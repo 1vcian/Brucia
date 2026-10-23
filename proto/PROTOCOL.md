@@ -66,13 +66,20 @@ A `CMD` with `cmd:"wifi scan"` is routed through that dispatcher, so most device
 control is available for free. Companion-specific commands (streaming hooks) are
 added as new entries rather than a parallel system.
 
-## Streams (`DATA` / `SUB`)
+## Streams (`SUB` + `EVENT`/`DATA`)
 
-A stream is a named, high-rate channel the phone subscribes to. First stream:
+A stream is a named channel the phone turns on/off with
+`SUB {stream: "<name>", on: bool}` (the device replies `ACK`).
 
-- `wifi.ap` — access-point observations for wardriving. Each item:
-  `{bssid, ssid, ch, rssi, enc, ts}`. The phone adds GPS/time, dedups, maps and
-  exports (Wigle CSV / KML). The device does **not** need onboard GPS.
+- **Structured streams** deliver `EVENT {ev: "<name>", data: {...}}` messages.
+- **Raw streams** (future, e.g. RF samples) deliver `DATA {stream, seq, chunk}`.
+
+First stream (F2):
+
+- `wifi.ap` — access-point observations for wardriving, one `EVENT` per AP:
+  `data = {bssid, ssid, ch, rssi, enc, ts}` (`ts` is device uptime in ms). The
+  device runs back-to-back async Wi-Fi scans; the phone adds GPS/real time,
+  dedups, maps and exports (Wigle CSV / KML). The device needs **no** onboard GPS.
 
 ## Versioning
 

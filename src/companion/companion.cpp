@@ -4,6 +4,7 @@
 #include "core/serialcmds.h" // serialcmdsTaskHandle
 #include <ArduinoJson.h>
 #include <SerialDevice.h>
+#include <WiFi.h>
 #include <globals.h> // serialCli, serialDevice
 
 // ---------------------------------------------------------------------------
@@ -189,6 +190,39 @@ static bool routeCommand(const String &cmd) {
     return ok;
 }
 
+// --- wifi.ap stream (wardriving) ---
+
+static const char *encToStr(wifi_auth_mode_t enc) {
+    switch (enc) {
+        case WIFI_AUTH_OPEN: return "open";
+        case WIFI_AUTH_WEP: return "wep";
+        case WIFI_AUTH_WPA_PSK: return "wpa";
+        case WIFI_AUTH_WPA2_PSK: return "wpa2";
+        case WIFI_AUTH_WPA_WPA2_PSK: return "wpa/wpa2";
+        case WIFI_AUTH_WPA2_ENTERPRISE: return "wpa2-ent";
+        case WIFI_AUTH_WPA3_PSK: return "wpa3";
+        case WIFI_AUTH_WPA2_WPA3_PSK: return "wpa2/wpa3";
+        default: return "unknown";
+    }
+}
+
+static void sendWifiApEvent(
+    const String &bssid, const String &ssid, int ch, int rssi, const char *enc
+) {
+    JsonDocument out;
+    beginEnvelope(out, MSG_EVENT, 0);
+    JsonObject d = out["d"].to<JsonObject>();
+    d["ev"] = "wifi.ap";
+    JsonObject r = d["data"].to<JsonObject>();
+    r["bssid"] = bssid;
+    r["ssid"] = ssid;
+    r["ch"] = ch;
+    r["rssi"] = rssi;
+    r["enc"] = enc;
+    r["ts"] = (uint32_t)millis(); // device uptime; the app stamps real time + GPS
+    sendEnvelope(out);
+}
+
 void companionModeUSB() {
     drawMainBorderWithTitle("Companion (USB)");
     padprintln("");
@@ -200,47 +234,87 @@ void companionModeUSB() {
     while (Serial.available()) Serial.read(); // drain stale bytes
 
     bool helloSeen = false;
+    bool subWifiAp = false; // wifi.ap stream subscription
+    bool scanning = false;  // an async WiFi scan is in flight
+
     while (true) {
         if (check(EscPress)) break;
 
+        // 1) Service one incoming frame if present. Short timeout keeps both the
+        //    ESC check and the scan servicing below responsive.
         String payload;
-        if (!readFrame(payload, 50)) continue; // keeps ESC responsive
-
-        JsonDocument in;
-        DeserializationError err = deserializeJson(in, payload);
-        if (err) {
-            sendErr(0, 400, "bad json");
-            continue;
+        if (readFrame(payload, 20)) {
+            JsonDocument in;
+            DeserializationError err = deserializeJson(in, payload);
+            if (err) {
+                sendErr(0, 400, "bad json");
+            } else {
+                uint8_t t = in["t"] | 0;
+                uint32_t id = in["id"] | 0;
+                switch (t) {
+                    case MSG_HELLO:
+                        sendCaps(id);
+                        if (!helloSeen) {
+                            helloSeen = true;
+                            drawMainBorderWithTitle("Companion (USB)");
+                            padprintln("");
+                            padprintln("App connected.");
+                            padprintln("Press ESC to exit.");
+                        }
+                        break;
+                    case MSG_PING: sendPong(id); break;
+                    case MSG_CMD: {
+                        const char *cmd = in["d"]["cmd"] | "";
+                        bool ok = routeCommand(String(cmd));
+                        sendAck(id, ok);
+                        break;
+                    }
+                    case MSG_SUB: {
+                        const char *stream = in["d"]["stream"] | "";
+                        bool on = in["d"]["on"] | false;
+                        if (strcmp(stream, "wifi.ap") == 0) {
+                            subWifiAp = on;
+                            WiFi.scanDelete();
+                            scanning = false;
+                            if (on) {
+                                WiFi.mode(WIFI_STA);
+                                WiFi.disconnect(false, true);
+                            }
+                            sendAck(id, true);
+                        } else {
+                            sendErr(id, 404, "unknown stream");
+                        }
+                        break;
+                    }
+                    default: sendErr(id, 404, "unknown message kind"); break;
+                }
+            }
         }
 
-        uint8_t t = in["t"] | 0;
-        uint32_t id = in["id"] | 0;
-
-        switch (t) {
-            case MSG_HELLO:
-                sendCaps(id);
-                if (!helloSeen) {
-                    helloSeen = true;
-                    drawMainBorderWithTitle("Companion (USB)");
-                    padprintln("");
-                    padprintln("App connected.");
-                    padprintln("Press ESC to exit.");
+        // 2) Service the wifi.ap stream: run back-to-back async scans and emit
+        //    each access point as an EVENT. The radio is free because the
+        //    transport is USB, not WiFi.
+        if (subWifiAp) {
+            if (!scanning) {
+                WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/true);
+                scanning = true;
+            } else {
+                int n = WiFi.scanComplete();
+                if (n >= 0) {
+                    for (int i = 0; i < n; i++) {
+                        sendWifiApEvent(
+                            WiFi.BSSIDstr(i), WiFi.SSID(i), WiFi.channel(i), WiFi.RSSI(i),
+                            encToStr(WiFi.encryptionType(i))
+                        );
+                    }
+                    WiFi.scanDelete();
+                    scanning = false; // a fresh scan starts next iteration
                 }
-                break;
-            case MSG_PING: sendPong(id); break;
-            case MSG_CMD: {
-                const char *cmd = in["d"]["cmd"] | "";
-                bool ok = routeCommand(String(cmd));
-                sendAck(id, ok);
-                break;
+                // n == WIFI_SCAN_RUNNING: keep waiting
             }
-            case MSG_SUB:
-                // Streams (e.g. wifi.ap for wardriving) arrive in F2.
-                sendErr(id, 501, "stream not available yet");
-                break;
-            default: sendErr(id, 404, "unknown message kind"); break;
         }
     }
 
+    WiFi.scanDelete();
     if (serialcmdsTaskHandle) vTaskResume(serialcmdsTaskHandle);
 }

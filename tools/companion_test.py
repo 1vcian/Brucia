@@ -53,6 +53,11 @@ def main():
     ap.add_argument("port", help="serial port, e.g. /dev/tty.usbmodem1101")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--cmd", help="run a CLI command via CMD and print the ACK")
+    ap.add_argument(
+        "--wardrive",
+        action="store_true",
+        help="subscribe to the wifi.ap stream and print access points until Ctrl-C",
+    )
     args = ap.parse_args()
 
     with serial.Serial(args.port, args.baud, timeout=3) as ser:
@@ -72,6 +77,32 @@ def main():
             print(f"-> CMD {args.cmd!r}")
             send(ser, CMD, 3, {"cmd": args.cmd})
             print("<- ", recv(ser))
+
+        if args.wardrive:
+            print("-> SUB wifi.ap on")
+            send(ser, SUB, 4, {"stream": "wifi.ap", "on": True})
+            print("<- ", recv(ser))
+            print("Streaming access points (Ctrl-C to stop)...")
+            seen = set()
+            try:
+                while True:
+                    msg = recv(ser, timeout=10.0)
+                    if not msg:
+                        continue
+                    if msg.get("t") == EVENT and msg.get("d", {}).get("ev") == "wifi.ap":
+                        ap_ = msg["d"]["data"]
+                        key = ap_.get("bssid")
+                        tag = "NEW" if key not in seen else "   "
+                        seen.add(key)
+                        print(
+                            f"[{tag}] {ap_.get('bssid'):17}  ch{ap_.get('ch'):>3}  "
+                            f"{ap_.get('rssi'):>4}dBm  {ap_.get('enc'):<9}  "
+                            f"{ap_.get('ssid')!r}   (unique={len(seen)})"
+                        )
+            except KeyboardInterrupt:
+                print("\n-> SUB wifi.ap off")
+                send(ser, SUB, 5, {"stream": "wifi.ap", "on": False})
+                print("<- ", recv(ser))
 
 
 if __name__ == "__main__":
