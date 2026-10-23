@@ -3,6 +3,7 @@
 #include "core/mykeyboard.h"
 #include "core/serialcmds.h" // serialcmdsTaskHandle
 #include "modules/others/qrcode_menu.h" // qrcode_display
+#include "modules/rf/rf_utils.h"    // setup_rf_rx, initRfModule, RMT types
 #include <ArduinoJson.h>
 #include <SerialDevice.h>
 #include <WiFi.h>
@@ -224,6 +225,84 @@ static void sendWifiApEvent(
     sendEnvelope(out);
 }
 
+// --- sub-ghz raw capture (OOK): the ESP captures RMT edge timings and streams
+// them; all decoding happens on the phone (see app/.../subghz). Modeled on
+// src/modules/rf/record.cpp. Runs only while the "subghz.raw" stream is on.
+
+static QueueHandle_t rfQueue = nullptr;
+static rmt_channel_handle_t rfRxCh = nullptr;
+static bool subRf = false;
+static rmt_symbol_word_t rfItem[64];
+static const float SUBGHZ_FREQ_MHZ = 433.92f;
+
+static bool companion_rf_rx_done(
+    rmt_channel_t *channel, const rmt_rx_done_event_data_t *edata, void *user_data
+) {
+    BaseType_t high_task_wakeup = pdFALSE;
+    QueueHandle_t q = (QueueHandle_t)user_data;
+    xQueueSendFromISR(q, edata, &high_task_wakeup);
+    return high_task_wakeup == pdTRUE;
+}
+
+static void subghzStart() {
+    if (subRf) return;
+    initRfModule("rx", SUBGHZ_FREQ_MHZ);
+    rfRxCh = setup_rf_rx();
+    if (rfRxCh == nullptr) {
+        deinitRfModule();
+        return;
+    }
+    rfQueue = xQueueCreate(4, sizeof(rmt_rx_done_event_data_t));
+    rmt_rx_event_callbacks_t cbs = {};
+    cbs.on_recv_done = companion_rf_rx_done;
+    rmt_rx_register_event_callbacks(rfRxCh, &cbs, rfQueue);
+    rmt_enable(rfRxCh);
+    rmt_receive_config_t cfg = {};
+    cfg.signal_range_min_ns = 3000;
+    cfg.signal_range_max_ns = 12000000;
+    rmt_receive(rfRxCh, rfItem, sizeof(rfItem), &cfg);
+    subRf = true;
+}
+
+static void subghzStop() {
+    if (!subRf) return;
+    subRf = false;
+    if (rfRxCh) {
+        rmt_disable(rfRxCh);
+        rfRxCh = nullptr;
+    }
+    if (rfQueue) {
+        vQueueDelete(rfQueue);
+        rfQueue = nullptr;
+    }
+    deinitRfModule();
+}
+
+static void subghzService() {
+    if (!subRf || rfQueue == nullptr) return;
+    rmt_rx_done_event_data_t rx;
+    if (xQueueReceive(rfQueue, &rx, 0) != pdPASS) return;
+    size_t n = rx.num_symbols;
+    if (n >= 5) {
+        JsonDocument out;
+        beginEnvelope(out, MSG_EVENT, 0);
+        JsonObject d = out["d"].to<JsonObject>();
+        d["ev"] = "subghz.raw";
+        JsonObject data = d["data"].to<JsonObject>();
+        data["freq"] = (uint32_t)(SUBGHZ_FREQ_MHZ * 1000000.0f);
+        JsonArray t = data["timings"].to<JsonArray>();
+        for (size_t i = 0; i < n; i++) {
+            if (rx.received_symbols[i].duration0) t.add(rx.received_symbols[i].duration0);
+            if (rx.received_symbols[i].duration1) t.add(rx.received_symbols[i].duration1);
+        }
+        sendEnvelope(out);
+    }
+    rmt_receive_config_t cfg = {};
+    cfg.signal_range_min_ns = 3000;
+    cfg.signal_range_max_ns = 12000000;
+    rmt_receive(rfRxCh, rfItem, sizeof(rfItem), &cfg);
+}
+
 void companionModeUSB() {
     // Show a QR to the latest release so the user can grab the companion app,
     // then wait for it to connect. (Press OK/ESC on the QR to continue.)
@@ -277,7 +356,10 @@ void companionModeUSB() {
                     case MSG_SUB: {
                         const char *stream = in["d"]["stream"] | "";
                         bool on = in["d"]["on"] | false;
-                        if (strcmp(stream, "wifi.ap") == 0) {
+                        if (strcmp(stream, "subghz.raw") == 0) {
+                            if (on) subghzStart(); else subghzStop();
+                            sendAck(id, true);
+                        } else if (strcmp(stream, "wifi.ap") == 0) {
                             subWifiAp = on;
                             WiFi.scanDelete();
                             scanning = false;
@@ -318,8 +400,12 @@ void companionModeUSB() {
                 // n == WIFI_SCAN_RUNNING: keep waiting
             }
         }
+
+        // 3) Service the sub-ghz raw stream.
+        subghzService();
     }
 
     WiFi.scanDelete();
+    subghzStop();
     if (serialcmdsTaskHandle) vTaskResume(serialcmdsTaskHandle);
 }
