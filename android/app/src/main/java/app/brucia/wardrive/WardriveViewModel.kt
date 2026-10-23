@@ -10,6 +10,9 @@ import app.brucia.data.ApEntity
 import app.brucia.data.BruciaDb
 import app.brucia.protocol.CompanionClient
 import app.brucia.protocol.Kind
+import app.brucia.subghz.DecodedSignal
+import app.brucia.subghz.OokSamples
+import app.brucia.subghz.SubGhzDecoder
 import app.brucia.transport.Transport
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -27,6 +30,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Owns the companion connection, the GPS fix, and persists AP observations. */
@@ -42,6 +46,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _wardriving = MutableStateFlow(false)
     val wardriving: StateFlow<Boolean> = _wardriving.asStateFlow()
+
+    private val _subghz = MutableStateFlow<List<DecodedSignal>>(emptyList())
+    val subghz: StateFlow<List<DecodedSignal>> = _subghz.asStateFlow()
 
     /** Access points, newest first, backed by Room (survives app restarts). */
     val aps: StateFlow<List<ApObservation>> =
@@ -80,6 +87,13 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         readJob = viewModelScope.launch(Dispatchers.IO) {
             c.hello()
             while (isActive) {
+                if (transport?.isOpen != true) {
+                    // Device unplugged / link lost.
+                    _status.value = "Disconnected (device unplugged)"
+                    _device.value = null
+                    _wardriving.value = false
+                    break
+                }
                 val msg = c.readMessage(1000)
                 ensureActive()
                 if (msg != null) handle(msg)
@@ -104,7 +118,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             }
             Kind.EVENT -> {
                 val d = msg.optJSONObject("d") ?: return
-                if (d.optString("ev") != "wifi.ap") return
+                val ev = d.optString("ev")
+                if (ev == "subghz.raw") {
+                    val arr: JSONArray = d.optJSONObject("data")?.optJSONArray("timings") ?: return
+                    val timings = IntArray(arr.length()) { arr.optInt(it) }
+                    val decoded = SubGhzDecoder.decode(timings)
+                    if (decoded.isNotEmpty()) _subghz.value = (decoded + _subghz.value).take(50)
+                    return
+                }
+                if (ev != "wifi.ap") return
                 val r = d.optJSONObject("data") ?: return
                 val bssid = r.optString("bssid")
                 if (bssid.isEmpty()) return
@@ -156,6 +178,20 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     fun setWardriving(on: Boolean) {
         client?.subWifiAp(on)
         _wardriving.value = on
+    }
+
+    fun setSubghz(on: Boolean) {
+        client?.sub("subghz.raw", on)
+    }
+
+    /** Decode the bundled synthetic sample (works without hardware, for demo/test). */
+    fun decodeSample() {
+        val decoded = SubGhzDecoder.decode(OokSamples.princeton24)
+        _subghz.value = (decoded + _subghz.value).take(50)
+    }
+
+    fun clearSubghz() {
+        _subghz.value = emptyList()
     }
 
     fun clearSession() {

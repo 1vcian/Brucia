@@ -34,8 +34,10 @@ class CompanionClient(private val transport: Transport) {
     fun hello() = send(Kind.HELLO, 1, JSONObject().put("app", "Brucia").put("appVersion", "0.1.0"))
     fun ping(id: Int = 2) = send(Kind.PING, id, JSONObject())
     fun cmd(command: String, id: Int = 3) = send(Kind.CMD, id, JSONObject().put("cmd", command))
-    fun subWifiAp(on: Boolean, id: Int = 4) =
-        send(Kind.SUB, id, JSONObject().put("stream", "wifi.ap").put("on", on))
+    fun sub(stream: String, on: Boolean, id: Int = 4) =
+        send(Kind.SUB, id, JSONObject().put("stream", stream).put("on", on))
+
+    fun subWifiAp(on: Boolean) = sub("wifi.ap", on)
 
     // --- incoming ---
 

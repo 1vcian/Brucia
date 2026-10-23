@@ -40,6 +40,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +60,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.brucia.transport.UsbTransport
 import app.brucia.ui.Amber
 import app.brucia.ui.BruciaTheme
+import app.brucia.subghz.DecodedSignal
+import app.brucia.wardrive.ChannelAdvisor
+import app.brucia.wardrive.Finding
+import app.brucia.wardrive.KmlExport
+import app.brucia.wardrive.SecurityFindings
 import app.brucia.ir.IrButton
 import app.brucia.ir.IrCatalog
 import app.brucia.ir.IrParser
@@ -241,20 +247,25 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         SegmentedView(view) { view = it }
         Spacer(Modifier.height(8.dp))
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 enabled = list.isNotEmpty(),
                 modifier = Modifier.weight(1f),
                 onClick = {
-                    val csv = WigleCsv.build(list)
-                    val file = File(
-                        context.getExternalFilesDir(null),
-                        "brucia_wardrive_${System.currentTimeMillis()}.csv"
-                    )
-                    file.writeText(csv)
-                    Toast.makeText(context, "Saved ${file.absolutePath}", Toast.LENGTH_LONG).show()
+                    val f = File(context.getExternalFilesDir(null), "brucia_${System.currentTimeMillis()}.csv")
+                    f.writeText(WigleCsv.build(list))
+                    Toast.makeText(context, "Saved ${f.name}", Toast.LENGTH_LONG).show()
                 }
-            ) { Text("Export CSV") }
+            ) { Text("CSV") }
+            Button(
+                enabled = list.isNotEmpty(),
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    val f = File(context.getExternalFilesDir(null), "brucia_${System.currentTimeMillis()}.kml")
+                    f.writeText(KmlExport.build(list))
+                    Toast.makeText(context, "Saved ${f.name}", Toast.LENGTH_LONG).show()
+                }
+            ) { Text("KML") }
             OutlinedButton(
                 enabled = list.isNotEmpty(),
                 modifier = Modifier.weight(1f),
@@ -265,7 +276,7 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
         when (view) {
             View.MAP -> ApMap(list, Modifier.fillMaxWidth().weight(1f))
-            View.STATS -> StatsView(stats, Modifier.fillMaxSize())
+            View.STATS -> StatsView(stats, list, Modifier.fillMaxSize())
             View.LIST -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(list) { ap -> ApCard(ap) }
             }
@@ -419,7 +430,7 @@ private fun RssiPill(rssi: Int) {
 }
 
 @Composable
-private fun StatsView(stats: WardriveStats, modifier: Modifier) {
+private fun StatsView(stats: WardriveStats, aps: List<ApObservation>, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme
     LazyColumn(modifier = modifier) {
         item {
@@ -444,6 +455,55 @@ private fun StatsView(stats: WardriveStats, modifier: Modifier) {
             )
         }
         item { StatCard("Top vendors", stats.topVendors, stats.topVendors.maxOfOrNull { it.second } ?: 0) }
+        item {
+            val best = remember(aps) { ChannelAdvisor.recommend24(aps) }
+            val cs = MaterialTheme.colorScheme
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = cs.surface),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text("Recommended 2.4GHz channel", fontWeight = FontWeight.SemiBold)
+                    Text("Channel $best (least congested of 1 / 6 / 11)", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+            }
+        }
+        item {
+            val findings = remember(aps) { SecurityFindings.analyze(aps) }
+            val cs = MaterialTheme.colorScheme
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = cs.surface),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text("Security findings", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    if (findings.isEmpty()) {
+                        Text("None", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        findings.forEach { FindingRow(it) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FindingRow(f: Finding) {
+    val cs = MaterialTheme.colorScheme
+    val color = when (f.severity) {
+        "high" -> cs.error
+        "medium" -> Amber
+        else -> cs.onSurfaceVariant
+    }
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+            Spacer(Modifier.size(6.dp))
+            Text(f.title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+        }
+        Text(f.detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
     }
 }
 
@@ -546,6 +606,17 @@ private fun ApMap(aps: List<ApObservation>, modifier: Modifier) {
 private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     var tab by remember { mutableStateOf(0) }
+    val context = LocalContext.current
+    val status by vm.status.collectAsState()
+    DisposableEffect(status) {
+        val window = (context as? android.app.Activity)?.window
+        if (status == "Connected") {
+            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose { window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
     Column(modifier = Modifier.fillMaxSize().background(cs.background)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -553,11 +624,13 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit) {
         ) {
             SegButton("Wardrive", tab == 0, Modifier.weight(1f)) { tab = 0 }
             SegButton("IR", tab == 1, Modifier.weight(1f)) { tab = 1 }
+            SegButton("Sub-GHz", tab == 2, Modifier.weight(1f)) { tab = 2 }
         }
         Box(modifier = Modifier.weight(1f)) {
             when (tab) {
                 0 -> BruciaScreen(vm, onConnect)
-                else -> IrScreen(vm, onConnect)
+                1 -> IrScreen(vm, onConnect)
+                else -> SubGhzScreen(vm, onConnect)
             }
         }
     }
@@ -737,6 +810,97 @@ private fun IrButtonCard(button: IrButton, enabled: Boolean, onSend: () -> Unit)
                 )
             }
             Button(enabled = enabled, onClick = onSend) { Text("Send") }
+        }
+    }
+}
+
+@Composable
+private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+    val status by vm.status.collectAsState()
+    val device by vm.device.collectAsState()
+    val signals by vm.subghz.collectAsState()
+    val connected = status == "Connected"
+    val cs = MaterialTheme.colorScheme
+    var listening by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "Brucia",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = cs.primary,
+            )
+            Spacer(Modifier.weight(1f))
+            StatusPill(connected)
+        }
+        Text(
+            "Sub-GHz - capture on device, decode on phone",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(12.dp))
+        DeviceCard(device)
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
+            Text(if (connected) "Reconnect over USB" else "Connect over USB")
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("Listen", fontWeight = FontWeight.SemiBold)
+                Text("subghz.raw stream", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(
+                checked = listening,
+                enabled = connected,
+                onCheckedChange = { listening = it; vm.setSubghz(it) },
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(modifier = Modifier.weight(1f), onClick = { vm.decodeSample() }) {
+                Text("Decode sample")
+            }
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                enabled = signals.isNotEmpty(),
+                onClick = { vm.clearSubghz() }
+            ) { Text("Clear") }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("${signals.size} decoded signals", color = cs.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(signals) { sig -> SignalCard(sig) }
+        }
+    }
+}
+
+@Composable
+private fun SignalCard(sig: DecodedSignal) {
+    val cs = MaterialTheme.colorScheme
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = cs.surface),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(sig.protocol, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+            Text(
+                "0x${sig.codeHex}",
+                style = MaterialTheme.typography.titleMedium,
+                color = cs.primary,
+                fontFamily = FontFamily.Monospace,
+            )
+            Text(
+                "${sig.bits} bits  -  TE ${sig.teMicros} us  -  x${sig.repeats}",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+            )
         }
     }
 }
