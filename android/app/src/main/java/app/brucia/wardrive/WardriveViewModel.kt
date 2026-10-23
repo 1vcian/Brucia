@@ -49,6 +49,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             .map { list -> list.map { it.toObservation() } }
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    /** Live analytics over the collected APs (encryption, channels, vendors). */
+    val stats: StateFlow<WardriveStats> =
+        aps.map { computeStats(it) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, computeStats(emptyList()))
+
+    init {
+        // Load the OUI vendor database off the main thread.
+        viewModelScope.launch(Dispatchers.IO) { OuiResolver.ensureLoaded(getApplication()) }
+    }
+
     private var client: CompanionClient? = null
     private var readJob: Job? = null
     private var transport: Transport? = null

@@ -58,7 +58,10 @@ import app.brucia.ui.Amber
 import app.brucia.ui.BruciaTheme
 import app.brucia.wardrive.ApObservation
 import app.brucia.wardrive.DeviceInfo
+import app.brucia.wardrive.OuiResolver
+import app.brucia.wardrive.WardriveStats
 import app.brucia.wardrive.WardriveViewModel
+import app.brucia.wardrive.WigleCsv
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import org.osmdroid.config.Configuration
@@ -67,6 +70,8 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import java.io.File
+
+private enum class View { LIST, MAP, STATS }
 
 class MainActivity : ComponentActivity() {
 
@@ -154,9 +159,10 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val list by vm.aps.collectAsState()
+    val stats by vm.stats.collectAsState()
     val wardriving by vm.wardriving.collectAsState()
     val context = LocalContext.current
-    var showMap by remember { mutableStateOf(false) }
+    var view by remember { mutableStateOf(View.LIST) }
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
 
@@ -166,7 +172,6 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             .background(cs.background)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        // Header
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text(
                 "Brucia",
@@ -174,21 +179,22 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 fontWeight = FontWeight.ExtraBold,
                 color = cs.primary,
             )
-            Spacer(Modifier.size(6.dp))
-            Text("🔥", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.weight(1f))
             StatusPill(connected)
         }
-        Text("Offload companion · wardrive", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Text(
+            "Offload companion - wardrive",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
         Spacer(Modifier.height(12.dp))
 
         DeviceCard(device)
         Spacer(Modifier.height(12.dp))
 
-        Button(
-            onClick = onConnect,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (connected) "Reconnect over USB" else "Connect over USB") }
+        Button(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
+            Text(if (connected) "Reconnect over USB" else "Connect over USB")
+        }
         Spacer(Modifier.height(12.dp))
 
         Row(
@@ -198,17 +204,20 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         ) {
             Column {
                 Text("Wardriving", fontWeight = FontWeight.SemiBold)
-                Text("wifi.ap stream", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "wifi.ap stream",
+                    color = cs.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             Switch(checked = wardriving, enabled = connected, onCheckedChange = { vm.setWardriving(it) })
         }
         Spacer(Modifier.height(12.dp))
 
-        // Stats + view toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Bottom
         ) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
@@ -220,10 +229,10 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Spacer(Modifier.size(6.dp))
                 Text("unique APs", color = cs.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp))
             }
-            OutlinedButton(onClick = { showMap = !showMap }) {
-                Text(if (showMap) "List" else "Map")
-            }
         }
+        Spacer(Modifier.height(8.dp))
+
+        SegmentedView(view) { view = it }
         Spacer(Modifier.height(8.dp))
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -231,7 +240,7 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 enabled = list.isNotEmpty(),
                 modifier = Modifier.weight(1f),
                 onClick = {
-                    val csv = WigleExport(list)
+                    val csv = WigleCsv.build(list)
                     val file = File(
                         context.getExternalFilesDir(null),
                         "brucia_wardrive_${System.currentTimeMillis()}.csv"
@@ -248,13 +257,31 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
 
-        if (showMap) {
-            ApMap(list, Modifier.fillMaxWidth().weight(1f))
-        } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
+        when (view) {
+            View.MAP -> ApMap(list, Modifier.fillMaxWidth().weight(1f))
+            View.STATS -> StatsView(stats, Modifier.fillMaxSize())
+            View.LIST -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(list) { ap -> ApCard(ap) }
             }
         }
+    }
+}
+
+@Composable
+private fun SegmentedView(current: View, onSelect: (View) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SegButton("List", current == View.LIST, Modifier.weight(1f)) { onSelect(View.LIST) }
+        SegButton("Map", current == View.MAP, Modifier.weight(1f)) { onSelect(View.MAP) }
+        SegButton("Stats", current == View.STATS, Modifier.weight(1f)) { onSelect(View.STATS) }
+    }
+}
+
+@Composable
+private fun SegButton(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    if (selected) {
+        Button(onClick = onClick, modifier = modifier) { Text(label) }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = modifier) { Text(label) }
     }
 }
 
@@ -290,14 +317,14 @@ private fun DeviceCard(device: DeviceInfo?) {
             if (device == null) {
                 Text("No device connected", color = cs.onSurfaceVariant)
                 Text(
-                    "Plug the T-Embed via USB-C OTG, open Connect → Companion on it, then tap Connect.",
+                    "Plug the T-Embed via USB-C OTG, open Connect / Companion on it, then tap Connect.",
                     style = MaterialTheme.typography.bodySmall,
                     color = cs.onSurfaceVariant,
                 )
             } else {
                 Text(device.board, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "${device.chip}  ·  fw ${device.fw}",
+                    "${device.chip}  -  fw ${device.fw}",
                     style = MaterialTheme.typography.bodySmall,
                     color = cs.onSurfaceVariant,
                 )
@@ -328,6 +355,7 @@ private fun Tag(text: String) {
 @Composable
 private fun ApCard(ap: ApObservation) {
     val cs = MaterialTheme.colorScheme
+    val vendor = OuiResolver.vendor(ap.bssid)
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(containerColor = cs.surface),
@@ -343,7 +371,7 @@ private fun ApCard(ap: ApObservation) {
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(
-                    ap.bssid,
+                    ap.bssid + (if (vendor != null) "  $vendor" else ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = cs.onSurfaceVariant,
                     fontFamily = FontFamily.Monospace,
@@ -355,7 +383,7 @@ private fun ApCard(ap: ApObservation) {
                     Text(ap.enc, style = MaterialTheme.typography.bodySmall, color = encColor)
                     if (ap.lat != null && ap.lon != null) {
                         Spacer(Modifier.size(8.dp))
-                        Text("📍", style = MaterialTheme.typography.bodySmall)
+                        Text("GPS", style = MaterialTheme.typography.labelSmall, color = cs.primary)
                     }
                 }
             }
@@ -382,8 +410,89 @@ private fun RssiPill(rssi: Int) {
     }
 }
 
-private fun WigleExport(list: List<ApObservation>): String =
-    app.brucia.wardrive.WigleCsv.build(list)
+@Composable
+private fun StatsView(stats: WardriveStats, modifier: Modifier) {
+    val cs = MaterialTheme.colorScheme
+    LazyColumn(modifier = modifier) {
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = cs.surface),
+            ) {
+                Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceAround) {
+                    Metric("${stats.total}", "APs", cs.primary)
+                    Metric("${stats.openCount}", "open", if (stats.openCount > 0) cs.error else cs.onSurface)
+                    Metric("${stats.withGps}", "geotagged", cs.onSurface)
+                    Metric(stats.mostCongestedChannel?.let { "ch$it" } ?: "-", "busiest", cs.secondary)
+                }
+            }
+        }
+        item { StatCard("Encryption", stats.byEnc.map { it.first to it.second }, stats.total) }
+        item {
+            StatCard(
+                "Channels",
+                stats.byChannel.map { "ch ${it.first}" to it.second },
+                stats.byChannel.maxOfOrNull { it.second } ?: 0,
+            )
+        }
+        item { StatCard("Top vendors", stats.topVendors, stats.topVendors.maxOfOrNull { it.second } ?: 0) }
+    }
+}
+
+@Composable
+private fun Metric(value: String, label: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = color)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun StatCard(title: String, rows: List<Pair<String, Int>>, max: Int) {
+    val cs = MaterialTheme.colorScheme
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = cs.surface),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            if (rows.isEmpty()) {
+                Text("No data yet", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            } else {
+                rows.forEach { (label, count) -> BarRow(label, count, max) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarRow(label: String, count: Int, max: Int) {
+    val cs = MaterialTheme.colorScheme
+    val fraction = if (max > 0) count.toFloat() / max else 0f
+    Column(modifier = Modifier.padding(vertical = 3.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.bodySmall)
+            Text("$count", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        }
+        Spacer(Modifier.height(2.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(50))
+                .background(cs.surfaceVariant)
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(cs.primary)
+            )
+        }
+    }
+}
 
 @Composable
 private fun ApMap(aps: List<ApObservation>, modifier: Modifier) {
@@ -412,7 +521,7 @@ private fun ApMap(aps: List<ApObservation>, modifier: Modifier) {
                     marker.position = point
                     marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     marker.title = ap.ssid.ifEmpty { "(hidden)" }
-                    marker.snippet = "${ap.bssid} • ${ap.enc} • ${ap.rssi} dBm"
+                    marker.snippet = "${ap.bssid} - ${ap.enc} - ${ap.rssi} dBm"
                     map.overlays.add(marker)
                     if (!centered) {
                         map.controller.setCenter(point)
