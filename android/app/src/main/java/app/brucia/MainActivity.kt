@@ -26,22 +26,34 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.brucia.transport.UsbTransport
+import app.brucia.wardrive.ApObservation
 import app.brucia.wardrive.WardriveViewModel
+import app.brucia.wardrive.WigleCsv
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialProber
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -129,10 +141,10 @@ class MainActivity : ComponentActivity() {
 private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val caps by vm.caps.collectAsState()
-    val aps by vm.aps.collectAsState()
+    val list by vm.aps.collectAsState()
     val wardriving by vm.wardriving.collectAsState()
     val context = LocalContext.current
-    val list = aps.values.toList()
+    var showMap by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Brucia — Wardrive", style = MaterialTheme.typography.headlineSmall)
@@ -162,31 +174,90 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Unique APs: ${list.size}")
+            OutlinedButton(onClick = { showMap = !showMap }) {
+                Text(if (showMap) "List" else "Map")
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Button(
                 enabled = list.isNotEmpty(),
                 onClick = {
-                    val csv = vm.exportCsv()
-                    val dir = context.getExternalFilesDir(null)
-                    val file = File(dir, "brucia_wardrive_${System.currentTimeMillis()}.csv")
+                    val csv = WigleCsv.build(list)
+                    val file = File(
+                        context.getExternalFilesDir(null),
+                        "brucia_wardrive_${System.currentTimeMillis()}.csv"
+                    )
                     file.writeText(csv)
                     Toast.makeText(context, "Saved ${file.absolutePath}", Toast.LENGTH_LONG).show()
                 }
             ) { Text("Export CSV") }
+            OutlinedButton(enabled = list.isNotEmpty(), onClick = { vm.clearSession() }) {
+                Text("Clear")
+            }
         }
         Spacer(Modifier.height(12.dp))
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(list) { ap ->
-                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(ap.ssid.ifEmpty { "(hidden)" }, style = MaterialTheme.typography.titleMedium)
-                        Text("${ap.bssid}  •  ch ${ap.channel}  •  ${ap.rssi} dBm  •  ${ap.enc}")
-                        val loc = if (ap.lat != null && ap.lon != null)
-                            "%.5f, %.5f".format(ap.lat, ap.lon) else "no GPS fix"
-                        Text(loc, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
+        if (showMap) {
+            ApMap(list, Modifier.fillMaxWidth().weight(1f))
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(list) { ap -> ApCard(ap) }
             }
         }
     }
+}
+
+@Composable
+private fun ApCard(ap: ApObservation) {
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(ap.ssid.ifEmpty { "(hidden)" }, style = MaterialTheme.typography.titleMedium)
+            Text("${ap.bssid}  •  ch ${ap.channel}  •  ${ap.rssi} dBm  •  ${ap.enc}")
+            val loc = if (ap.lat != null && ap.lon != null)
+                "%.5f, %.5f".format(ap.lat, ap.lon) else "no GPS fix"
+            Text(loc, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun ApMap(aps: List<ApObservation>, modifier: Modifier) {
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            Configuration.getInstance()
+                .load(ctx, ctx.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+            Configuration.getInstance().userAgentValue = ctx.packageName
+            MapView(ctx).apply {
+                setTileSource(TileSourceFactory.MAPNIK)
+                setMultiTouchControls(true)
+                controller.setZoom(16.0)
+                onResume()
+            }
+        },
+        update = { map ->
+            map.overlays.clear()
+            var centered = false
+            for (ap in aps) {
+                val la = ap.lat
+                val lo = ap.lon
+                if (la != null && lo != null) {
+                    val point = GeoPoint(la, lo)
+                    val marker = Marker(map)
+                    marker.position = point
+                    marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    marker.title = ap.ssid.ifEmpty { "(hidden)" }
+                    marker.snippet = "${ap.bssid} • ${ap.enc} • ${ap.rssi} dBm"
+                    map.overlays.add(marker)
+                    if (!centered) {
+                        map.controller.setCenter(point)
+                        centered = true
+                    }
+                }
+            }
+            map.invalidate()
+        }
+    )
 }

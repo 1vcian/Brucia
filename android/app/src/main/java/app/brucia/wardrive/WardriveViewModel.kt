@@ -6,6 +6,8 @@ import android.location.Location
 import android.os.Looper
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import app.brucia.data.ApEntity
+import app.brucia.data.BruciaDb
 import app.brucia.protocol.CompanionClient
 import app.brucia.protocol.Kind
 import app.brucia.transport.Transport
@@ -18,14 +20,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-/** Owns the companion connection, the AP map, and the phone's GPS fix. */
+/** Owns the companion connection, the GPS fix, and persists AP observations. */
 class WardriveViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val dao = BruciaDb.get(app).apDao()
 
     private val _status = MutableStateFlow("Disconnected")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -33,11 +40,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val _caps = MutableStateFlow<String?>(null)
     val caps: StateFlow<String?> = _caps.asStateFlow()
 
-    private val _aps = MutableStateFlow<Map<String, ApObservation>>(emptyMap())
-    val aps: StateFlow<Map<String, ApObservation>> = _aps.asStateFlow()
-
     private val _wardriving = MutableStateFlow(false)
     val wardriving: StateFlow<Boolean> = _wardriving.asStateFlow()
+
+    /** Access points, newest first, backed by Room (survives app restarts). */
+    val aps: StateFlow<List<ApObservation>> =
+        dao.observeAll()
+            .map { list -> list.map { it.toObservation() } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private var client: CompanionClient? = null
     private var readJob: Job? = null
@@ -67,25 +77,28 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun handle(msg: JSONObject) {
+    private suspend fun handle(msg: JSONObject) {
         when (msg.optInt("t")) {
             Kind.CAPS -> _caps.value = msg.optJSONObject("d")?.toString()
             Kind.EVENT -> {
                 val d = msg.optJSONObject("d") ?: return
                 if (d.optString("ev") != "wifi.ap") return
                 val r = d.optJSONObject("data") ?: return
+                val bssid = r.optString("bssid")
+                if (bssid.isEmpty()) return
                 val loc = lastLocation
-                val ap = ApObservation(
-                    bssid = r.optString("bssid"),
-                    ssid = r.optString("ssid"),
-                    channel = r.optInt("ch"),
-                    rssi = r.optInt("rssi"),
-                    enc = r.optString("enc"),
-                    lat = loc?.latitude,
-                    lon = loc?.longitude,
-                    timeMillis = System.currentTimeMillis(),
+                dao.upsert(
+                    ApEntity(
+                        bssid = bssid,
+                        ssid = r.optString("ssid"),
+                        channel = r.optInt("ch"),
+                        rssi = r.optInt("rssi"),
+                        enc = r.optString("enc"),
+                        lat = loc?.latitude,
+                        lon = loc?.longitude,
+                        timeMillis = System.currentTimeMillis(),
+                    )
                 )
-                if (ap.bssid.isNotEmpty()) _aps.value = _aps.value + (ap.bssid to ap)
             }
         }
     }
@@ -104,7 +117,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         _wardriving.value = on
     }
 
-    fun exportCsv(): String = WigleCsv.build(_aps.value.values)
+    fun clearSession() {
+        viewModelScope.launch(Dispatchers.IO) { dao.clear() }
+    }
 
     fun disconnect() {
         readJob?.cancel()
