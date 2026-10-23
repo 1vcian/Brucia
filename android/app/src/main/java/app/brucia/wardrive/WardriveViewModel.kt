@@ -109,16 +109,30 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 val bssid = r.optString("bssid")
                 if (bssid.isEmpty()) return
                 val loc = lastLocation
+                val rssi = r.optInt("rssi")
+                // RSSI-weighted position estimate: stronger signal => closer => higher
+                // weight. Accumulate across sightings so the fix improves over time.
+                val existing = dao.get(bssid)
+                val w = if (loc != null) Math.pow(10.0, rssi / 10.0) else 0.0
+                val wLat = (existing?.wLat ?: 0.0) + (loc?.latitude ?: 0.0) * w
+                val wLon = (existing?.wLon ?: 0.0) + (loc?.longitude ?: 0.0) * w
+                val wSum = (existing?.wSum ?: 0.0) + w
+                val estLat = if (wSum > 0) wLat / wSum else existing?.lat ?: loc?.latitude
+                val estLon = if (wSum > 0) wLon / wSum else existing?.lon ?: loc?.longitude
                 dao.upsert(
                     ApEntity(
                         bssid = bssid,
                         ssid = r.optString("ssid"),
                         channel = r.optInt("ch"),
-                        rssi = r.optInt("rssi"),
+                        rssi = rssi,
                         enc = r.optString("enc"),
-                        lat = loc?.latitude,
-                        lon = loc?.longitude,
+                        lat = estLat,
+                        lon = estLon,
                         timeMillis = System.currentTimeMillis(),
+                        wLat = wLat,
+                        wLon = wLon,
+                        wSum = wSum,
+                        seen = (existing?.seen ?: 0) + 1,
                     )
                 )
             }

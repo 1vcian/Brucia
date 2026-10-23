@@ -381,9 +381,11 @@ private fun ApCard(ap: ApObservation) {
                     Text("ch ${ap.channel}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     Spacer(Modifier.size(8.dp))
                     Text(ap.enc, style = MaterialTheme.typography.bodySmall, color = encColor)
+                    Spacer(Modifier.size(8.dp))
+                    Text("x${ap.seen}", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     if (ap.lat != null && ap.lon != null) {
                         Spacer(Modifier.size(8.dp))
-                        Text("GPS", style = MaterialTheme.typography.labelSmall, color = cs.primary)
+                        Text("~GPS", style = MaterialTheme.typography.labelSmall, color = cs.primary)
                     }
                 }
             }

@@ -10,4 +10,5 @@ data class ApObservation(
     val lat: Double?,
     val lon: Double?,
     val timeMillis: Long,
+    val seen: Int = 1,
 )

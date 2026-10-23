@@ -11,6 +11,9 @@ interface ApDao {
     @Query("SELECT * FROM ap ORDER BY timeMillis DESC")
     fun observeAll(): Flow<List<ApEntity>>
 
+    @Query("SELECT * FROM ap WHERE bssid = :bssid")
+    suspend fun get(bssid: String): ApEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(ap: ApEntity)
 

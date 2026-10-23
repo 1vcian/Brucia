@@ -14,8 +14,13 @@ data class ApEntity(
     val lat: Double?,
     val lon: Double?,
     val timeMillis: Long,
+    // RSSI-weighted accumulators for position estimation (offload computation).
+    val wLat: Double = 0.0,
+    val wLon: Double = 0.0,
+    val wSum: Double = 0.0,
+    val seen: Int = 1,
 ) {
-    fun toObservation() = ApObservation(bssid, ssid, channel, rssi, enc, lat, lon, timeMillis)
+    fun toObservation() = ApObservation(bssid, ssid, channel, rssi, enc, lat, lon, timeMillis, seen)
 
     companion object {
         fun from(o: ApObservation) =

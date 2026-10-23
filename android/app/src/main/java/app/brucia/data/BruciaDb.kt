@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [ApEntity::class], version = 1, exportSchema = false)
+@Database(entities = [ApEntity::class], version = 2, exportSchema = false)
 abstract class BruciaDb : RoomDatabase() {
     abstract fun apDao(): ApDao
 
@@ -15,7 +15,7 @@ abstract class BruciaDb : RoomDatabase() {
         fun get(context: Context): BruciaDb = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext, BruciaDb::class.java, "brucia.db"
-            ).build().also { instance = it }
+            ).fallbackToDestructiveMigration().build().also { instance = it }
         }
     }
 }
