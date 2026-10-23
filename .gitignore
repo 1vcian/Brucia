@@ -5,7 +5,9 @@
 .vscode/extensions.json
 .vscode/ipch
 .codex_tmp
-.claude
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 Bruce3_*.bin
 bruce.conf
 _*.sh
