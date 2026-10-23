@@ -11,9 +11,11 @@ import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,6 +60,7 @@ import app.brucia.transport.UsbTransport
 import app.brucia.ui.Amber
 import app.brucia.ui.BruciaTheme
 import app.brucia.ir.IrButton
+import app.brucia.ir.IrCatalog
 import app.brucia.ir.IrParser
 import app.brucia.wardrive.ApObservation
 import app.brucia.wardrive.DeviceInfo
@@ -567,8 +570,32 @@ private fun IrScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    var catalog by remember { mutableStateOf(IrParser.samples) }
+    val devices = remember { IrCatalog.load(context) }
+    var buttons by remember { mutableStateOf(IrParser.samples) }
     var paste by remember { mutableStateOf("") }
+    var browsing by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val text = context.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()?.use { it.readText() } ?: ""
+                val parsed = IrParser.parse(text)
+                if (parsed.isNotEmpty()) {
+                    buttons = parsed
+                    browsing = false
+                    Toast.makeText(context, "Loaded ${parsed.size} codes", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "No codes found in file", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Read failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -593,42 +620,94 @@ private fun IrScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             Text(if (connected) "Reconnect over USB" else "Connect over USB")
         }
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = paste,
-            onValueChange = { paste = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Paste Flipper .ir content") },
-            minLines = 3,
-            maxLines = 6,
-        )
-        Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                enabled = paste.isNotBlank(),
-                modifier = Modifier.weight(1f),
-                onClick = {
-                    val b = IrParser.parse(paste)
-                    if (b.isNotEmpty()) {
-                        catalog = b
-                        Toast.makeText(context, "Loaded ${b.size} codes", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "No codes found", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            ) { Text("Load") }
+            Button(modifier = Modifier.weight(1f), onClick = { browsing = !browsing }) {
+                Text(if (browsing) "Close catalog" else "Catalog (${devices.size})")
+            }
             OutlinedButton(
                 modifier = Modifier.weight(1f),
-                onClick = { catalog = IrParser.samples; paste = "" }
-            ) { Text("Samples") }
+                onClick = { importLauncher.launch(arrayOf("*/*")) }
+            ) { Text("Import .ir") }
         }
-        Spacer(Modifier.height(12.dp))
-        Text("${catalog.size} buttons", color = cs.onSurfaceVariant)
-        Spacer(Modifier.height(4.dp))
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(catalog) { b ->
-                IrButtonCard(b, connected) {
-                    vm.sendCommand(b.toCli())
-                    Toast.makeText(context, "Sent ${b.name}", Toast.LENGTH_SHORT).show()
+        Spacer(Modifier.height(8.dp))
+
+        if (browsing) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Search brand / model / category") },
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            val filtered = if (query.isBlank()) devices else devices.filter {
+                it.brand.contains(query, true) || it.model.contains(query, true) ||
+                    it.category.contains(query, true)
+            }
+            Text("${filtered.size} devices", color = cs.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(filtered) { d ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable {
+                                buttons = d.buttons
+                                browsing = false
+                                Toast.makeText(context, "${d.label}: ${d.buttons.size} buttons", Toast.LENGTH_SHORT).show()
+                            },
+                        colors = CardDefaults.cardColors(containerColor = cs.surface),
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(d.label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "${d.category} - ${d.buttons.size} buttons",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            OutlinedTextField(
+                value = paste,
+                onValueChange = { paste = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Paste Flipper .ir content") },
+                minLines = 3,
+                maxLines = 5,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    enabled = paste.isNotBlank(),
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        val b = IrParser.parse(paste)
+                        if (b.isNotEmpty()) {
+                            buttons = b
+                            Toast.makeText(context, "Loaded ${b.size} codes", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "No codes found", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) { Text("Load") }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = { buttons = IrParser.samples; paste = "" }
+                ) { Text("Samples") }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("${buttons.size} buttons", color = cs.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(buttons) { b ->
+                    IrButtonCard(b, connected) {
+                        vm.sendCommand(b.toCli())
+                        Toast.makeText(context, "Sent ${b.name}", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
