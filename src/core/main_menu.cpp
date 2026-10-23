@@ -21,6 +21,7 @@ MainMenu::MainMenu() {
 #endif
         &gpsMenu,
         &rfidMenu,
+        &connectMenu, // Brucia: hosts the "Companion" offload mode
         &fileMenu,
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
         &scriptsMenu,

@@ -56,7 +56,13 @@ def main():
     ap.add_argument(
         "--wardrive",
         action="store_true",
-        help="subscribe to the wifi.ap stream and print access points until Ctrl-C",
+        help="subscribe to the wifi.ap stream and print access points",
+    )
+    ap.add_argument(
+        "--seconds",
+        type=float,
+        default=0,
+        help="stop wardriving after N seconds (0 = until Ctrl-C)",
     )
     args = ap.parse_args()
 
@@ -84,9 +90,12 @@ def main():
             print("<- ", recv(ser))
             print("Streaming access points (Ctrl-C to stop)...")
             seen = set()
+            end = time.time() + args.seconds if args.seconds > 0 else None
             try:
                 while True:
-                    msg = recv(ser, timeout=10.0)
+                    if end is not None and time.time() >= end:
+                        break
+                    msg = recv(ser, timeout=2.0)
                     if not msg:
                         continue
                     if msg.get("t") == EVENT and msg.get("d", {}).get("ev") == "wifi.ap":
@@ -100,9 +109,10 @@ def main():
                             f"{ap_.get('ssid')!r}   (unique={len(seen)})"
                         )
             except KeyboardInterrupt:
-                print("\n-> SUB wifi.ap off")
-                send(ser, SUB, 5, {"stream": "wifi.ap", "on": False})
-                print("<- ", recv(ser))
+                pass
+            print("\n-> SUB wifi.ap off")
+            send(ser, SUB, 5, {"stream": "wifi.ap", "on": False})
+            print("<- ", recv(ser))
 
 
 if __name__ == "__main__":

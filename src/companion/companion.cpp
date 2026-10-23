@@ -2,6 +2,7 @@
 #include "core/display.h"
 #include "core/mykeyboard.h"
 #include "core/serialcmds.h" // serialcmdsTaskHandle
+#include "modules/others/qrcode_menu.h" // qrcode_display
 #include <ArduinoJson.h>
 #include <SerialDevice.h>
 #include <WiFi.h>
@@ -224,7 +225,11 @@ static void sendWifiApEvent(
 }
 
 void companionModeUSB() {
-    drawMainBorderWithTitle("Companion (USB)");
+    // Show a QR to the latest release so the user can grab the companion app,
+    // then wait for it to connect. (Press OK/ESC on the QR to continue.)
+    qrcode_display("https://github.com/1vcian/Brucia/releases/latest");
+
+    drawMainBorderWithTitle("Connect with Brucia");
     padprintln("");
     padprintln("Waiting for app...");
     padprintln("Press ESC to exit.");
@@ -256,7 +261,7 @@ void companionModeUSB() {
                         sendCaps(id);
                         if (!helloSeen) {
                             helloSeen = true;
-                            drawMainBorderWithTitle("Companion (USB)");
+                            drawMainBorderWithTitle("Connect with Brucia");
                             padprintln("");
                             padprintln("App connected.");
                             padprintln("Press ESC to exit.");
