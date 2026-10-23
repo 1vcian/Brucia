@@ -37,8 +37,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val _status = MutableStateFlow("Disconnected")
     val status: StateFlow<String> = _status.asStateFlow()
 
-    private val _caps = MutableStateFlow<String?>(null)
-    val caps: StateFlow<String?> = _caps.asStateFlow()
+    private val _device = MutableStateFlow<DeviceInfo?>(null)
+    val device: StateFlow<DeviceInfo?> = _device.asStateFlow()
 
     private val _wardriving = MutableStateFlow(false)
     val wardriving: StateFlow<Boolean> = _wardriving.asStateFlow()
@@ -79,7 +79,19 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun handle(msg: JSONObject) {
         when (msg.optInt("t")) {
-            Kind.CAPS -> _caps.value = msg.optJSONObject("d")?.toString()
+            Kind.CAPS -> {
+                val d = msg.optJSONObject("d") ?: return
+                val modsArr = d.optJSONArray("modules")
+                val mods = buildList {
+                    if (modsArr != null) for (i in 0 until modsArr.length()) add(modsArr.optString(i))
+                }
+                _device.value = DeviceInfo(
+                    board = d.optString("board", "device"),
+                    chip = d.optString("chip", ""),
+                    fw = d.optString("fw", ""),
+                    modules = mods,
+                )
+            }
             Kind.EVENT -> {
                 val d = msg.optJSONObject("d") ?: return
                 if (d.optString("ev") != "wifi.ap") return
@@ -129,6 +141,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         transport = null
         _status.value = "Disconnected"
         _wardriving.value = false
+        _device.value = null
     }
 
     override fun onCleared() {
