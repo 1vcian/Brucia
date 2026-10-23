@@ -33,6 +33,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +57,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.brucia.transport.UsbTransport
 import app.brucia.ui.Amber
 import app.brucia.ui.BruciaTheme
+import app.brucia.ir.IrButton
+import app.brucia.ir.IrParser
 import app.brucia.wardrive.ApObservation
 import app.brucia.wardrive.DeviceInfo
 import app.brucia.wardrive.OuiResolver
@@ -96,7 +99,7 @@ class MainActivity : ComponentActivity() {
                     }
                     vm.startLocation()
                 }
-                BruciaScreen(vm, onConnect = { connectUsb(vm) })
+                AppRoot(vm, onConnect = { connectUsb(vm) })
             }
         }
     }
@@ -534,4 +537,127 @@ private fun ApMap(aps: List<ApObservation>, modifier: Modifier) {
             map.invalidate()
         }
     )
+}
+
+@Composable
+private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var tab by remember { mutableStateOf(0) }
+    Column(modifier = Modifier.fillMaxSize().background(cs.background)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SegButton("Wardrive", tab == 0, Modifier.weight(1f)) { tab = 0 }
+            SegButton("IR", tab == 1, Modifier.weight(1f)) { tab = 1 }
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            when (tab) {
+                0 -> BruciaScreen(vm, onConnect)
+                else -> IrScreen(vm, onConnect)
+            }
+        }
+    }
+}
+
+@Composable
+private fun IrScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+    val status by vm.status.collectAsState()
+    val device by vm.device.collectAsState()
+    val connected = status == "Connected"
+    val cs = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    var catalog by remember { mutableStateOf(IrParser.samples) }
+    var paste by remember { mutableStateOf("") }
+
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "Brucia",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = cs.primary,
+            )
+            Spacer(Modifier.weight(1f))
+            StatusPill(connected)
+        }
+        Text(
+            "IR catalog - transmit through the device",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(12.dp))
+        DeviceCard(device)
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
+            Text(if (connected) "Reconnect over USB" else "Connect over USB")
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = paste,
+            onValueChange = { paste = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Paste Flipper .ir content") },
+            minLines = 3,
+            maxLines = 6,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                enabled = paste.isNotBlank(),
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    val b = IrParser.parse(paste)
+                    if (b.isNotEmpty()) {
+                        catalog = b
+                        Toast.makeText(context, "Loaded ${b.size} codes", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "No codes found", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            ) { Text("Load") }
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = { catalog = IrParser.samples; paste = "" }
+            ) { Text("Samples") }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("${catalog.size} buttons", color = cs.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(catalog) { b ->
+                IrButtonCard(b, connected) {
+                    vm.sendCommand(b.toCli())
+                    Toast.makeText(context, "Sent ${b.name}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IrButtonCard(button: IrButton, enabled: Boolean, onSend: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = cs.surface),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(button.name, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+                val detail = if (button.raw) "raw - ${button.frequency} Hz"
+                    else "${button.protocol}  ${button.address} ${button.command}"
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            Button(enabled = enabled, onClick = onSend) { Text("Send") }
+        }
+    }
 }

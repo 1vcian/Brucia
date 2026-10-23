@@ -148,6 +148,11 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Send a raw CLI command to the device (used by the IR module: `ir tx ...`). */
+    fun sendCommand(cmd: String) {
+        client?.cmd(cmd)
+    }
+
     fun setWardriving(on: Boolean) {
         client?.subWifiAp(on)
         _wardriving.value = on
