@@ -19,7 +19,7 @@ feature logic            (wardriving, ir, rf, ... — never touches the wire)
 - **Framing**: each frame = `uint32 length` (little-endian, payload bytes) +
   `payload`. Simple, transport-agnostic, resync by reading length. (COBS may be
   added later for self-synchronizing streams.)
-- **Payload**: CBOR map. JSON with the same keys is accepted in debug builds.
+- **Payload**: a JSON object (v0 baseline; parsed with ArduinoJson on the device). A compact binary encoding (MessagePack on the ESP via ArduinoJson, CBOR on Android) may replace JSON later behind the same envelope — bump the version when it does.
 
 ## Envelope (every message)
 

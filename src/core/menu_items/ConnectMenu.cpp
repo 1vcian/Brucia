@@ -1,4 +1,5 @@
 #include "ConnectMenu.h"
+#include "companion/companion.h"
 #include "core/connect/file_sharing.h"
 #include "core/connect/serial_commands.h"
 #include "core/display.h"
@@ -16,6 +17,8 @@ void ConnectMenu::optionsMenu() {
         {"Recv Cmds", [=]() { EspSerialCmd().receiveCommands(); }},
 #endif
     };
+    // Brucia: companion mode (offload to the Android app over USB-CDC).
+    options.push_back({"Companion", [=]() { companionModeUSB(); }});
     addOptionToMainMenu();
 
     loopOptions(options, MENU_TYPE_SUBMENU, getName().c_str());
