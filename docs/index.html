@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Brucia - Web Flasher & Guide</title>
+  <link rel="icon" href="img/logo.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="img/logo.svg" />
+  <meta name="description" content="Flash the Brucia firmware to a LilyGo T-Embed CC1101 from your browser, then drive it with the native Android app. The phone is the brain, the ESP32 is the antenna." />
+  <meta property="og:title" content="Brucia" />
+  <meta property="og:description" content="The phone is the brain, the ESP32 is the antenna. Open-source platform for low-cost security research." />
+  <meta property="og:image" content="img/banner.png" />
+  <meta name="theme-color" content="#0b0b0d" />
+  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    :root{
+      --ember:#ff6d1a; --ember-deep:#e23e00; --amber:#ffb300;
+      --bg:#0b0b0d; --surf:#161619; --surf2:#1f1f24; --line:#2a2a2e; --line-soft:#232327;
+      --card:#131316;
+      --fg:#f3f1ef; --muted:#b1aca6; --muted-dim:#8a857f;
+      --maxw:1080px; --gut:16px; --hdr:60px;
+      --ease:cubic-bezier(.2,.7,.2,1);
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{
+      margin:0; background:var(--bg); color:var(--fg);
+      font-family:Inter,-apple-system,system-ui,sans-serif; line-height:1.65;
+      -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+      overflow-x:hidden;
+    }
+    a{color:var(--ember); text-decoration:none; transition:color .2s var(--ease)}
+    a:hover{color:var(--amber)}
+    img{max-width:100%}
+    ::selection{background:rgba(255,109,26,.3); color:#fff}
+    :focus-visible{outline:2px solid var(--amber); outline-offset:3px; border-radius:4px}
+
+    .wrap{width:100%; max-width:var(--maxw); margin:0 auto; padding:0 var(--gut)}
+
+    /* ---------- sticky header ---------- */
+    .site-header{
+      position:fixed; top:0; left:0; right:0; z-index:50; height:var(--hdr);
+      box-sizing:content-box; padding-top:calc(env(safe-area-inset-top, 0px) + 12px);
+      display:flex; align-items:center;
+      background:rgba(11,11,13,0); border-bottom:1px solid transparent;
+      backdrop-filter:saturate(140%) blur(0px);
+      transition:background .3s var(--ease), border-color .3s var(--ease), backdrop-filter .3s var(--ease);
+    }
+    .site-header.scrolled{
+      background:rgba(11,11,13,.72); border-bottom:1px solid var(--line-soft);
+      backdrop-filter:saturate(150%) blur(12px);
+    }
+    .nav{display:flex; align-items:center; justify-content:space-between; gap:16px; width:100%}
+    .brand{display:inline-flex; align-items:center; gap:9px; color:var(--fg); font-weight:800; letter-spacing:.2px; font-size:1.08rem}
+    .brand:hover{color:var(--fg)}
+    .brand svg{width:22px; height:22px; filter:drop-shadow(0 0 7px rgba(255,109,26,.6))}
+    .nav-links{display:flex; align-items:center; gap:26px}
+    .nav-links a{color:var(--muted); font-size:.92rem; font-weight:500}
+    .nav-links a:hover{color:var(--fg)}
+    .btn-sm{padding:9px 16px; font-size:.9rem; border-radius:10px}
+    .header-actions{display:flex; gap:8px; align-items:center; flex-wrap:nowrap}
+    @media (max-width:720px){ .nav-links{display:none} }
+    /* On mobile keep GitHub + Support in the header, but drop the oversized primary "Flash now"
+       (flashing stays reachable from the hero CTA and the #flash section). */
+    @media (max-width:720px){ .header-actions .btn-primary{display:none} .ghlabel{display:none} }
+
+    /* ---------- buttons ---------- */
+    .btn{
+      position:relative; display:inline-flex; align-items:center; justify-content:center; gap:9px;
+      border:1px solid transparent; border-radius:12px; padding:15px 26px;
+      font-size:1.02rem; font-weight:700; cursor:pointer; font-family:inherit; text-decoration:none;
+      transition:transform .2s var(--ease), box-shadow .25s var(--ease), background .25s var(--ease), color .2s var(--ease), border-color .25s var(--ease);
+    }
+    .btn:active{transform:translateY(1px)}
+    .btn-primary{
+      background:linear-gradient(180deg,#ff8f45,var(--ember)); color:#200900;
+      box-shadow:0 10px 30px -12px rgba(255,109,26,.7), inset 0 1px 0 rgba(255,255,255,.25);
+    }
+    .btn-primary:hover{color:#200900; box-shadow:0 16px 38px -12px rgba(255,109,26,.9), inset 0 1px 0 rgba(255,255,255,.3)}
+    .btn-ghost{background:rgba(31,31,36,.55); color:var(--amber); border:1px solid var(--line); backdrop-filter:blur(6px)}
+    .btn-ghost:hover{border-color:var(--ember); color:var(--fg)}
+    esp-web-install-button{
+      --esp-tools-button-color:var(--bg);
+      --esp-tools-button-text-color:var(--ember);
+    }
+
+    /* ---------- board selector ---------- */
+    .field-label{display:block; font-size:.76rem; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:var(--amber); margin:22px 0 8px}
+    .board-select{
+      width:100%; appearance:none; -webkit-appearance:none;
+      background:#000 url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%23FF6D1A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>') no-repeat right 13px center;
+      color:var(--fg); border:1px solid var(--line); border-radius:10px;
+      padding:12px 40px 12px 14px; font-size:.95rem; font-family:inherit; cursor:pointer;
+      transition:border-color .2s var(--ease), box-shadow .2s var(--ease);
+    }
+    .board-select:hover{border-color:var(--ember)}
+    .board-select:focus{outline:none; border-color:var(--ember); box-shadow:0 0 0 3px rgba(255,109,26,.18)}
+    .board-select optgroup{background:#161618; color:var(--amber); font-weight:700}
+    .board-select option{background:#161618; color:var(--fg); font-weight:500}
+    .chip-line{color:var(--muted); font-size:.85rem; margin:10px 0 0}
+    .chip-line span{color:var(--amber); font-weight:700}
+    .flash-btn-row{margin-top:16px}
+    .verified-note{line-height:1.55}
+    .dl-modes{margin:16px 0 0; border:1px solid var(--line); border-radius:10px; background:rgba(0,0,0,.25)}
+    .dl-modes summary{cursor:pointer; padding:12px 14px; color:var(--amber); font-size:.9rem; font-weight:600; list-style:none}
+    .dl-modes summary::-webkit-details-marker{display:none}
+    .dl-modes summary::before{content:"+"; display:inline-block; width:14px; color:var(--ember); font-weight:700}
+    .dl-modes[open] summary::before{content:"\2212"}
+    .dl-modes[open] summary{border-bottom:1px solid var(--line)}
+    .dl-modes ul{margin:0; padding:12px 14px 14px 30px; color:var(--muted); font-size:.88rem; line-height:1.6}
+    .dl-modes li{margin:0 0 7px}
+    .dl-modes li:last-child{margin:0}
+    .dl-modes b{color:var(--fg)}
+
+    /* ---------- hero ---------- */
+    .hero{
+      position:relative; min-height:100svh; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; text-align:center; overflow:hidden;
+      border-bottom:1px solid var(--line-soft); padding:calc(var(--hdr) + 40px) var(--gut) 48px;
+    }
+    #embers{position:absolute; inset:0; width:100%; height:100%; display:block; z-index:1}
+    /* ambient CSS glow - also the WebGL-less fallback */
+    .hero::before{
+      content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+      background:
+        radial-gradient(70% 55% at 50% 108%, rgba(255,109,26,.26), rgba(226,62,0,.08) 42%, transparent 70%),
+        radial-gradient(90% 60% at 50% 0%, rgba(226,62,0,.05), transparent 60%);
+      animation:breathe 7s ease-in-out infinite;
+    }
+    .hero::after{
+      content:""; position:absolute; inset:0; z-index:2; pointer-events:none;
+      background:linear-gradient(180deg, rgba(11,11,13,.35) 0%, transparent 22%, transparent 72%, rgba(11,11,13,.9) 100%);
+    }
+    @keyframes breathe{0%,100%{opacity:.85}50%{opacity:1}}
+    .hero-inner{position:relative; z-index:3; max-width:860px; margin:0 auto}
+    .eyebrow{
+      display:inline-flex; align-items:center; gap:8px; margin:0 0 22px;
+      padding:7px 15px; border-radius:999px; font-size:.78rem; font-weight:600; letter-spacing:1.4px;
+      text-transform:uppercase; color:var(--amber);
+      background:rgba(255,109,26,.08); border:1px solid rgba(255,109,26,.28);
+    }
+    .eyebrow .dot{width:6px; height:6px; border-radius:50%; background:var(--ember); box-shadow:0 0 10px var(--ember); animation:pulse 2.4s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+    .flame{width:86px; height:86px; filter:drop-shadow(0 0 26px rgba(255,109,26,.6)); animation:flicker 2.8s ease-in-out infinite}
+    @keyframes flicker{0%,100%{transform:translateY(0) scale(1) rotate(-.5deg)}50%{transform:translateY(-5px) scale(1.045) rotate(.5deg)}}
+    h1.title{
+      font-size:clamp(58px,13vw,132px); font-weight:900; letter-spacing:-2px; line-height:.95; margin:10px 0 0;
+      background:linear-gradient(92deg,#FFC24D 0%,#FF6D1A 55%,#E23E00 100%);
+      -webkit-background-clip:text; background-clip:text; color:transparent;
+      filter:drop-shadow(0 6px 30px rgba(255,109,26,.25));
+    }
+    .tag{color:#d9d4ce; font-size:clamp(14px,2.3vw,20px); letter-spacing:2.5px; font-weight:500; margin:18px auto 34px; max-width:620px}
+    .tag b{color:var(--amber); font-weight:700}
+    .cta{display:flex; gap:14px; justify-content:center; flex-wrap:wrap}
+    .note{color:var(--muted); font-size:.86rem; margin-top:20px}
+    .note b{color:var(--fg)}
+    .unsupported{color:var(--amber); font-size:.9rem; display:inline-block; max-width:520px}
+    .badges{margin-top:26px; display:flex; flex-wrap:wrap; gap:9px; justify-content:center}
+    .badge{
+      display:inline-flex; align-items:center; background:rgba(31,31,36,.55); border:1px solid var(--line);
+      color:var(--muted); border-radius:999px; padding:6px 14px; font-size:.8rem; font-weight:500;
+      backdrop-filter:blur(4px);
+    }
+    .scrollcue{position:absolute; bottom:22px; left:50%; transform:translateX(-50%); z-index:3; color:var(--muted-dim); animation:cue 2.2s ease-in-out infinite}
+    .scrollcue svg{width:22px; height:22px; display:block}
+    @keyframes cue{0%,100%{transform:translate(-50%,0); opacity:.5}50%{transform:translate(-50%,6px); opacity:1}}
+
+    /* ---------- sections ---------- */
+    section{padding:92px 0; scroll-margin-top:calc(var(--hdr) + 24px)}
+    .eyebrow-sm{display:block; font-size:.78rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--ember); margin:0 0 10px}
+    h2{font-size:clamp(1.8rem,4.2vw,2.6rem); font-weight:800; letter-spacing:-.5px; line-height:1.1; margin:0 0 10px}
+    h2 .fire{background:linear-gradient(92deg,#FFC24D,#FF6D1A); -webkit-background-clip:text; background-clip:text; color:transparent}
+    .lead{color:var(--muted); font-size:1.05rem; max-width:620px; margin:0 0 34px}
+
+    /* ---------- cards ---------- */
+    .card{
+      position:relative; background:linear-gradient(180deg,var(--surf),#121214);
+      border:1px solid var(--line); border-radius:18px; padding:26px;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.025), 0 24px 44px -28px rgba(0,0,0,.9);
+      transition:transform .35s var(--ease), border-color .35s var(--ease), box-shadow .35s var(--ease);
+    }
+    .card:hover{transform:translateY(-4px); border-color:#3a3a40; box-shadow:0 30px 56px -28px rgba(226,62,0,.3)}
+    .card h3{margin:0 0 12px; font-size:1.18rem; font-weight:700}
+    .grid{display:grid; gap:18px}
+    .g2{grid-template-columns:repeat(2,1fr)}
+    .g3{grid-template-columns:repeat(3,1fr)}
+    @media (max-width:860px){ .g3{grid-template-columns:repeat(2,1fr)} }
+    @media (max-width:620px){ .g2,.g3{grid-template-columns:1fr} }
+
+    ol.steps{margin:0; padding-left:0; list-style:none; counter-reset:step}
+    ol.steps li{position:relative; padding:0 0 14px 42px; margin:0; color:#d9d4ce}
+    ol.steps li:last-child{padding-bottom:0}
+    ol.steps li::before{
+      counter-increment:step; content:counter(step);
+      position:absolute; left:0; top:-1px; width:28px; height:28px; border-radius:8px;
+      display:flex; align-items:center; justify-content:center; font-size:.82rem; font-weight:700;
+      color:var(--amber); background:rgba(255,109,26,.1); border:1px solid rgba(255,109,26,.3);
+    }
+    code{background:#000; color:var(--amber); padding:3px 8px; border-radius:6px; font-size:.86em; font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    .warn{color:var(--amber); font-size:.9rem; margin:18px 0 0}
+    .muted-note{color:var(--muted-dim); font-size:.9rem; margin:16px 0 0}
+
+    /* ---------- feature grid ---------- */
+    .feat{
+      position:relative; background:linear-gradient(180deg,var(--surf),#121214);
+      border:1px solid var(--line); border-radius:16px; padding:24px 22px; overflow:hidden;
+      transition:transform .35s var(--ease), border-color .35s var(--ease), box-shadow .35s var(--ease);
+    }
+    .feat::before{content:""; position:absolute; left:0; top:0; height:100%; width:3px; background:linear-gradient(180deg,var(--amber),var(--ember-deep)); opacity:.65; transition:opacity .35s var(--ease)}
+    .feat:hover{transform:translateY(-4px); border-color:#3a3a40; box-shadow:0 26px 48px -28px rgba(226,62,0,.28)}
+    .feat:hover::before{opacity:1}
+    .feat-num{font-size:.8rem; font-weight:800; letter-spacing:1px; color:var(--ember-deep); opacity:.8; margin:0 0 10px}
+    .feat h3{margin:0 0 6px; font-size:1.1rem; font-weight:700}
+    .feat p{margin:0; color:var(--muted); font-size:.92rem; line-height:1.55}
+
+    /* ---------- demo ---------- */
+    .shot-frame{padding:14px; border-radius:20px}
+    .shot{width:100%; display:block; border-radius:12px; border:1px solid var(--line)}
+
+    /* ---------- doc links ---------- */
+    .doclink{
+      display:flex; align-items:center; justify-content:space-between; gap:14px;
+      background:linear-gradient(180deg,var(--surf),#131315); border:1px solid var(--line);
+      border-radius:14px; padding:18px 20px;
+      transition:transform .3s var(--ease), border-color .3s var(--ease), box-shadow .3s var(--ease);
+    }
+    .doclink:hover{transform:translateY(-3px); border-color:var(--ember); box-shadow:0 22px 44px -28px rgba(226,62,0,.35)}
+    .doclink b{color:var(--fg); font-size:1.02rem; display:block}
+    .doclink span{display:block; color:var(--muted); font-size:.86rem; margin-top:3px}
+    .doclink .arrow{flex:none; color:var(--muted-dim); transition:transform .3s var(--ease), color .3s var(--ease)}
+    .doclink:hover .arrow{transform:translate(3px,-3px); color:var(--ember)}
+
+    /* ---------- support ---------- */
+    .support{text-align:center}
+    .support .panel{
+      position:relative; overflow:hidden; border:1px solid var(--line); border-radius:24px;
+      padding:56px 28px; background:
+        radial-gradient(90% 120% at 50% -10%, rgba(255,109,26,.14), transparent 60%),
+        linear-gradient(180deg,#141416,#0f0f11);
+    }
+    .support h2{margin-bottom:8px}
+    .support .lead{margin-left:auto; margin-right:auto; text-align:center}
+
+    /* ---------- footer ---------- */
+    footer{border-top:1px solid var(--line-soft); padding:40px var(--gut); text-align:center; color:var(--muted); font-size:.88rem; line-height:1.8}
+    footer .foot-brand{display:inline-flex; align-items:center; gap:8px; color:var(--fg); font-weight:700; margin-bottom:10px}
+    footer .foot-brand svg{width:18px; height:18px}
+
+    /* ---------- scroll reveal ---------- */
+    .reveal{opacity:0; transform:translateY(26px); transition:opacity .75s var(--ease), transform .75s var(--ease)}
+    .reveal.in{opacity:1; transform:none}
+    .grid .reveal:nth-child(2){transition-delay:.07s}
+    .grid .reveal:nth-child(3){transition-delay:.14s}
+    .grid .reveal:nth-child(4){transition-delay:.07s}
+    .grid .reveal:nth-child(5){transition-delay:.14s}
+    .grid .reveal:nth-child(6){transition-delay:.21s}
+
+    @media (prefers-reduced-motion:reduce){
+      html{scroll-behavior:auto}
+      .reveal{opacity:1; transform:none; transition:none}
+      .flame,.hero::before,.eyebrow .dot,.scrollcue{animation:none}
+    }
+
+    /* ---------- comparison table ---------- */
+    .cmp-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:16px; border:1px solid var(--line-soft); background:var(--card)}
+    table.cmp{border-collapse:collapse; width:100%; min-width:720px; font-size:.92rem}
+    table.cmp th, table.cmp td{padding:12px 14px; text-align:left; border-bottom:1px solid var(--line-soft); vertical-align:top}
+    table.cmp thead th{position:sticky; top:0; z-index:2; background:#141418; font-weight:700; font-size:.82rem; letter-spacing:.3px; text-transform:uppercase; color:var(--muted)}
+    table.cmp thead th.col-brucia{color:var(--fg)}
+    table.cmp tbody td:first-child{color:var(--fg); font-weight:600}
+    /* Freeze the first column; the other three scroll horizontally under it. */
+    table.cmp th:first-child, table.cmp td:first-child{position:sticky; left:0; z-index:1; width:220px; min-width:200px; background:var(--card); box-shadow:1px 0 0 var(--line-soft)}
+    table.cmp thead th:first-child{z-index:3; background:#141418}
+    table.cmp td.col-brucia{background:rgba(255,109,26,.06); border-left:1px solid rgba(255,109,26,.18); border-right:1px solid rgba(255,109,26,.18)}
+    table.cmp thead th.col-brucia{background:rgba(255,109,26,.12); border-left:1px solid rgba(255,109,26,.22); border-right:1px solid rgba(255,109,26,.22)}
+    table.cmp tbody tr:last-child td{border-bottom:none}
+    table.cmp tr.hl td:first-child::after{content:"killer"; margin-left:8px; font-size:.64rem; font-weight:900; letter-spacing:1px; text-transform:uppercase; color:#1a0800; background:linear-gradient(180deg,#ff8f45,var(--ember)); padding:2px 7px; border-radius:6px; vertical-align:middle; box-shadow:0 2px 8px -2px rgba(255,109,26,.7)}
+    /* Red variant of the badge for the (tongue-in-cheek) serial-killer feature. */
+    table.cmp tr.serialkill td:first-child::after{content:"serial-killer"; margin-left:8px; font-size:.64rem; font-weight:900; letter-spacing:1px; text-transform:uppercase; color:#fff; background:linear-gradient(180deg,#ff4d4d,#c81e1e); padding:2px 7px; border-radius:6px; vertical-align:middle; box-shadow:0 2px 8px -2px rgba(220,30,30,.75)}
+    .cmp .y{color:#ffb300; font-weight:700}
+    .cmp .y-strong{color:#ff8a3c; font-weight:800}
+    .cmp .n{color:var(--muted-dim)}
+    .cmp .p{color:var(--muted)}
+    .cmp-note{color:var(--muted-dim); font-size:.82rem; margin:14px 2px 0; line-height:1.5}
+
+    /* ---------- crypto donate ---------- */
+    .crypto{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:22px; text-align:left}
+    @media (max-width:560px){ .crypto{grid-template-columns:1fr} }
+    .crypto-item{display:flex; gap:14px; align-items:center; background:var(--card); border:1px solid var(--line-soft); border-radius:14px; padding:14px}
+    .crypto-item img{width:96px; height:96px; border-radius:8px; background:#fff; padding:4px; flex:none}
+    .crypto-item .c-name{font-weight:700; margin:0 0 4px}
+    .crypto-item code{display:block; font-size:.74rem; color:var(--muted); word-break:break-all; line-height:1.4; margin-bottom:8px}
+    .copybtn{font-size:.78rem; padding:6px 12px; border-radius:8px; cursor:pointer; border:1px solid var(--line-soft); background:transparent; color:var(--fg); transition:background .2s var(--ease), border-color .2s var(--ease)}
+    .copybtn:hover{border-color:var(--amber); color:var(--amber)}
+  </style>
+</head>
+<body>
+
+  <header class="site-header" id="siteHeader">
+    <div class="nav wrap">
+      <a class="brand" href="#top" aria-label="Brucia home">
+        <svg viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+          <path fill="#FF6D1A" d="M20 15.0002C20 19.2547 17.3819 21.1216 15.3588 21.7512C15.2746 21.7774 15.196 21.7793 15.126 21.7627C14.8373 21.6942 14.6942 21.3101 14.9019 21.0116C15.7823 19.7464 16.8 17.8161 16.8 16.0002C16.8 14.0496 15.1559 11.7467 13.8721 10.3263C13.5786 10.0016 13.0667 10.2164 13.0507 10.6539C12.9976 12.1031 12.7689 14.042 11.7828 15.5616C11.6241 15.8062 11.2872 15.8264 11.1063 15.5977C10.7982 15.208 10.4901 14.7267 10.182 14.3464C10.016 14.1416 9.71604 14.1388 9.52461 14.32C8.77825 15.0267 7.73333 16.1288 7.73333 17.5002C7.73333 18.4301 8.0936 19.405 8.50007 20.1893C8.70225 20.5795 8.39657 21.0415 8.01803 20.9595C7.97791 20.9508 7.93697 20.936 7.89573 20.9144C6.11307 19.9789 4 18.0838 4 15.0002C4 11.8538 8.31029 7.49503 9.95605 3.37712C10.2157 2.72733 11.0161 2.42199 11.5727 2.84603C14.9439 5.41409 20 10.3783 20 15.0002Z"/>
+          <path fill="#FFB300" d="M7.7334 17.5004C7.7334 18.4303 8.09366 19.4052 8.50013 20.1896C8.70231 20.5797 8.39664 21.0417 8.0181 20.9597C8.5 21.5 11.6763 21.9175 15.1261 21.7629C14.8374 21.6944 14.6943 21.3103 14.902 21.0119C15.7824 19.7466 16.8001 17.8163 16.8001 16.0004C16.8001 14.0498 15.156 11.7469 13.8722 10.3265C13.5787 10.0018 13.0667 10.2167 13.0507 10.6541C12.9977 12.1033 12.769 14.0422 11.7829 15.5618C11.6242 15.8064 11.2872 15.8266 11.1064 15.5979C10.7983 15.2083 10.4901 14.7269 10.182 14.3466C10.0161 14.1418 9.71611 14.139 9.52467 14.3202C8.77832 15.0269 7.7334 16.129 7.7334 17.5004Z"/>
+        </svg>
+        <span>Brucia</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#demo">Demo</a>
+        <a href="#compare">Compare</a>
+        <a href="#flash">Flash</a>
+        <a href="#features">Features</a>
+        <a href="#docs">Docs</a>
+        <a href="wiki/">Wiki</a>
+      </nav>
+      <span class="header-actions">
+        <a class="btn btn-ghost btn-sm" href="https://github.com/1vcian/BruciaDev" target="_blank" rel="noopener" aria-label="Source on GitHub">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="vertical-align:-3px; margin-right:5px"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="ghlabel">GitHub</span></a>
+        <a class="btn btn-ghost btn-sm" href="#support">Support</a>
+        <a class="btn btn-primary btn-sm" href="#top">Flash now</a>
+      </span>
+    </div>
+  </header>
+
+  <header class="hero" id="top">
+    <canvas id="embers" aria-hidden="true"></canvas>
+    <div class="hero-inner">
+      <div>
+        <svg class="flame" viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+          <path fill="#FF6D1A" d="M20 15.0002C20 19.2547 17.3819 21.1216 15.3588 21.7512C15.2746 21.7774 15.196 21.7793 15.126 21.7627C14.8373 21.6942 14.6942 21.3101 14.9019 21.0116C15.7823 19.7464 16.8 17.8161 16.8 16.0002C16.8 14.0496 15.1559 11.7467 13.8721 10.3263C13.5786 10.0016 13.0667 10.2164 13.0507 10.6539C12.9976 12.1031 12.7689 14.042 11.7828 15.5616C11.6241 15.8062 11.2872 15.8264 11.1063 15.5977C10.7982 15.208 10.4901 14.7267 10.182 14.3464C10.016 14.1416 9.71604 14.1388 9.52461 14.32C8.77825 15.0267 7.73333 16.1288 7.73333 17.5002C7.73333 18.4301 8.0936 19.405 8.50007 20.1893C8.70225 20.5795 8.39657 21.0415 8.01803 20.9595C7.97791 20.9508 7.93697 20.936 7.89573 20.9144C6.11307 19.9789 4 18.0838 4 15.0002C4 11.8538 8.31029 7.49503 9.95605 3.37712C10.2157 2.72733 11.0161 2.42199 11.5727 2.84603C14.9439 5.41409 20 10.3783 20 15.0002Z"/>
+          <path fill="#FFB300" d="M7.7334 17.5004C7.7334 18.4303 8.09366 19.4052 8.50013 20.1896C8.70231 20.5797 8.39664 21.0417 8.0181 20.9597C8.5 21.5 11.6763 21.9175 15.1261 21.7629C14.8374 21.6944 14.6943 21.3103 14.902 21.0119C15.7824 19.7466 16.8001 17.8163 16.8001 16.0004C16.8001 14.0498 15.156 11.7469 13.8722 10.3265C13.5787 10.0018 13.0667 10.2167 13.0507 10.6541C12.9977 12.1033 12.769 14.0422 11.7829 15.5618C11.6242 15.8064 11.2872 15.8266 11.1064 15.5979C10.7983 15.2083 10.4901 14.7269 10.182 14.3466C10.0161 14.1418 9.71611 14.139 9.52467 14.3202C8.77832 15.0269 7.7334 16.129 7.7334 17.5004Z"/>
+        </svg>
+      </div>
+      <h1 class="title">Brucia</h1>
+      <p class="tag">The phone is the <b>brain</b> &nbsp;&middot;&nbsp; the ESP32 is the <b>antenna</b></p>
+      <p class="tag" style="font-style:italic;opacity:.92">Let your phone burn, so your ESP32 doesn't.</p>
+      <div class="cta">
+        <esp-web-install-button manifest="manifest.json">
+          <button class="btn btn-primary" slot="activate">Connect &amp; Flash</button>
+          <span slot="unsupported" class="unsupported">Use desktop Chrome/Edge (or Chrome on Android) - this browser has no Web Serial.</span>
+          <span slot="not-allowed" class="unsupported">Serial access was not allowed.</span>
+        </esp-web-install-button>
+        <a class="btn btn-ghost" href="https://github.com/1vcian/BruciaDev/releases/latest">Download the app</a>
+        <a class="btn btn-ghost" href="https://s.click.aliexpress.com/e/_c33qeCLh" target="_blank" rel="noopener sponsored">Buy the board</a>
+      </div>
+      <p class="note">Chrome / Edge on desktop, or Chrome on Android (USB-OTG). Use a <b>data</b> USB-C cable.</p>
+      <div class="badges">
+        <span class="badge">USB companion</span>
+        <span class="badge">ESP32-S3</span>
+        <span class="badge">Wi-Fi &middot; BLE &middot; Sub-GHz &middot; NFC &middot; IR &middot; NRF24 &middot; Audio</span>
+        <span class="badge">AGPL-3.0</span>
+        <span class="badge">No ads &middot; No telemetry</span>
+      </div>
+    </div>
+    <a class="scrollcue" href="#demo" aria-label="Scroll to content">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </a>
+  </header>
+
+  <main class="wrap">
+    <section id="demo">
+      <span class="eyebrow-sm reveal">In action</span>
+      <h2 class="reveal">See it <span class="fire">running</span></h2>
+      <p class="lead reveal"><strong>Brucia</strong> means <em>"it burns"</em> in Italian - a phonetic nod to the original <em>Bruce</em> firmware, with a completely inverted architecture: let your Android CPU burn through the heavy DSP, UI and WPA-cracking tasks, so your little ESP32 doesn't literally <em>brucia</em>.</p>
+      <p class="lead reveal">Live Wi-Fi wardrive streamed from the device to the phone over USB.</p>
+      <div class="card shot-frame reveal"><img class="shot" src="img/demo.gif" alt="Brucia live Wi-Fi wardrive demo streaming from the device to the Android app" loading="lazy" /></div>
+    </section>
+
+    <section id="compare">
+      <span class="eyebrow-sm reveal">Why Brucia</span>
+      <h2 class="reveal">Brucia vs <span class="fire">Flipper vs Bruce</span></h2>
+      <p class="lead reveal">Same cheap radios, but the phone adds compute, storage, GPS and a full-size screen. Several of these have never existed on a Flipper Zero or on Bruce.</p>
+      <div class="cmp-wrap reveal">
+        <table class="cmp">
+          <thead>
+            <tr><th>Capability</th><th>Flipper Zero</th><th>Bruce</th><th class="col-brucia">Brucia<br><span style="font-weight:400; font-size:.72rem; text-transform:none; letter-spacing:0; opacity:.85">LilyGo T-Embed CC1101</span></th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Wi-Fi recon / wardrive</td><td class="n">Add-on board</td><td class="p">Yes, tiny screen</td><td class="col-brucia y">Yes + GPS, live map, WiGLE</td></tr>
+            <tr class="hl"><td>WPA / PMKID crack (dictionary)</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes - rockyou/SecLists, on the phone</td></tr>
+            <tr class="hl"><td>GPS + live map + WiGLE export</td><td class="n">Add-on, no map</td><td class="n">Add-on, no map</td><td class="col-brucia y-strong">Yes - uses the phone</td></tr>
+            <tr class="hl"><td>MITM HTTPS intercept proxy</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes - on-phone CA, TLS decrypt</td></tr>
+            <tr class="hl"><td>Wi-Fi monitor + pcap to Wireshark</td><td class="n">No</td><td class="p">Sniff only</td><td class="col-brucia y-strong">Yes - pcap export + PSK decrypt</td></tr>
+            <tr><td>Sub-GHz capture / replay / decode</td><td class="y">Yes</td><td class="y">Yes</td><td class="col-brucia y">Yes + waterfall, rolling-code, big screen</td></tr>
+            <tr><td>NFC / RFID read, emulate, attack</td><td class="y">Yes</td><td class="y">Yes</td><td class="col-brucia y">Yes</td></tr>
+            <tr><td>Infrared + universal remote catalog</td><td class="y">Yes</td><td class="y">Yes</td><td class="col-brucia y">Yes - 1648 codes, phone-hosted</td></tr>
+            <tr><td>BLE scan + GATT explorer + spam</td><td class="p">Partial</td><td class="p">Spam</td><td class="col-brucia y">Scan + GATT + spam hub</td></tr>
+            <tr><td>2.4 GHz NRF24 / MouseJack</td><td class="p">Add-on</td><td class="p">Add-on</td><td class="col-brucia y">Add-on, phone-driven</td></tr>
+            <tr class="hl"><td>Microphone tools (needs audio in)</td><td class="n">No microphone</td><td class="p">Mic, no tools</td><td class="col-brucia y-strong">Full audio suite</td></tr>
+            <tr class="hl"><td>SSTV decode to image + transmit</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes - Robot36 and more</td></tr>
+            <tr class="hl"><td>Oscilloscope + waterfall from mic</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes</td></tr>
+            <tr class="hl"><td>Session report + OSINT insights</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes</td></tr>
+            <tr class="hl"><td>Flash firmware from the companion app</td><td class="p">n/a</td><td class="n">Web / serial only</td><td class="col-brucia y-strong">Yes - over USB, in-app</td></tr>
+            <tr><td>Flash from the browser (no install)</td><td class="n">No (qFlipper desktop)</td><td class="y">Yes (web flasher)</td><td class="col-brucia y">Yes - Web Serial on this page</td></tr>
+            <tr class="hl"><td>OTA update (app + firmware, in-app notes)</td><td class="n">Desktop only</td><td class="n">No</td><td class="col-brucia y-strong">Yes - app self-update + device firmware, shows release notes</td></tr>
+            <tr><td>Full-size touch GUI + big datasets</td><td class="n">Tiny screen</td><td class="n">Tiny screen</td><td class="col-brucia y">Yes - the phone</td></tr>
+            <tr><td>Open source</td><td class="y">Yes</td><td class="y">AGPL-3.0</td><td class="col-brucia y">AGPL-3.0</td></tr>
+            <tr><td>Hardware cost</td><td class="p">~$169</td><td class="y">~$30-50</td><td class="col-brucia y">~$30-50 + a phone you own</td></tr>
+            <tr class="serialkill"><td>Never runs out of battery</td><td class="n">Own battery, dies</td><td class="n">Own battery, dies</td><td class="col-brucia y-strong">Never - charges from your phone (it's the phone that dies)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="cmp-note reveal"><b>Early development:</b> the table shows what Brucia is designed to do. Everything compiles and the phone-side logic is unit-tested, but most radio features are still being verified on real hardware - treat any capability as "builds, pending on-device verification" until checked off in the repo's TESTS.md. Brucia builds and runs on the LilyGo T-Embed CC1101 (ESP32-S3), the reference board; it also builds for ~70 other Bruce-supported boards, but those are untested. Fair notes: Flipper Zero firmware is open source and has a large community-app ecosystem; some rows (NRF24, rolling-code, GATT) also exist on Flipper add-ons or on Bruce - there the gain is the phone's compute, storage and screen, not novelty. The rows marked <b>KILLER</b> are the standouts - genuinely absent on Bruce and Flipper (and, for the microphone tools, physically impossible on a Flipper: it has no audio input).</p>
+    </section>
+
+    <section id="flash">
+      <span class="eyebrow-sm reveal">Getting started</span>
+      <h2 class="reveal">Flash in <span class="fire">three steps</span></h2>
+      <p class="lead reveal">No toolchain, no drivers - it all happens in this page.</p>
+      <div class="grid g2">
+        <div class="card reveal">
+          <h3>1 &middot; Flash the firmware</h3>
+          <ol class="steps">
+            <li>Pick your board below, then plug it in with a <b>data</b> cable.</li>
+            <li>Click <b>Install Brucia</b> and pick the serial port.</li>
+            <li>Wait for the write to finish and the device to reboot into Brucia.</li>
+          </ol>
+          <label class="field-label" for="boardSelect">Choose your board</label>
+          <select id="boardSelect" class="board-select">
+            <optgroup label="LilyGo">
+              <option value="lilygo-t-deck" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-deck.bin" data-chip="ESP32-S3">T-Deck &mdash; ESP32-S3</option>
+              <option value="lilygo-t-deck-pro" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-deck-pro.bin" data-chip="ESP32-S3">T-Deck Pro / Plus &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-s3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-s3.bin" data-chip="ESP32-S3">T-Display S3 &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-s3-mmc" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-s3-mmc.bin" data-chip="ESP32-S3">T-Display S3 (MMC) &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-S3-pro" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-S3-pro.bin" data-chip="ESP32-S3">T-Display S3 Pro &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-s3-touch" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-s3-touch.bin" data-chip="ESP32-S3">T-Display S3 Touch &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-s3-touch-mmc" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-s3-touch-mmc.bin" data-chip="ESP32-S3">T-Display S3 Touch (MMC) &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-ttgo" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-ttgo.bin" data-chip="ESP32">T-Display TTGO &mdash; ESP32</option>
+              <option value="lilygo-t-embed" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-embed.bin" data-chip="ESP32-S3">T-Embed &mdash; ESP32-S3</option>
+              <option value="lilygo-t-embed-cc1101" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-embed-cc1101.bin" data-chip="ESP32-S3" selected>T-Embed CC1101 &mdash; ESP32-S3</option>
+              <option value="lilygo-t-hmi" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-hmi.bin" data-chip="ESP32-S3">T-HMI &mdash; ESP32-S3</option>
+              <option value="lilygo-t-lora-pager" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-lora-pager.bin" data-chip="ESP32-S3">T-LoRa Pager &mdash; ESP32-S3</option>
+              <option value="lilygo-t-watch-s3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-watch-s3.bin" data-chip="ESP32-S3">T-Watch S3 &mdash; ESP32-S3</option>
+            </optgroup>
+            <optgroup label="M5Stack">
+              <option value="m5stack-cardputer" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-cardputer.bin" data-chip="ESP32-S3">Cardputer &mdash; ESP32-S3</option>
+              <option value="m5stack-core16mb" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-core16mb.bin" data-chip="ESP32">Core (16MB) &mdash; ESP32</option>
+              <option value="m5stack-core4mb" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-core4mb.bin" data-chip="ESP32">Core (4MB) &mdash; ESP32</option>
+              <option value="m5stack-core2" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-core2.bin" data-chip="ESP32">Core2 &mdash; ESP32</option>
+              <option value="m5stack-cores3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-cores3.bin" data-chip="ESP32-S3">CoreS3 &mdash; ESP32-S3</option>
+              <option value="m5stack-dinmeter" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-dinmeter.bin" data-chip="ESP32-S3">DinMeter &mdash; ESP32-S3</option>
+              <option value="m5stack-cplus1_1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-cplus1_1.bin" data-chip="ESP32">StickC Plus 1.1 &mdash; ESP32</option>
+              <option value="m5stack-sticks3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-sticks3.bin" data-chip="ESP32-S3">StickC Plus S3 &mdash; ESP32-S3</option>
+              <option value="m5stack-cplus2" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-cplus2.bin" data-chip="ESP32">StickC Plus2 &mdash; ESP32</option>
+            </optgroup>
+            <optgroup label="CYD">
+              <option value="CYD-2USB" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2USB.bin" data-chip="ESP32">CYD 2-USB &mdash; ESP32</option>
+              <option value="CYD-2432S028" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2432S028.bin" data-chip="ESP32">CYD 2432S028 &mdash; ESP32</option>
+              <option value="CYD-2432W328C" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2432W328C.bin" data-chip="ESP32">CYD 2432W328C &mdash; ESP32</option>
+              <option value="CYD-2432W328C_2" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2432W328C_2.bin" data-chip="ESP32">CYD 2432W328C (cap. S024) &mdash; ESP32</option>
+              <option value="CYD-2432W328R-or-S024R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2432W328R-or-S024R.bin" data-chip="ESP32">CYD 2432W328R / S024R &mdash; ESP32</option>
+              <option value="CYD-3248S035C" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-3248S035C.bin" data-chip="ESP32">CYD 3248S035C &mdash; ESP32</option>
+              <option value="CYD-3248S035R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-3248S035R.bin" data-chip="ESP32">CYD 3248S035R &mdash; ESP32</option>
+            </optgroup>
+            <optgroup label="Launcher">
+              <option value="LAUNCHER_CYD-2USB" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-2USB.bin" data-chip="ESP32">CYD 2-USB - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-2432S028" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-2432S028.bin" data-chip="ESP32">CYD 2432S028 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-2432W328C" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-2432W328C.bin" data-chip="ESP32">CYD 2432W328C - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-2432W328R-or-S024R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-2432W328R-or-S024R.bin" data-chip="ESP32">CYD 2432W328R / S024R - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-3248S035C" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-3248S035C.bin" data-chip="ESP32">CYD 3248S035C - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-3248S035R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-3248S035R.bin" data-chip="ESP32">CYD 3248S035R - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Marauder-Mini" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Marauder-Mini.bin" data-chip="ESP32">Marauder Mini - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Marauder-V4-V6" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Marauder-V4-V6.bin" data-chip="ESP32">Marauder V4-V6 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Marauder-v61" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Marauder-v61.bin" data-chip="ESP32">Marauder v6.1 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Marauder-v7" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Marauder-v7.bin" data-chip="ESP32">Marauder v7 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Phantom_S024R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Phantom_S024R.bin" data-chip="ESP32">Phantom S024R - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_m5stack-cplus1_1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_m5stack-cplus1_1.bin" data-chip="ESP32">StickC Plus 1.1 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_WaveSentry-R1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_WaveSentry-R1.bin" data-chip="ESP32">WaveSentry R1 - Launcher &mdash; ESP32</option>
+            </optgroup>
+            <optgroup label="Marauder">
+              <option value="Marauder-Mini" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Marauder-Mini.bin" data-chip="ESP32">Marauder Mini &mdash; ESP32</option>
+              <option value="Marauder-V4-V6" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Marauder-V4-V6.bin" data-chip="ESP32">Marauder V4-V6 &mdash; ESP32</option>
+              <option value="Marauder-v61" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Marauder-v61.bin" data-chip="ESP32">Marauder v6.1 &mdash; ESP32</option>
+              <option value="Marauder-v7" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Marauder-v7.bin" data-chip="ESP32">Marauder v7 &mdash; ESP32</option>
+            </optgroup>
+            <optgroup label="Elecrow">
+              <option value="elecrow-24B" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-elecrow-24B.bin" data-chip="ESP32">Elecrow 2.4&quot; B &mdash; ESP32</option>
+              <option value="elecrow-28B" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-elecrow-28B.bin" data-chip="ESP32">Elecrow 2.8&quot; B &mdash; ESP32</option>
+              <option value="elecrow-advance-35-s3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-elecrow-advance-35-s3.bin" data-chip="ESP32-S3">Elecrow Advance 3.5&quot; S3 &mdash; ESP32-S3</option>
+            </optgroup>
+            <optgroup label="ESP32 dev">
+              <option value="esp32-c5" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-esp32-c5.bin" data-chip="ESP32-C5">ESP32-C5 DevKit &mdash; ESP32-C5</option>
+              <option value="esp32-c5-tft" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-esp32-c5-tft.bin" data-chip="ESP32-C5">ESP32-C5 DevKit + TFT &mdash; ESP32-C5</option>
+              <option value="esp32-s3-devkitc-1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-esp32-s3-devkitc-1.bin" data-chip="ESP32-S3">ESP32-S3 DevKitC-1 &mdash; ESP32-S3</option>
+              <option value="esp32-s3-devkitc-1-psram" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-esp32-s3-devkitc-1-psram.bin" data-chip="ESP32-S3">ESP32-S3 DevKitC-1 (PSRAM) &mdash; ESP32-S3</option>
+            </optgroup>
+            <optgroup label="Other">
+              <option value="arduino-nesso-n1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-arduino-nesso-n1.bin" data-chip="ESP32-C6">Arduino Nesso N1 &mdash; ESP32-C6</option>
+              <option value="Awok-Mini" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Awok-Mini.bin" data-chip="ESP32">Awok Mini &mdash; ESP32</option>
+              <option value="Awok-Touch" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Awok-Touch.bin" data-chip="ESP32">Awok Touch &mdash; ESP32</option>
+              <option value="nm-cyd-c5" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-nm-cyd-c5.bin" data-chip="ESP32-C5">NM CYD C5 &mdash; ESP32-C5</option>
+              <option value="Phantom_S024R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Phantom_S024R.bin" data-chip="ESP32">Phantom S024R &mdash; ESP32</option>
+              <option value="reaper" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-reaper.bin" data-chip="ESP32-S3">Reaper &mdash; ESP32-S3</option>
+              <option value="smoochiee-board" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-smoochiee-board.bin" data-chip="ESP32-S3">Smoochiee Board &mdash; ESP32-S3</option>
+              <option value="WaveSentry-R1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-WaveSentry-R1.bin" data-chip="ESP32">WaveSentry R1 &mdash; ESP32</option>
+            </optgroup>
+          </select>
+          <p class="chip-line">Chip family: <span id="chipFamily">ESP32-S3</span></p>
+          <div class="flash-btn-row">
+            <esp-web-install-button id="boardInstall">
+              <button class="btn btn-primary" slot="activate">Install Brucia</button>
+              <span slot="unsupported" class="unsupported">Use desktop Chrome/Edge (or Chrome on Android) - this browser has no Web Serial.</span>
+              <span slot="not-allowed" class="unsupported">Serial access was not allowed.</span>
+            </esp-web-install-button>
+          </div>
+          <p class="warn verified-note">Only the <b>LilyGo T-Embed CC1101</b> is verified. Every other board is built from the same source but <b>untested</b> - treat it as experimental; it may not boot or some features may not work. You cannot permanently brick an ESP32 by flashing: if a write fails or the board will not start, hold <b>BOOT</b> and press <b>RESET</b> to re-enter download mode, then flash again.</p>
+          <details class="dl-modes">
+            <summary>Cannot enter download mode?</summary>
+            <ul>
+              <li><b>LilyGo T-Embed / CC1101</b> - hold the encoder (center) button and press RST, release RST, then release the encoder.</li>
+              <li><b>M5 Cardputer</b> - power off, hold G0 (the top-right key), then connect USB.</li>
+              <li><b>M5 StickC / Plus</b> - jumper GND to G0 while powering on.</li>
+              <li><b>Generic ESP32</b> - hold BOOT, plug in (or press RST), then release BOOT.</li>
+            </ul>
+          </details>
+          <p class="warn">CLI: <code>pio run -e <span id="cliEnv">lilygo-t-embed-cc1101</span> -t upload</code></p>
+        </div>
+        <div class="card reveal">
+          <h3>2 &middot; Connect the app</h3>
+          <p class="warn">Do this after step 1 has flashed Brucia and the device has rebooted into it. From then on you can update the firmware itself from inside the app - no need to re-flash from the browser.</p>
+          <ol class="steps">
+            <li>Install the app from <a href="https://github.com/1vcian/BruciaDev/releases/latest">Releases</a>.</li>
+            <li>Plug the device into the phone; tap <b>Brucia</b> on the device home.</li>
+            <li>Open the app and tap <b>Connect over USB</b>.</li>
+          </ol>
+          <p class="warn">For authorized security research and education only.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <span class="eyebrow-sm reveal">The split design</span>
+      <h2 class="reveal">The full <span class="fire">toolkit</span></h2>
+      <p class="lead reveal">The device captures and transmits; the phone brings compute, storage, GPS and a full GUI. Everything below is for authorized security research and education only.</p>
+      <div class="grid g3">
+        <article class="feat reveal"><div class="feat-num">01</div><h3>Wi-Fi</h3><p>Wardrive with GPS and WiGLE/KML export, PMKID and handshake capture cracked on the phone, deauth, station and probe sniffers, beacon spam, monitor mode with pcap export to Wireshark and PSK decrypt, and ARP MITM.</p></article>
+        <article class="feat reveal"><div class="feat-num">02</div><h3>MITM HTTPS proxy</h3><p>An on-phone intercepting proxy with its own Brucia CA, for full TLS decrypt of traffic you are authorized to inspect.</p></article>
+        <article class="feat reveal"><div class="feat-num">03</div><h3>Sub-GHz</h3><p>Capture to CSV, a rolling-code-aware decoder, .sub import and export, De Bruijn brute force, a spectrum waterfall, replay, jammer and radio config.</p></article>
+        <article class="feat reveal"><div class="feat-num">04</div><h3>NFC / RFID</h3><p>Read, clone, emulate and write NDEF, default-key dictionary attack, NDEF push, EMV card read and magic-UID cards.</p></article>
+        <article class="feat reveal"><div class="feat-num">05</div><h3>Infrared</h3><p>Universal remote catalog, signal learning, TV-B-Gone and raw replay.</p></article>
+        <article class="feat reveal"><div class="feat-num">06</div><h3>Bluetooth LE</h3><p>Scanner, an advertisement spam hub (Apple, Android, Windows, Samsung), a GATT explorer and BadBLE.</p></article>
+        <article class="feat reveal"><div class="feat-num">07</div><h3>NRF24 add-on</h3><p>With the 2.4 GHz module attached: channel scanner, Enhanced ShockBurst sniffer, jammer and MouseJack.</p></article>
+        <article class="feat reveal"><div class="feat-num">08</div><h3>Tools &amp; offload</h3><p>On-device JavaScript, iButton, clock, speaker and mic, mic spectrum and ESP-NOW, plus phone-side session reports with OSINT and insights, a live console, a file manager and a remote screen mirror.</p></article>
+        <article class="feat reveal"><div class="feat-num">09</div><h3>In-app updates</h3><p>Update the app over the air and flash new device firmware over USB, straight from inside the app.</p></article>
+        <article class="feat reveal"><div class="feat-num">10</div><h3>Audio from the mic</h3><p>Driven by the ESP microphone and speaker: live spectrum, a waterfall spectrogram, an SSTV decoder and transmitter (Robot36 and more), a tone and DTMF detector/generator, and an oscilloscope - all impossible on a device with no audio input.</p></article>
+        <article class="feat reveal"><div class="feat-num">11</div><h3>Adaptive UI</h3><p>Runtime module detection: every page adapts to the hardware actually present, so you only see the tools your device can run.</p></article>
+        <article class="feat reveal"><div class="feat-num">12</div><h3>Private and local</h3><p>Everything runs on your phone and the device. No accounts, no analytics, no telemetry; nothing is collected or stored on our servers and your captures stay on your phone. The internet is used only to download databases you choose and to check for updates.</p></article>
+      </div>
+    </section>
+
+    <section id="docs">
+      <span class="eyebrow-sm reveal">Learn</span>
+      <h2 class="reveal"><span class="fire">Documentation</span></h2>
+      <p class="lead reveal">The wiki is rendered right here on the site, themed - a single source of truth (the Markdown) you edit in one place.</p>
+      <div class="grid g2">
+        <a class="doclink reveal" href="wiki/"><span><b>Browse the wiki</b><span>All docs, themed and on-site</span></span><svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+        <a class="doclink reveal" href="wiki/#/getting-started"><span><b>Getting started</b><span>Flash, connect and first steps</span></span><svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+        <a class="doclink reveal" href="wiki/#/features"><span><b>Features</b><span>Every tool, by domain</span></span><svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+        <a class="doclink reveal" href="wiki/#/architecture"><span><b>Architecture</b><span>The split design and layers</span></span><svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+        <a class="doclink reveal" href="wiki/#/protocol"><span><b>Protocol</b><span>The companion wire protocol</span></span><svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+        <a class="doclink reveal" href="wiki/#/faq"><span><b>FAQ</b><span>Common questions</span></span><svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+        <a class="doclink reveal" href="#compare"><span><b>Flipper vs Bruce vs Brucia</b><span>Feature comparison</span></span><svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+        <a class="doclink reveal" href="https://github.com/1vcian/BruciaDev"><span><b>Source on GitHub</b><span>Firmware + Android app (AGPL-3.0)</span></span><svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+      </div>
+    </section>
+
+    <section class="support" id="support">
+      <div class="panel reveal">
+        <span class="eyebrow-sm">Support</span>
+        <h2>Free, <span class="fire">forever</span></h2>
+        <p class="lead">No ads, no paid tiers, no telemetry. Support is purely optional.</p>
+        <p class="lead" style="margin-top:-18px">Everything runs locally on your phone and the device - no accounts, no analytics, nothing is collected or stored on our servers; your captures stay on your phone. The internet is used only to download databases you choose and to check for updates (plus any export you trigger yourself, e.g. WiGLE).</p>
+        <div class="cta" style="justify-content:center">
+          <a class="btn btn-primary" href="https://github.com/sponsors/1vcian" target="_blank" rel="noopener">Sponsor on GitHub</a>
+          <a class="btn btn-ghost" href="https://buymeacoffee.com/1vcian" target="_blank" rel="noopener">Buy me a coffee</a>
+          <a class="btn btn-ghost" href="https://s.click.aliexpress.com/e/_c33qeCLh" target="_blank" rel="noopener sponsored">Buy the board (AliExpress)</a>
+        </div>
+        <p class="lead" style="margin-top:12px;font-size:.85rem;opacity:.7">Buying the board through the affiliate link also supports the project.</p>
+        <div class="crypto">
+          <div class="crypto-item">
+            <img src="img/btc-qr.png" alt="Bitcoin donation QR" loading="lazy" />
+            <div>
+              <p class="c-name">Bitcoin</p>
+              <code id="addr-btc">bc1qee8a06x886ng8ce6qy84l6u6x54jnjsesgqym7</code>
+              <button class="copybtn" type="button" data-addr="addr-btc">Copy address</button>
+            </div>
+          </div>
+          <div class="crypto-item">
+            <img src="img/xmr-qr.png" alt="Monero donation QR" loading="lazy" />
+            <div>
+              <p class="c-name">Monero</p>
+              <code id="addr-xmr">46qDyafRkn1at3E2GMwuESBeqzpt74xE8S2kjPe35EUyKiS57Ho7cLB1vD2zH4hPmjYcYzWWxSSLZAYB5Hp1yDFrKnPWkR7</code>
+              <button class="copybtn" type="button" data-addr="addr-xmr">Copy address</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span class="foot-brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path fill="#FF6D1A" d="M20 15C20 19.25 17.38 21.12 15.36 21.75C15.27 21.78 15.2 21.78 15.13 21.76C14.84 21.69 14.69 21.31 14.9 21.01C15.78 19.75 16.8 17.82 16.8 16C16.8 14.05 15.16 11.75 13.87 10.33C13.58 10 13.07 10.22 13.05 10.65C13 12.1 12.77 14.04 11.78 15.56C11.62 15.81 11.29 15.83 11.11 15.6C10.8 15.21 10.49 14.73 10.18 14.35C10.02 14.14 9.72 14.14 9.52 14.32C8.78 15.03 7.73 16.13 7.73 17.5C7.73 18.43 8.09 19.41 8.5 20.19C8.7 20.58 8.4 21.04 8.02 20.96C7.98 20.95 7.94 20.94 7.9 20.91C6.11 19.98 4 18.08 4 15C4 11.85 8.31 7.5 9.96 3.38C10.22 2.73 11.02 2.42 11.57 2.85C14.94 5.41 20 10.38 20 15Z"/></svg>
+      Brucia
+    </span><br />
+    Brucia started from <a href="https://github.com/BruceDevices/firmware">Bruce</a> and is complementary to its
+    <a href="https://github.com/BruceDevices/App">official app</a> - AGPL-3.0.<br />
+    <a href="https://github.com/1vcian/BruciaDev">github.com/1vcian/BruciaDev</a>
+  </footer>
+
+  <script>
+    /* ---------- sticky header state ---------- */
+    (function () {
+      var header = document.getElementById("siteHeader");
+      if (!header) return;
+      function onScroll() {
+        if (window.scrollY > 12) header.classList.add("scrolled");
+        else header.classList.remove("scrolled");
+      }
+      window.addEventListener("scroll", onScroll, { passive: true });
+      onScroll();
+    })();
+
+    /* ---------- scroll reveal ---------- */
+    (function () {
+      var els = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+      if (!els.length) return;
+      var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduce || !("IntersectionObserver" in window)) {
+        els.forEach(function (el) { el.classList.add("in"); });
+        return;
+      }
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+        });
+      }, { rootMargin: "0px 0px -8% 0px", threshold: 0.12 });
+      els.forEach(function (el) { io.observe(el); });
+    })();
+
+    /* ---------- three.js ember field (refined GPU particles) ---------- */
+    (function () {
+      if (typeof THREE === "undefined") return;
+      var canvas = document.getElementById("embers");
+      if (!canvas) return;
+      var hero = canvas.parentElement;
+      var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      var renderer;
+      try {
+        renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: false, powerPreference: "low-power" });
+      } catch (e) { return; } // no WebGL -> CSS glow remains as the fallback
+      if (!renderer) return;
+
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      renderer.setPixelRatio(dpr);
+      renderer.setClearColor(0x000000, 0);
+
+      var scene = new THREE.Scene();
+      var camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+      camera.position.z = 40;
+
+      // fewer particles on small screens for performance
+      var small = Math.min(window.innerWidth, window.innerHeight) < 680;
+      var COUNT = small ? 650 : 1300;
+
+      var BAND = 50;      // horizontal spawn band half-width-ish
+      var HEIGHT = 56;    // vertical travel range
+
+      var positions = new Float32Array(COUNT * 3);
+      var aSeed = new Float32Array(COUNT);
+      var aSpeed = new Float32Array(COUNT);
+      var aScale = new Float32Array(COUNT);
+      for (var i = 0; i < COUNT; i++) {
+        // bias spawn toward center-bottom so it reads as a fire column
+        var x = (Math.random() - 0.5) * 2;
+        x = Math.sign(x) * Math.pow(Math.abs(x), 1.5) * BAND;
+        positions[i * 3] = x;
+        positions[i * 3 + 1] = 0;
+        positions[i * 3 + 2] = (Math.random() - 0.5) * 26;
+        aSeed[i] = Math.random();
+        aSpeed[i] = 0.5 + Math.random() * 1.1;
+        aScale[i] = 0.4 + Math.random() * 1.5;
+      }
+
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute("aSeed", new THREE.BufferAttribute(aSeed, 1));
+      geo.setAttribute("aSpeed", new THREE.BufferAttribute(aSpeed, 1));
+      geo.setAttribute("aScale", new THREE.BufferAttribute(aScale, 1));
+
+      var uniforms = {
+        u_time: { value: 0 },
+        u_pr: { value: dpr },
+        u_height: { value: HEIGHT },
+        u_size: { value: 7.5 },
+        u_amber: { value: new THREE.Color(0xffc24d) },
+        u_ember: { value: new THREE.Color(0xff6d1a) },
+        u_deep: { value: new THREE.Color(0xe23e00) }
+      };
+
+      var vert = [
+        "uniform float u_time;",
+        "uniform float u_pr;",
+        "uniform float u_height;",
+        "uniform float u_size;",
+        "attribute float aSeed;",
+        "attribute float aSpeed;",
+        "attribute float aScale;",
+        "varying float vAlpha;",
+        "varying float vLife;",
+        "void main(){",
+        "  float life = fract(u_time * aSpeed * 0.06 + aSeed);",
+        "  vLife = life;",
+        "  vec3 pos = position;",
+        "  pos.y = -u_height * 0.5 + life * u_height;",
+        "  float sway = sin(u_time * 0.7 + aSeed * 42.0) * (1.1 + aScale * 0.9);",
+        "  pos.x = pos.x * (1.0 - life * 0.33) + sway;",   // taper + drift -> flame-ish
+        "  vec4 mv = modelViewMatrix * vec4(pos, 1.0);",
+        "  gl_Position = projectionMatrix * mv;",
+        "  float flick = 0.72 + 0.28 * sin(u_time * 7.0 + aSeed * 50.0);",
+        "  gl_PointSize = u_size * aScale * flick * u_pr * (42.0 / -mv.z);",
+        "  float fadeIn = smoothstep(0.0, 0.07, life);",
+        "  float fadeOut = 1.0 - smoothstep(0.55, 1.0, life);",
+        "  vAlpha = fadeIn * fadeOut;",
+        "}"
+      ].join("\n");
+
+      var frag = [
+        "precision mediump float;",
+        "uniform vec3 u_amber;",
+        "uniform vec3 u_ember;",
+        "uniform vec3 u_deep;",
+        "varying float vAlpha;",
+        "varying float vLife;",
+        "void main(){",
+        "  vec2 uv = gl_PointCoord - 0.5;",
+        "  float d = length(uv);",
+        "  if (d > 0.5) discard;",
+        "  float glow = smoothstep(0.5, 0.0, d);",
+        "  glow = pow(glow, 1.7);",
+        "  vec3 col = mix(u_amber, u_ember, smoothstep(0.0, 0.5, vLife));",
+        "  col = mix(col, u_deep, smoothstep(0.5, 1.0, vLife));",
+        "  gl_FragColor = vec4(col, glow * vAlpha * 0.9);",
+        "}"
+      ].join("\n");
+
+      var mat = new THREE.ShaderMaterial({
+        uniforms: uniforms,
+        vertexShader: vert,
+        fragmentShader: frag,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      });
+
+      var points = new THREE.Points(geo, mat);
+      scene.add(points);
+
+      function resize() {
+        var w = hero.clientWidth, h = hero.clientHeight;
+        if (!w || !h) return;
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      var raf = null, running = false, start = performance.now();
+      function frame(now) {
+        uniforms.u_time.value = (now - start) / 1000;
+        renderer.render(scene, camera);
+        raf = requestAnimationFrame(frame);
+      }
+      function play() {
+        if (running) return;
+        running = true;
+        start = performance.now() - uniforms.u_time.value * 1000;
+        raf = requestAnimationFrame(frame);
+      }
+      function stop() {
+        running = false;
+        if (raf) { cancelAnimationFrame(raf); raf = null; }
+      }
+
+      if (reduce) {
+        // static, tasteful single frame - no motion
+        uniforms.u_time.value = 8.0;
+        renderer.render(scene, camera);
+      } else {
+        document.addEventListener("visibilitychange", function () {
+          if (document.hidden) stop(); else play();
+        });
+        play();
+      }
+    })();
+
+    // Copy crypto donation addresses to the clipboard.
+    document.querySelectorAll(".copybtn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var el = document.getElementById(btn.getAttribute("data-addr"));
+        if (!el) return;
+        var text = el.textContent.trim();
+        var done = function () {
+          var old = btn.textContent;
+          btn.textContent = "Copied";
+          setTimeout(function () { btn.textContent = old; }, 1500);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(function () {});
+        } else {
+          var r = document.createRange(); r.selectNode(el);
+          var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+          try { document.execCommand("copy"); done(); } catch (e) {}
+          s.removeAllRanges();
+        }
+      });
+    });
+
+    /* ---------- multi-board web flasher ---------- */
+    (function () {
+      var sel = document.getElementById("boardSelect");
+      var btn = document.getElementById("boardInstall");
+      var chip = document.getElementById("chipFamily");
+      var cliEnv = document.getElementById("cliEnv");
+      if (!sel || !btn) return;
+      var currentUrl = null;
+      function apply() {
+        var opt = sel.options[sel.selectedIndex];
+        if (!opt) return;
+        var bin = opt.getAttribute("data-bin");
+        var cf = opt.getAttribute("data-chip");
+        if (chip) chip.textContent = cf;
+        if (cliEnv) cliEnv.textContent = opt.value;
+        var manifest = {
+          name: "Brucia",
+          version: "latest",
+          new_install_prompt_erase: true,
+          builds: [{ chipFamily: cf, parts: [{ path: bin, offset: 0 }] }]
+        };
+        var blob = new Blob([JSON.stringify(manifest)], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        btn.setAttribute("manifest", url);
+        if (currentUrl) URL.revokeObjectURL(currentUrl);
+        currentUrl = url;
+      }
+      sel.addEventListener("change", apply);
+      apply();
+    })();
+  </script>
+</body>
+</html>

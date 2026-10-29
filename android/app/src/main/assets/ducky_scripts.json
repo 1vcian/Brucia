@@ -1,0 +1,86 @@
+[
+    {
+        "name": "Hello World",
+        "category": "Basics",
+        "description": "Types a single greeting line. Useful as a first smoke test of keystroke injection.",
+        "os": "any",
+        "script": "DELAY 1000\nSTRING Hello, World!\nENTER"
+    },
+    {
+        "name": "Open URL (Windows)",
+        "category": "Browser",
+        "description": "Opens the Run dialog and launches the default browser to a URL.",
+        "os": "windows",
+        "script": "DELAY 1000\nGUI r\nDELAY 500\nSTRING https://example.com\nENTER"
+    },
+    {
+        "name": "Notepad Note (Windows)",
+        "category": "Productivity",
+        "description": "Opens Notepad via the Run dialog and types a short reminder note.",
+        "os": "windows",
+        "script": "DELAY 1000\nGUI r\nDELAY 500\nSTRING notepad\nENTER\nDELAY 1000\nSTRING This machine was tested with authorization.\nENTER"
+    },
+    {
+        "name": "Lock Workstation (Windows)",
+        "category": "Security",
+        "description": "Locks the current Windows session using the Win+L shortcut.",
+        "os": "windows",
+        "script": "DELAY 500\nGUI l"
+    },
+    {
+        "name": "Show IP Config (Windows)",
+        "category": "Diagnostics",
+        "description": "Opens a command prompt and prints the network configuration.",
+        "os": "windows",
+        "script": "DELAY 1000\nGUI r\nDELAY 500\nSTRING cmd\nENTER\nDELAY 1000\nSTRING ipconfig /all\nENTER"
+    },
+    {
+        "name": "System Info (Windows)",
+        "category": "Diagnostics",
+        "description": "Opens a command prompt and shows basic system information.",
+        "os": "windows",
+        "script": "DELAY 1000\nGUI r\nDELAY 500\nSTRING cmd\nENTER\nDELAY 1000\nSTRING systeminfo\nENTER"
+    },
+    {
+        "name": "Spotlight Note (macOS)",
+        "category": "Productivity",
+        "description": "Uses Spotlight to open the Notes app and types a short note.",
+        "os": "macos",
+        "script": "DELAY 1000\nGUI SPACE\nDELAY 500\nSTRING Notes\nENTER\nDELAY 1500\nGUI n\nDELAY 500\nSTRING Authorized test note.\nENTER"
+    },
+    {
+        "name": "Open URL (macOS)",
+        "category": "Browser",
+        "description": "Uses Spotlight to open Safari and navigate to a URL.",
+        "os": "macos",
+        "script": "DELAY 1000\nGUI SPACE\nDELAY 500\nSTRING Safari\nENTER\nDELAY 1500\nGUI l\nDELAY 500\nSTRING https://example.com\nENTER"
+    },
+    {
+        "name": "Lock Screen (macOS)",
+        "category": "Security",
+        "description": "Locks the macOS screen using the Control+Command+Q shortcut.",
+        "os": "macos",
+        "script": "DELAY 500\nCTRL GUI q"
+    },
+    {
+        "name": "Terminal Echo (Linux)",
+        "category": "Basics",
+        "description": "Opens a terminal via the activities search and echoes a message.",
+        "os": "linux",
+        "script": "DELAY 1000\nGUI\nDELAY 500\nSTRING terminal\nENTER\nDELAY 1500\nSTRING echo Authorized test on this host\nENTER"
+    },
+    {
+        "name": "Show IP Address (Linux)",
+        "category": "Diagnostics",
+        "description": "Opens a terminal and prints the host network addresses.",
+        "os": "linux",
+        "script": "DELAY 1000\nGUI\nDELAY 500\nSTRING terminal\nENTER\nDELAY 1500\nSTRING ip addr\nENTER"
+    },
+    {
+        "name": "Close Window",
+        "category": "Basics",
+        "description": "Closes the active window using the common Alt+F4 shortcut on Windows.",
+        "os": "windows",
+        "script": "DELAY 500\nALT F4"
+    }
+]

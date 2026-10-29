@@ -1,0 +1,10 @@
+REM Ducky / BadUSB starter payload (DuckyScript).
+REM Runs as an HID keyboard. Edit, then push to the device or run from BadUSB.
+REM NOTE: BadUSB is disabled while the phone is connected over USB.
+DELAY 1000
+GUI r
+DELAY 500
+STRING notepad
+ENTER
+DELAY 1000
+STRING Hello from Brucia

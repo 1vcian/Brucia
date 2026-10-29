@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-files-path name="exports" path="." />
+    <files-path name="internal" path="." />
+    <!-- Temp copies written for an "Open with..." external viewer (editor / pulled files). -->
+    <cache-path name="cache" path="." />
+    <external-cache-path name="external_cache" path="." />
+</paths>

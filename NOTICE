@@ -1,0 +1,28 @@
+Brucia
+======
+
+Brucia is a derivative work of the Bruce firmware
+(https://github.com/BruceDevices/firmware), licensed under the GNU Affero
+General Public License v3.0 (AGPL-3.0). Brucia is distributed under the same
+license.
+
+Copyright of the original Bruce firmware remains with the Bruce authors and the
+authors of its third-party components; see LICENSE and
+THIRD_PARTY.md, which are preserved unchanged.
+
+What Brucia adds / changes relative to Bruce
+--------------------------------------------
+- A "companion" mode: the device streams data to, and is driven by, a native
+  Android companion app that performs the heavy computation, storage and GUI.
+- A transport-agnostic wire protocol (USB-CDC first, then Wi-Fi and BLE) defined
+  in proto/.
+- The native Android application under android/ (also AGPL-3.0).
+- A browser-based firmware flasher (GitHub Pages) under docs/.
+- Product/brand strings renamed from "Bruce" to "Brucia". Upstream copyright and
+  license headers are preserved; only user-facing product naming is changed.
+- platformio.ini: FastLED pinned to an exact version (3.10.3) for reproducible
+  builds; the upstream caret range resolves to a version that does not compile
+  with the current toolchain.
+
+This NOTICE summarizes modifications as encouraged by the AGPL. It is not a
+grant of additional rights and does not supersede the license texts.
