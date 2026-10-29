@@ -333,7 +333,11 @@ PN532::PN532(CONNECTION_TYPE connection_type) {
         );
 }
 
-bool PN532::begin() {
+bool PN532::begin() { return beginInternal(false); }
+
+bool PN532::probe() { return beginInternal(true); }
+
+bool PN532::beginInternal(bool quiet) {
     TwoWire *Wire = nullptr;
 #ifdef M5STICK
     if (_connection_type == CONNECTION_TYPE::I2C_SPI) {
@@ -362,28 +366,22 @@ bool PN532::begin() {
         // Adafruit_PN532 always talks to the global `Wire` - can't work if
         // bus_HAL remapped i2c_bus to Wire1 to avoid colliding with sys_i2c.
         PN532_DBG("[PN532] begin: FAILED - I2C bus conflicts with system I2C bus\n");
-        displayError("I2C bus conflicts with system I2C bus", true);
+        if (!quiet) displayError("I2C bus conflicts with system I2C bus", true);
         return false;
     }
 
-    bool i2c_check = true;
-    if (_use_i2c && Wire != nullptr) {
-        Wire->beginTransmission(PN532_I2C_ADDRESS);
-        int error = Wire->endTransmission();
-        i2c_check = (error == 0);
-    }
-    PN532_DBG("[PN532] begin: i2c_check=%d (addr 0x%02X)\n", (int)i2c_check, PN532_I2C_ADDRESS);
-
-    nfc.begin();
+    if (!nfc.begin()) return false;
 
     uint32_t versiondata = nfc.getFirmwareVersion();
     PN532_DBG(
         "[PN532] begin: versiondata=0x%08lX result=%d\n",
         (unsigned long)versiondata,
-        (int)(i2c_check || versiondata)
+        (int)(versiondata != 0)
     );
 
-    return i2c_check || versiondata;
+    // An ACK at 0x24 alone is not an identified PN532; in SPI mode the old
+    // i2c_check default was true even with an empty socket.
+    return versiondata != 0;
 }
 
 int PN532::read(int cardBaudRate) {

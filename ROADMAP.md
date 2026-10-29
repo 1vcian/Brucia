@@ -4,6 +4,16 @@ Brucia pairs cheap ESP32 hardware as a radio/sensor front-end with a phone as th
 compute, storage and GUI. This file tracks what works, how to test it on real
 hardware, and where help is wanted.
 
+Research-platform proposals are tracked separately in
+[Research platform ideas](docs/RESEARCH_IDEAS.md): portable experiment bundles,
+hardware diagnostics, reproducible recipes, synchronized evidence and offline replay.
+These are proposals; completing the functional audit remains the immediate priority.
+
+**Current scope:** stabilize and verify existing features before adding new ones.
+The ideas backlog also records protocol expansion, optional modules, pentest tools,
+signal generators and creative/community extensions. Check existing implementations
+first; several proposed audio tools already exist and need validation, not duplication.
+
 Contributions are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md) and
 [ARCHITECTURE.md](ARCHITECTURE.md). Items tagged **[help wanted]** are good first
 tasks; **[priority]** is what matters most right now.

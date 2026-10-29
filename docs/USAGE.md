@@ -8,9 +8,9 @@ explicitly permitted to test.
 
 Pick one:
 
-- **Browser** (easiest): open https://1vcian.me/BruciaDev/ in Chrome or Edge (desktop,
-  or Chrome on Android via USB-OTG), plug the LilyGo T-Embed CC1101 with a **data**
+- **Browser** (easiest): open https://1vcian.me/BruciaDev/ in desktop Chrome or Edge, plug the LilyGo T-Embed CC1101 with a **data**
   USB-C cable, click *Connect & Flash*.
+- **Android app**: use Device → Updates with the board connected over USB-OTG.
 - **PlatformIO**: `pio run -e lilygo-t-embed-cc1101 -t upload`.
 
 ## 2. Install the app
@@ -97,3 +97,11 @@ already app-driven (above).
 The ESP32 captures and transmits; the phone does the heavy computation, storage,
 GUI, GPS and large datasets. See `docs/COMPARISON.md` for how this compares to
 Flipper Zero and plain Bruce.
+
+## Standalone WebUI identity
+
+New configurations use `BruciaNet` as the access-point name; the inherited default
+AP password remains `brucenet`. Existing saved Wi-Fi settings are retained. In
+station mode the WebUI advertises `http://brucia.local` when mDNS is available;
+the device also displays its IP address. About and CLI diagnostics identify the
+firmware as Brucia and retain the Bruce/AGPL attribution.

@@ -42,6 +42,8 @@ public:
     // Life Cycle
     /////////////////////////////////////////////////////////////////////////////////////
     bool begin();
+    // Identify the reader without opening an interactive error dialog.
+    bool probe();
 
     /////////////////////////////////////////////////////////////////////////////////////
     // Operations
@@ -59,6 +61,7 @@ public:
     bool mifareKeyCheck(const uint8_t (*keyList)[6], size_t count, std::vector<MifareKeyHit> &out) override;
 
 private:
+    bool beginInternal(bool quiet);
     bool _use_i2c;
     CONNECTION_TYPE _connection_type;
 

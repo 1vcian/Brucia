@@ -8,9 +8,9 @@ import org.junit.Test
 
 class CapsTest {
 
-    @Test fun absentCapsTreatedAsAllPresent() {
+    @Test fun absentCapsDoNotInventHardware() {
         val c = DeviceCaps.fromJson(null)
-        assertTrue(c.cc1101 && c.nfc && c.nrf24 && c.fm && c.ir && c.mic && c.speaker && c.wifi && c.ble && c.lora && c.eth)
+        assertFalse(c.cc1101 || c.nfc || c.nrf24 || c.fm || c.ir || c.mic || c.speaker || c.wifi || c.ble || c.lora || c.eth)
     }
 
     @Test fun parsesExplicitFlags() {
@@ -29,14 +29,48 @@ class CapsTest {
         assertFalse(c.ble)
     }
 
-    @Test fun missingKeyInPresentObjectDefaultsTrue() {
-        // caps object present but only nrf24 reported -> the rest stay available.
+    @Test fun missingKeyInPresentObjectStaysUnavailable() {
+        // Reporting one module must not enable unrelated, unreported modules.
         val c = DeviceCaps.fromJson(JSONObject().put("nrf24", false))
         assertFalse(c.nrf24)
-        assertTrue(c.wifi)
+        assertFalse(c.wifi)
+        assertFalse(c.nfc)
+        assertFalse(c.lora)
+        assertFalse(c.eth)
+    }
+
+    @Test fun malformedFlagsDoNotEnableModules() {
+        val c = DeviceCaps.fromJson(JSONObject()
+            .put("cc1101", "true").put("nfc", 1).put("lora", JSONObject.NULL)
+            .put("eth", JSONObject()).put("speaker", true))
+        assertFalse(c.cc1101)
+        assertFalse(c.nfc)
+        assertFalse(c.lora)
+        assertFalse(c.eth)
+        assertTrue(c.speaker)
+    }
+
+    @Test fun gatesCompositeScreenStreamsByConfirmedHardware() {
+        val c = DeviceCaps.fromJson(JSONObject().put("wifi", true).put("ble", true))
+        assertTrue(c.allowsStream("wifi.ap"))
+        assertTrue(c.allowsStream("wifi.monitor"))
+        assertTrue(c.allowsStream("ble.scan"))
+        assertFalse(c.allowsStream("subghz.spectrum"))
+        assertFalse(c.allowsStream("subghz.raw"))
+        assertFalse(c.allowsStream("mic.pcm"))
+        assertFalse(c.allowsStream("wifi.unknown"))
+        assertTrue(c.allows(null))
+        assertFalse(c.allows("unknown-module"))
+        assertFalse(DeviceCaps().allowsStream("wifi.ap"))
+    }
+
+    @Test fun nfcDoesNotImplyAnLfReaderOrOneWireInterface() {
+        val c = DeviceCaps.fromJson(JSONObject().put("nfc", true))
         assertTrue(c.nfc)
-        assertTrue(c.lora)
-        assertTrue(c.eth)
+        assertFalse(c.lfRfid)
+        assertFalse(c.ibutton)
+        assertFalse(c.allows("lf_rfid"))
+        assertFalse(c.allows("ibutton"))
     }
 
     @Test fun parsesLoraAndEthFlags() {

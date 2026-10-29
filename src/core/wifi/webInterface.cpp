@@ -1,3 +1,4 @@
+#include <brucia_identity.h>
 #include "webInterface.h"
 #include "core/display.h"    // using displayRedStripe as error msg
 #include "core/mykeyboard.h" // using keyboard when calling rename
@@ -25,7 +26,7 @@ const int default_webserverporthttp = 80;
 IPAddress AP_GATEWAY(172, 0, 0, 1); // Gateway
 
 AsyncWebServer *server = nullptr; // initialise webserver
-const char *host = "bruce";
+const char *host = BRUCIA_MDNS_HOST;
 String uploadFolder = "";
 static bool mdnsRunning = false;
 
@@ -292,7 +293,7 @@ void drawWebUiScreen(bool mode_ap) {
     }
 
     tft.setCursor(padX, currentY);
-    if (mdnsRunning) tft.print("Url: http://bruce.local");
+    if (mdnsRunning) tft.print("Url: http://" BRUCIA_MDNS_HOST ".local");
     currentY += LH * FP + 6;
 
     tft.setCursor(padX, currentY);

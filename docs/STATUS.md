@@ -5,6 +5,11 @@ plan - for what is next, see [ROADMAP.md](../ROADMAP.md). For the design split a
 feature set, see the [README](../README.md), the [comparison](COMPARISON.md) and the
 [protocol](../proto/PROTOCOL.md).
 
+The [2026-10-29 audit](AUDIT_2026-10-29.md) takes precedence for current test
+evidence. Historical hardware claims below must not be read as a complete
+acceptance test of the refactored firmware. Module gating is documented in
+[Hardware capabilities](HARDWARE_CAPABILITIES.md).
+
 States used below:
 
 - **Implemented** - built and exercised (unit/known-answer tested, or validated on the real device where noted).
@@ -26,7 +31,7 @@ otherwise it is build-verified only.
 | Runtime module detection | Implemented | CAPS reports real caps (cc1101/nfc/nrf24/fm/ir/mic/speaker) via I2C/SPI probes + board macros; the app gates each page. FM reports absent on this board. |
 | Mode auto-negotiation | Implemented | `companion` command + headless entry; the app switches a device at its menu into companion mode on connect. |
 | Home dashboard + bottom nav + status bar | Implemented | Hardware-validated. |
-| In-app updates (app OTA + device FW over USB) | Implemented, not hardware-tested | App self-update from GitHub Releases; esptool-over-USB device flash is build-verified, on-hardware pending. |
+| In-app updates (app OTA + device FW over USB) | Partial validation | TESTS.md records a successful firmware flash of 0.8.12 on hardware. App install/resume and current-version flashing still require re-verification. |
 | Fire theme + flame branding + animated splash | Implemented | Hardware-validated. |
 
 ### Wi-Fi

@@ -4,38 +4,69 @@ import org.json.JSONObject
 
 /**
  * Hardware capabilities reported in the CAPS handshake under d.caps. Each flag says whether
- * the corresponding module/radio is present. When d.caps is absent (older firmware) everything
- * defaults to true so no tool is hidden; a present object with a missing key also defaults true.
+ * the corresponding module/radio is present. Only an explicit true enables a module. Missing/invalid flags (including older
+ * firmware without d.caps) remain unavailable until the device reports support.
  */
 data class DeviceCaps(
-    val cc1101: Boolean = true,
-    val nfc: Boolean = true,
-    val nrf24: Boolean = true,
-    val fm: Boolean = true,
-    val ir: Boolean = true,
-    val mic: Boolean = true,
-    val speaker: Boolean = true,
-    val wifi: Boolean = true,
-    val ble: Boolean = true,
-    val lora: Boolean = true,
-    val eth: Boolean = true,
+    val cc1101: Boolean = false,
+    val nfc: Boolean = false,
+    val nrf24: Boolean = false,
+    val fm: Boolean = false,
+    val ir: Boolean = false,
+    val mic: Boolean = false,
+    val speaker: Boolean = false,
+    val wifi: Boolean = false,
+    val ble: Boolean = false,
+    val lora: Boolean = false,
+    val eth: Boolean = false,
+    val lfRfid: Boolean = false,
+    val ibutton: Boolean = false,
 ) {
+    /** Unknown capability names must not bypass hardware gating. */
+    fun allows(capability: String?): Boolean = when (capability) {
+        null -> true
+        "cc1101" -> cc1101
+        "nfc" -> nfc
+        "nrf24" -> nrf24
+        "fm" -> fm
+        "ir" -> ir
+        "mic" -> mic
+        "speaker" -> speaker
+        "wifi" -> wifi
+        "ble" -> ble
+        "lora" -> lora
+        "eth" -> eth
+        "lf_rfid" -> lfRfid
+        "ibutton" -> ibutton
+        else -> false
+    }
+
+    fun allowsStream(stream: String): Boolean = when (stream) {
+        "wifi.ap", "wifi.sta", "wifi.probe", "wifi.monitor" -> wifi
+        "ble.scan" -> ble
+        "subghz.raw", "subghz.spectrum" -> cc1101
+        "mic.pcm", "mic.spectrum" -> mic
+        else -> false
+    }
+
     companion object {
-        /** Parse the d.caps object; null (older firmware) -> all capabilities present. */
+        /** Parse the d.caps object; null (older firmware) -> no confirmed capabilities. */
         fun fromJson(obj: JSONObject?): DeviceCaps {
             if (obj == null) return DeviceCaps()
             return DeviceCaps(
-                cc1101 = obj.optBoolean("cc1101", true),
-                nfc = obj.optBoolean("nfc", true),
-                nrf24 = obj.optBoolean("nrf24", true),
-                fm = obj.optBoolean("fm", true),
-                ir = obj.optBoolean("ir", true),
-                mic = obj.optBoolean("mic", true),
-                speaker = obj.optBoolean("speaker", true),
-                wifi = obj.optBoolean("wifi", true),
-                ble = obj.optBoolean("ble", true),
-                lora = obj.optBoolean("lora", true),
-                eth = obj.optBoolean("eth", true),
+                cc1101 = obj.opt("cc1101") == true,
+                nfc = obj.opt("nfc") == true,
+                nrf24 = obj.opt("nrf24") == true,
+                fm = obj.opt("fm") == true,
+                ir = obj.opt("ir") == true,
+                mic = obj.opt("mic") == true,
+                speaker = obj.opt("speaker") == true,
+                wifi = obj.opt("wifi") == true,
+                ble = obj.opt("ble") == true,
+                lora = obj.opt("lora") == true,
+                eth = obj.opt("eth") == true,
+                lfRfid = obj.opt("lf_rfid") == true,
+                ibutton = obj.opt("ibutton") == true,
             )
         }
     }

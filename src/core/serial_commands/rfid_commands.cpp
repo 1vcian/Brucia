@@ -1,3 +1,4 @@
+#include <brucia_identity.h>
 #include "rfid_commands.h"
 #if !defined(LITE_VERSION)
 #include "modules/rfid/ST25R3916.h"
@@ -263,7 +264,7 @@ uint32_t rfidNdefCallback(cmd *c) {
         value += cmd.getArgument(i).getValue();
     }
     type.toLowerCase();
-    if (value.length() == 0) value = (type == "text") ? "Bruce" : "https://bruce.computer";
+    if (value.length() == 0) value = (type == "text") ? BRUCIA_PRODUCT_NAME : BRUCIA_PROJECT_URL;
 
     if (!_ensureRfid()) return false;
 

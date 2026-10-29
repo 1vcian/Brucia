@@ -246,3 +246,19 @@ Third-party libraries used by the app (each under its own license):
   Google's proprietary SDK (Android Software Development Kit License). Not bundled in source; linked
   at build time.
 - Test-only: **JUnit** (`junit:junit`, EPL-1.0) and **org.json** (`org.json:json`, JSON License).
+
+## Additional local BLE compatibility patches
+
+`patch_library_conflicts.py` gives the independent ChameleonUltra, Amiibolink and
+PN532BLE scan-callback classes distinct names to avoid cross-library C++ ODR
+violations under LTO. It also fixes the ChameleonUltra/Amiibolink callback signature
+for NimBLE 2.x while retaining the 1.x signature behind the existing version guard.
+Tests compile and exercise virtual callback dispatch for both interfaces.
+Upstream authorship and licenses are unchanged. Patches are applied only to the
+active PlatformIO environment's dependency directory.
+
+The build bootstrap also normalizes malformed owner-qualified Arduino dependency
+names in cached library manifests (`h2zero/NimBLE-Arduino` and
+`whywilson/ESP-PN532-UART`) to their installed canonical names. This changes
+build metadata only; source authorship and licenses are retained. NimBLE is pinned
+to 2.5.2 in both full and light configurations.

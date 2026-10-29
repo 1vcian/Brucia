@@ -1,6 +1,8 @@
 #ifndef __BRUCE_CONFIG_H__
 #define __BRUCE_CONFIG_H__
 
+#include <brucia_identity.h>
+
 #include "theme.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -65,7 +67,7 @@ public:
     // Wifi
     Credential webUI = {"admin", "bruce"};
     std::vector<String> webUISessions = {}; // FIFO queue of session tokens
-    WiFiCredential wifiAp = {"BruceNet", "brucenet"};
+    WiFiCredential wifiAp = {BRUCIA_AP_SSID, "brucenet"};
     std::map<String, String> wifi = {};
     std::set<String> evilWifiNames = {};
     String wifiMAC = ""; //@IncursioHack
@@ -98,9 +100,9 @@ public:
     std::vector<String> disabledMenus = {};
 
     std::vector<QrCodeEntry> qrCodes = {
-        {"Bruce AP",   "WIFI:T:WPA;S:BruceNet;P:brucenet;;"},
-        {"Bruce Wiki", "https://github.com/pr3y/Bruce/wiki"},
-        {"Bruce Site", "https://bruce.computer"            },
+        {"Brucia AP", "WIFI:T:WPA;S:" BRUCIA_AP_SSID ";P:brucenet;;"},
+        {"Brucia guide", BRUCIA_GUIDE_URL},
+        {"Bruce upstream", "https://bruce.computer"},
         {"Rickroll",   "https://youtu.be/dQw4w9WgXcQ"      }
     };
 

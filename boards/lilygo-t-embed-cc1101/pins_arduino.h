@@ -13,8 +13,8 @@
 #define SPI_SCK_PIN 11
 static const uint8_t SS = SPI_SS_PIN;
 static const uint8_t MOSI = SPI_MOSI_PIN;
-static const uint8_t SCK = SPI_MISO_PIN;
-static const uint8_t MISO = SPI_SCK_PIN;
+static const uint8_t SCK = SPI_SCK_PIN;
+static const uint8_t MISO = SPI_MISO_PIN;
 
 // Set Main I2C Bus
 #define GROVE_SDA 8
@@ -187,8 +187,8 @@ static const uint8_t RX = SERIAL_RX;
 #define SPI_SCK_PIN 40
 static const uint8_t SS = SPI_SS_PIN;
 static const uint8_t MOSI = SPI_MOSI_PIN;
-static const uint8_t SCK = SPI_MISO_PIN;
-static const uint8_t MISO = SPI_SCK_PIN;
+static const uint8_t SCK = SPI_SCK_PIN;
+static const uint8_t MISO = SPI_MISO_PIN;
 
 // Set Main I2C Bus
 #define GROVE_SDA 44

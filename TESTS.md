@@ -1,13 +1,22 @@
 # Brucia - test checklist
 
-On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Android app, after
-flashing the latest firmware from the phone. Flash from the phone only (no PC-USB). Tick each item.
+On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Android app, Record the app version, firmware version, commit and result for each run.
+Use phone flashing to validate the in-app updater; PC flashing is also available for
+development and recovery. Historical checks below are not proof for the current build.
 
-## Confident these work (verified live this session or very low risk)
+## Current audit
+
+See [2026-10-29 audit](docs/AUDIT_2026-10-29.md) for the current evidence and
+remaining release gates. Checkmarks below are historical records, not proof that
+the current working tree passes every hardware test. The detailed
+[interactive-control checklist](docs/APP_CONTROLS_CHECKLIST.md) still needs to be
+completed against the rebuilt firmware before recording a new demo.
+
+## Historical verification (retest on the current build)
 - [x] Cross-board firmware builds: lilygo-t-embed-cc1101 (primary) AND m5stack-core4mb (LITE,
       no RGB LED) both compile. A LITE break - companion.cpp used BruceConfig::ledColor/ledBright/
       ledEffect, which only exist under HAS_RGB_LED - is fixed (those caps fields and led_set are now
-      guarded). CI builds ~70 boards; the LITE + non-LED path was the class that was failing.
+      guarded). The manual full-matrix workflow covers configured boards; the LITE + non-LED path was the class that was failing.
 - [x] Phone flashing over USB (esptool-stub path): 0.8.12 flashed on real hardware; boot shows the
       flashed version. Re-confirm the flash log reaches **verified OK (MD5 matches)**.
 - [x] USB auto-connect / companion HELLO + CAPS; Device info shows board/chip/fw/battery.

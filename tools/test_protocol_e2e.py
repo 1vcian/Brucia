@@ -134,6 +134,7 @@ def main():
     import base64 as _b
     send(CMD, 6, {"cmd": "fs_read /BrucePCAP/test.bin"})
     buf = bytearray()
+    file_ok = False
     deadline = time.time() + 3
     while time.time() < deadline:
         m = recv()
@@ -142,9 +143,10 @@ def main():
         if m.get("t") == DATA and m["d"].get("stream") == "file":
             buf += _b.b64decode(m["d"]["chunk"])
         elif m.get("t") == ACK and "size" in m.get("d", {}):
-            checks.append(("fs_read pull", len(buf) == m["d"]["size"] and buf.startswith(b"BRUCIA-E2E-FILE-")))
+            file_ok = len(buf) == m["d"]["size"] and buf.startswith(b"BRUCIA-E2E-FILE-")
             break
 
+    checks.append(("fs_read pull", file_ok))
     stop.set()
     ser.close()
 

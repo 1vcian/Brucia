@@ -1,3 +1,4 @@
+#include <brucia_identity.h>
 #include "utils.h"
 #include "core/wifi/wifi_common.h" //to return MAC addr
 #include "scrollableTextArea.h"
@@ -159,8 +160,8 @@ void updateTimeStr(struct tm timeInfo) {
 void showDeviceInfo() {
     ScrollableTextArea area = ScrollableTextArea("DEVICE INFO");
 
-    area.addLine("Brucia " + String(BRUCE_VERSION));
-    area.addLine("based on Bruce");
+    area.addLine(BRUCIA_PRODUCT_NAME " " + String(BRUCE_VERSION));
+    area.addLine(BRUCIA_UPSTREAM_CREDIT);
     area.addLine("EEPROM size: " + String(EEPROMSIZE));
     area.addLine("");
     area.addLine("[MEMORY]");

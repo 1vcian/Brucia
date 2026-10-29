@@ -1,3 +1,4 @@
+#include <brucia_identity.h>
 #include "util_commands.h"
 #include "core/main_menu.h"
 #include "core/sd_functions.h"
@@ -106,9 +107,10 @@ uint32_t freeCallback(cmd *c) {
 }
 
 uint32_t infoCallback(cmd *c) {
-    serialDevice->print("Bruce v");
+    serialDevice->print(BRUCIA_PRODUCT_NAME " v");
     serialDevice->println(BRUCE_VERSION);
     serialDevice->println(GIT_COMMIT_HASH);
+    serialDevice->println(BRUCIA_UPSTREAM_CREDIT);
     serialDevice->print("SDK: ");
     serialDevice->println(ESP.getSdkVersion());
     serialDevice->println("MAC addr: " + String(WiFi.macAddress()));
@@ -134,7 +136,7 @@ uint32_t infoCallback(cmd *c) {
 }
 
 uint32_t helpCallback(cmd *c) {
-    serialDevice->print("Bruce v");
+    serialDevice->print(BRUCIA_PRODUCT_NAME " v");
     serialDevice->print(BRUCE_VERSION);
     serialDevice->print("\nThese shell commands are defined internally.\n");
 

@@ -1,5 +1,6 @@
 package app.brucia.protocol
 
+import app.brucia.BuildConfig
 import app.brucia.transport.Transport
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
@@ -15,13 +16,18 @@ class CompanionClient(private val transport: Transport) {
 
     // Monotonic request ids so in-flight commands can be correlated with their
     // ACK/DATA responses. Starts high to avoid clashing with the fixed ids below.
-    private val idCounter = AtomicInteger(100)
+    private companion object {
+        // Keep IDs unique across reconnects, so a late local failure cannot resolve
+        // a command belonging to a newer transport session.
+        val idCounter = AtomicInteger(100)
+    }
 
     /** Next unique request id for a command that needs its response correlated. */
     fun nextId(): Int = idCounter.incrementAndGet()
 
     // --- outgoing ---
 
+    @Synchronized
     private fun send(kind: Int, id: Int, body: JSONObject) {
         val env = JSONObject()
             .put("v", PROTO_VERSION)
@@ -30,6 +36,7 @@ class CompanionClient(private val transport: Transport) {
             .put("d", body)
         val payload = env.toString().toByteArray(Charsets.UTF_8)
         val len = payload.size
+        require(len <= 8192) { "Command exceeds firmware frame limit (8192 bytes)" }
         val head = byteArrayOf(
             (len and 0xFF).toByte(),
             ((len ushr 8) and 0xFF).toByte(),
@@ -39,7 +46,7 @@ class CompanionClient(private val transport: Transport) {
         transport.write(head + payload)
     }
 
-    fun hello() = send(Kind.HELLO, 1, JSONObject().put("app", "Brucia").put("appVersion", "0.1.0"))
+    fun hello() = send(Kind.HELLO, 1, JSONObject().put("app", "Brucia").put("appVersion", BuildConfig.VERSION_NAME))
     fun ping(id: Int = 2) = send(Kind.PING, id, JSONObject())
     /** Send a command; returns the id used so the caller can match the response. */
     fun cmd(command: String, id: Int = nextId()): Int {
@@ -63,10 +70,11 @@ class CompanionClient(private val transport: Transport) {
 
     /** Blocking read of one envelope; null if nothing complete within [timeoutMs]. */
     fun readMessage(timeoutMs: Int): JSONObject? {
-        val deadline = System.currentTimeMillis() + timeoutMs
+        val deadline = System.nanoTime() + timeoutMs.coerceAtLeast(0) * 1_000_000L
         while (true) {
             extractFrame()?.let { return it }
-            val remaining = (deadline - System.currentTimeMillis())
+            if (!transport.isOpen) return null
+            val remaining = (deadline - System.nanoTime() + 999_999L) / 1_000_000L
             if (remaining <= 0) return extractFrame()
             val n = transport.read(chunk, remaining.coerceIn(1, timeoutMs.toLong()).toInt())
             if (n > 0) buffer += chunk.copyOf(n)

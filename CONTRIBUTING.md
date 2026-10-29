@@ -26,9 +26,14 @@ for where Brucia hooks into Bruce.
 PlatformIO with the pioarduino core (Python 3.11 venv recommended):
 
 ```sh
-pio run -e lilygo-t-embed-cc1101            # build
+python3 tools/build_firmware.py -e lilygo-t-embed-cc1101  # bootstrap + build
 pio run -e lilygo-t-embed-cc1101 -t upload  # flash
 ```
+
+The build wrapper installs direct dependencies first and fixes malformed Arduino
+NimBLE/PN532-UART dependency declarations before recursive resolution. This avoids redundant
+registry requests and makes subsequent builds work with an existing dependency
+cache. `pio run` remains usable after that bootstrap.
 
 A merged, flashable image is produced at
 `.pio/build/lilygo-t-embed-cc1101/firmware.factory.bin` (used by the web flasher).
@@ -41,6 +46,17 @@ cd android
 ./gradlew :app:assembleDebug       # debug APK
 ./gradlew :app:recordPaparazziDebug  # re-record UI snapshots after a UI change
 ```
+
+WebUI assets are gzip-compressed locally without a network minifier. Validate
+resource generation and the firmware's host-testable code with:
+
+```sh
+python3 -m unittest discover -s tools -p test_web_resources.py
+python3 tools/test_firmware_framing.py
+python3 tools/test_firmware_codec.py
+```
+
+Companion contributions should follow the [service ownership map](src/companion/README.md).
 
 ### Release signing
 Release builds are signed from a keystore that is **never committed**. Create

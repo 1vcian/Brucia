@@ -1,3 +1,4 @@
+#include <brucia_identity.h>
 #include "brucia_flame.h"
 #include "core/main_menu.h"
 #include <globals.h>
@@ -393,7 +394,7 @@ void boot_screen() {
     drawBruciaFlame(cx - BRUCIA_FLAME_OUTER_W / 2, 2);
     tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
     tft.setTextSize(FM);
-    tft.drawCentreString("Brucia", cx, BRUCIA_FLAME_OUTER_H + 6, 1);
+    tft.drawCentreString(BRUCIA_PRODUCT_NAME, cx, BRUCIA_FLAME_OUTER_H + 6, 1);
     tft.setTextSize(FP);
     tft.drawCentreString(BRUCE_VERSION, cx, BRUCIA_FLAME_OUTER_H + 26, 1);
     tft.setTextSize(FM);
@@ -469,7 +470,7 @@ void boot_screen_anim() {
                 tft.fillScreen(bruceConfig.bgColor);
                 tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
                 tft.setTextSize(FM);
-                tft.drawCentreString("Brucia", tftWidth / 2, tftHeight / 2 + 30, 1);
+                tft.drawCentreString(BRUCIA_PRODUCT_NAME, tftWidth / 2, tftHeight / 2 + 30, 1);
                 tft.setTextSize(FP);
                 tft.drawCentreString(BRUCE_VERSION, tftWidth / 2, tftHeight / 2 + 50, 1);
                 animCleared = true;
@@ -484,7 +485,7 @@ void boot_screen_anim() {
             if (flick > 1.0f) flick = 1.0f;
             tft.setTextColor(bruciaBlend565(bruceConfig.priColor, bruceConfig.secColor, flick), bruceConfig.bgColor);
             tft.setTextSize(FM);
-            tft.drawCentreString("Brucia", tftWidth / 2, tftHeight / 2 + 30, 1);
+            tft.drawCentreString(BRUCIA_PRODUCT_NAME, tftWidth / 2, tftHeight / 2 + 30, 1);
             delay(45);
         }
 #endif

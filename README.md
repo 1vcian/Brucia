@@ -44,7 +44,8 @@ radio/sensor front-end, a native Android app as the compute, storage and GUI.
 > explicitly permitted to test.
 
 > **Project status - early development, honest disclaimer.** Brucia is young and moving fast.
-> Everything here **compiles**, and the phone-side pure logic (WPA/PMKID cracking, OOK/rolling-code
+> Build and test evidence is recorded in the [current audit](docs/AUDIT_2026-10-29.md);
+> it does not establish hardware coverage for every supported board. Phone-side pure logic (WPA/PMKID cracking, OOK/rolling-code
 > decode, MIFARE key checks, OUI lookup, protocol, ...) has **unit-test coverage**. But most of the
 > **radio/hardware features have not yet been verified end-to-end on real hardware** - they are
 > implemented, not proven. Treat any capability as "builds, pending on-device verification" until

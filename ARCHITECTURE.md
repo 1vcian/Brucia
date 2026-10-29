@@ -38,6 +38,13 @@ feature logic   (wardrive, crack, ir, ... - never touches the wire)
 
 ## Firmware side (`src/companion/`)
 
+The companion is split into independent translation units: session lifecycle,
+framing/responses, capability probing, command dispatch and feature services.
+Each service owns its command matching and private state; the dispatcher retains
+the legacy CLI fallback. See the [module ownership map](src/companion/README.md)
+and [hardware availability contract](docs/HARDWARE_CAPABILITIES.md).
+
+
 - `companionModeUSB()` takes exclusive ownership of the USB-CDC serial, shows a
   themed status screen, and runs the message loop.
 - **HELLO -> CAPS**: reports board, chip, modules and transports.
@@ -54,7 +61,7 @@ feature logic   (wardrive, crack, ir, ... - never touches the wire)
 - **protocol/framing** - mirrors `proto/PROTOCOL.md`.
 - **feature packages** - `wardrive`, `wifi` (WPA/PMKID crypto), `nfc`, `subghz`, `ir`,
   `ble`, `badusb`, `wordlist`, `report` - the heavy work the ESP cannot do.
-- **ui/** - Jetpack Compose, flame theme; screens are verified with Paparazzi.
+- **ui/** - Jetpack Compose, flame theme; Paparazzi covers representative fixture layouts; real screen interactions need on-device tests.
 - **Storage** - Room DB, bundled assets (OUI table, IR catalog, dictionaries), and
   phone storage for rockyou-scale wordlists.
 

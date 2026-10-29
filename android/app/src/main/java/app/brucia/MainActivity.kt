@@ -1245,9 +1245,9 @@ private val toolCategories = listOf(
         ToolEntry(4, "BadUSB", "Run Ducky keystroke-injection scripts"),
     )),
     ToolCategory("Spam", "Spam", listOf(
-        ToolEntry(49, "Spam BLE", "Bluetooth pairing-popup floods (iOS/Android/Windows/Samsung)"),
-        ToolEntry(50, "Spam Wi-Fi", "Beacon flood: broadcast fake Wi-Fi networks"),
-        ToolEntry(51, "Spam NFC", "NFC NDEF push (tap-to-send)"),
+        ToolEntry(49, "Spam BLE", "Bluetooth pairing-popup floods (iOS/Android/Windows/Samsung)", cap = "ble"),
+        ToolEntry(50, "Spam Wi-Fi", "Beacon flood: broadcast fake Wi-Fi networks", cap = "wifi"),
+        ToolEntry(51, "Spam NFC", "NFC NDEF push (tap-to-send)", cap = "nfc"),
     )),
     ToolCategory("Intercept", "MITM", listOf(
         ToolEntry(18, "MITM", "On-phone HTTPS intercepting proxy - authorized use only"),
@@ -1370,27 +1370,13 @@ private fun capForTab(tab: Int): String? =
     toolCategories.firstNotNullOfOrNull { c -> c.tools.firstOrNull { it.tab == tab }?.cap }
 
 /** Whether [caps] permits a tool needing capability [cap] (null cap is always allowed). */
-private fun capsAllow(caps: DeviceCaps, cap: String?): Boolean = when (cap) {
-    null -> true
-    "wifi" -> caps.wifi
-    "cc1101" -> caps.cc1101
-    "nfc" -> caps.nfc
-    "ble" -> caps.ble
-    "ir" -> caps.ir
-    "nrf24" -> caps.nrf24
-    "fm" -> caps.fm
-    "lora" -> caps.lora
-    "eth" -> caps.eth
-    "mic" -> caps.mic
-    "speaker" -> caps.speaker
-    else -> true
-}
+private fun capsAllow(caps: DeviceCaps, cap: String?): Boolean = caps.allows(cap)
 
 /** User-facing "this device has no <module>" message for a missing capability. */
 private fun capMessage(cap: String?): String = when (cap) {
     "wifi" -> "This device has no Wi-Fi radio."
     "cc1101" -> "This device has no CC1101 sub-GHz module."
-    "nfc" -> "This device has no PN532 NFC module."
+    "nfc" -> "No supported NFC reader was detected or reported by this firmware."
     "ble" -> "This device has no BLE radio."
     "ir" -> "This device has no IR module."
     "nrf24" -> "This device has no NRF24L01 module."
@@ -1406,7 +1392,7 @@ private fun capMessage(cap: String?): String = when (cap) {
 private fun capModuleName(cap: String?): String = when (cap) {
     "wifi" -> "Wi-Fi"
     "cc1101" -> "CC1101"
-    "nfc" -> "PN532 (NFC)"
+    "nfc" -> "NFC reader"
     "ble" -> "BLE"
     "ir" -> "IR LED"
     "nrf24" -> "NRF24L01"
@@ -4799,9 +4785,12 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         ) {
             Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
                 Text("iButton", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
+                if (connected && caps?.ibutton != true) {
+                    Text("No confirmed iButton interface", color = cs.onSurfaceVariant)
+                }
                 Spacer(Modifier.height(8.dp))
                 Button(
-                    enabled = connected,
+                    enabled = connected && caps?.ibutton == true,
                     onClick = { vm.ibuttonRead() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Read") }
@@ -4816,7 +4805,7 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
                     )
                     Button(
-                        enabled = connected && hex.isNotBlank(),
+                        enabled = connected && caps?.ibutton == true && hex.isNotBlank(),
                         onClick = { vm.ibuttonWrite(hex.trim()) },
                     ) { Text("Write") }
                 }
@@ -5862,18 +5851,18 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 )
                 Spacer(Modifier.height(10.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.nfcAmiibo("emulate") }) { Text("Amiibo emulate") }
-                    OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.nfcAmiibo("dump") }) { Text("Amiibo dump") }
+                    OutlinedButton(enabled = false, modifier = Modifier.weight(1f), onClick = { vm.nfcAmiibo("emulate") }) { Text("Amiibo emulate") }
+                    OutlinedButton(enabled = false, modifier = Modifier.weight(1f), onClick = { vm.nfcAmiibo("dump") }) { Text("Amiibo dump") }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.mifareNested() }) { Text("Nested") }
-                    OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.mifareMfkey32() }) { Text("mfkey32") }
+                    OutlinedButton(enabled = false, modifier = Modifier.weight(1f), onClick = { vm.mifareNested() }) { Text("Nested") }
+                    OutlinedButton(enabled = false, modifier = Modifier.weight(1f), onClick = { vm.mifareMfkey32() }) { Text("mfkey32") }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.srixRead() }) { Text("SRIX read") }
-                    OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.rfid125Read() }) { Text("125kHz read") }
+                    OutlinedButton(enabled = connected && device?.caps?.lfRfid == true, modifier = Modifier.weight(1f), onClick = { vm.rfid125Read() }) { Text("125kHz read") }
                 }
                 if (advStatus.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
@@ -7725,7 +7714,7 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
             Spacer(Modifier.height(12.dp))
         }
         Text(
-            "Brucia 0.1.0 - AGPL-3.0 - authorized research only - github.com/1vcian/BruciaDev",
+            "Brucia ${BuildConfig.VERSION_NAME} - AGPL-3.0 - authorized research only - github.com/1vcian/BruciaDev",
             style = MaterialTheme.typography.bodySmall,
             color = cs.onSurfaceVariant,
         )

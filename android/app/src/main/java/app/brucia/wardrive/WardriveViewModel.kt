@@ -477,6 +477,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val pullBufs = java.util.concurrent.ConcurrentHashMap<Int, java.io.ByteArrayOutputStream>()
     // Device streams currently subscribed (wifi.ap / subghz.raw / ble.scan), so we can
     // unsubscribe them on disconnect and stop the device radios.
+    private val pendingStreamIds = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val activeStreams = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     /** Access points, newest first, backed by Room (survives app restarts). */
@@ -593,11 +594,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
         // Periodic ping so the battery % stays fresh while connected.
         pingJob = viewModelScope.launch(Dispatchers.IO) {
-            var id = 1000
             while (isActive) {
                 kotlinx.coroutines.delay(8000)
                 if (transport?.isOpen != true) break
-                client?.ping(id++)
+                c.ping(c.nextId())
                 // Also re-fetch CAPS so a theme change made ON THE DEVICE propagates to the app: CAPS
                 // carries the live device UI color (theme), and handling it rebuilds _device, which
                 // re-themes the app accent. The device always wins; app-side theme_set updates _device
@@ -749,6 +749,23 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Empty the command log. */
     fun clearCommandLog() { _commandLog.value = emptyList() }
 
+    /** Convert local send failures into the same completion path as firmware ERR. */
+    private fun transmitCommand(c: CompanionClient, command: String, id: Int) {
+        try {
+            check(client === c && transport?.isOpen == true) { "USB connection is closed or changed" }
+            if (command.startsWith("rfid125_read"))
+                check(_device.value?.caps?.lfRfid == true) { "No confirmed 125 kHz reader" }
+            if (command.startsWith("ibutton_"))
+                check(_device.value?.caps?.ibutton == true) { "No confirmed iButton interface" }
+            c.cmd(command, id)
+            check(transport?.isOpen == true) { "USB write failed" }
+        } catch (e: Exception) {
+            val reply = JSONObject().put("t", Kind.ERR).put("id", id)
+                .put("d", JSONObject().put("msg", e.message ?: "Unable to send command"))
+            app.brucia.protocol.routeCommandReply(reply, pendingAcks, pendingJsonAcks)
+        }
+    }
+
     /** Fire-and-forget command on IO; optionally route its ACK to a one-shot callback. */
     private fun dispatchCmd(cmd: String, cb: ((Boolean, String) -> Unit)? = null) {
         val c = client ?: return
@@ -759,7 +776,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 logCmdDone(logId, ok, out)
                 cb?.invoke(ok, out)
             }
-            c.cmd(cmd, id)
+            transmitCommand(c, cmd, id)
         }
     }
 
@@ -773,7 +790,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 logCmdDone(logId, ok, d?.toString() ?: "")
                 cb(ok, d)
             }
-            c.cmd(cmd, id)
+            transmitCommand(c, cmd, id)
         }
     }
 
@@ -791,7 +808,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     val id = c.nextId()
                     pendingAcks[id] = { ok, out -> if (cont.isActive) cont.resumeWith(Result.success(ok to out)) }
                     cont.invokeOnCancellation { pendingAcks.remove(id) }
-                    c.cmd(cmd, id)
+                    transmitCommand(c, cmd, id)
                 }
             } ?: (false to "No response from the device.")
             logCmdDone(logId, res.first, res.second)
@@ -912,22 +929,12 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     try { buf?.write(Base64.decode(d.optString("chunk"), Base64.DEFAULT)) } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "file-pull chunk write", e) }
                 }
             }
-            Kind.ACK -> {
-                val id = msg.optInt("id", -1)
-                val d = msg.optJSONObject("d")
-                val ok = d?.optBoolean("ok") ?: false
-                val out = d?.optString("out") ?: ""
+            Kind.ACK, Kind.ERR -> {
+                val out = app.brucia.protocol.routeCommandReply(msg, pendingAcks, pendingJsonAcks)
                 if (out.isNotEmpty()) {
                     val lines = out.split("\n").filter { it.isNotBlank() }
                     _console.value = (_console.value + lines).takeLast(500)
                 }
-                // Match by id; fall back to the only pending callback if the id is unknown.
-                val cb = pendingAcks.remove(id)
-                    ?: pendingAcks.keys.singleOrNull()?.let { pendingAcks.remove(it) }
-                cb?.invoke(ok, out)
-                val jcb = pendingJsonAcks.remove(id)
-                    ?: pendingJsonAcks.keys.singleOrNull()?.let { pendingJsonAcks.remove(it) }
-                jcb?.invoke(ok, d)
             }
             Kind.CAPS -> {
                 val d = msg.optJSONObject("d") ?: return
@@ -1989,20 +1996,56 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { savedDao.delete(id) }
     }
 
-    /** Subscribe/unsubscribe a device stream on IO, tracking it so disconnect can stop it. */
-    private fun setStream(stream: String, on: Boolean) {
-        val c = client ?: return
-        if (on) activeStreams.add(stream) else activeStreams.remove(stream)
-        refreshConnectionNotification()
-        viewModelScope.launch(Dispatchers.IO) { c.sub(stream, on) }
+    private fun updateStreamState(stream: String, on: Boolean) {
+        when (stream) {
+            "wifi.ap" -> _wardriving.value = on
+            "wifi.sta" -> _sniffing.value = on
+            "wifi.probe" -> _probing.value = on
+            "wifi.monitor" -> _monitoring.value = on
+            "subghz.spectrum" -> _spectrumActive.value = on
+            "subghz.raw" -> if (!on) stopRfCapture()
+            "mic.pcm" -> {
+                _micPcmActive.value = on
+                if (!on) _recording.value = false
+            }
+        }
     }
 
-    /** [setStream] variant that carries optional channel/bssid monitor parameters. */
-    private fun setStream(stream: String, on: Boolean, channel: Int?, bssid: String?) {
-        val c = client ?: return
+    /** Gate every entry point, including composite screens, then correlate the SUB result. */
+    private fun setStream(stream: String, on: Boolean, channel: Int? = null, bssid: String? = null): Boolean {
+        val c = client
+        if (c == null || (on && _device.value?.caps?.allowsStream(stream) != true)) {
+            updateStreamState(stream, false)
+            return false
+        }
+        // Publish the request before scheduling IO. A fast failure must not be
+        // overwritten later by an optimistic running=true assignment in a caller.
+        updateStreamState(stream, on)
+        val id = c.nextId()
+        pendingStreamIds[stream] = id
         if (on) activeStreams.add(stream) else activeStreams.remove(stream)
         refreshConnectionNotification()
-        viewModelScope.launch(Dispatchers.IO) { c.sub(stream, on, channel, bssid) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val logId = logCmdStart("SUB $stream ${if (on) "on" else "off"}")
+            pendingAcks[id] = { ok, out ->
+                logCmdDone(logId, ok, out)
+                if (pendingStreamIds.remove(stream, id) && !ok) {
+                    activeStreams.remove(stream)
+                    updateStreamState(stream, false)
+                    if (stream == "mic.pcm") _micPcmStatus.value = out.ifBlank { "Microphone stream failed" }
+                    refreshConnectionNotification()
+                }
+            }
+            try {
+                c.sub(stream, on, channel, bssid, id)
+                if (transport?.isOpen != true) pendingAcks.remove(id)?.invoke(false, "USB write failed")
+            } catch (e: Exception) {
+                pendingAcks.remove(id)?.invoke(false, e.message ?: "Unable to set stream")
+            }
+            delay(8000)
+            pendingAcks.remove(id)?.invoke(false, "No stream acknowledgement from the device")
+        }
+        return true
     }
 
     // --- "Monitor my network" (raw 802.11 frames via the "wifi.monitor" stream) ---
@@ -2014,7 +2057,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         monitorIndex = 0
         _monitorFrames.value = emptyList()
         setStream("wifi.monitor", true, channel, bssid)
-        _monitoring.value = true
     }
 
     fun stopMonitor() {
@@ -2059,7 +2101,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setWardriving(on: Boolean) {
         setStream("wifi.ap", on)
-        _wardriving.value = on
     }
 
     fun setSubghz(on: Boolean) {
@@ -2070,7 +2111,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     fun startRfCapture() {
         synchronized(rfCaptureRows) { rfCaptureRows.clear() }
         _rfCapture.value = RfCaptureState(true, 0)
-        setSubghz(true)
+        setStream("subghz.raw", true)
     }
 
     /** Stop recording. Keeps the captured rows so they can still be exported. */
@@ -2181,7 +2222,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // --- Station sniffer (nearby Wi-Fi clients via the "wifi.sta" stream) ---
     fun startStationSniff() {
         setStream("wifi.sta", true)
-        _sniffing.value = true
     }
 
     fun stopStationSniff() {
@@ -2219,7 +2259,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         lastSpectrumFreq = Long.MIN_VALUE
         _spectrum.value = null
         _spectrumHistory.value = emptyList()
-        _spectrumActive.value = true
         setStream("subghz.spectrum", true)
     }
 
@@ -2257,7 +2296,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // --- Wi-Fi probe-request profiling (the "wifi.probe" stream) ---
     fun startProbeSniff() {
         setStream("wifi.probe", true)
-        _probing.value = true
     }
 
     fun stopProbeSniff() {
@@ -2916,7 +2954,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 val id = c.nextId()
                 pendingAcks[id] = { ok, out -> if (cont.isActive) cont.resumeWith(Result.success(ok to out)) }
                 cont.invokeOnCancellation { pendingAcks.remove(id) }
-                c.cmd(cmd, id)
+                transmitCommand(c, cmd, id)
             }
         } ?: (false to "No response from the device.")
     }
@@ -3331,6 +3369,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         activeStreams.clear()
+        pendingStreamIds.clear()
         pendingAcks.clear()
         pendingJsonAcks.clear()
         pullBufs.clear()
@@ -3493,7 +3532,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 onDone?.invoke(loaded)
             }
-            c.cmd("fs_read $path", id)
+            transmitCommand(c, "fs_read $path", id)
         }
     }
 
@@ -3530,7 +3569,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     withContext(Dispatchers.Main) { onDone(okWritten, msg) }
                 }
             }
-            c.cmd("fs_read $path", id)
+            transmitCommand(c, "fs_read $path", id)
         }
     }
 
@@ -3547,7 +3586,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 val bytes = if (ok) buf.toByteArray() else null
                 viewModelScope.launch(Dispatchers.Main) { onBytes(bytes) }
             }
-            c.cmd("fs_read $path", id)
+            transmitCommand(c, "fs_read $path", id)
         }
     }
 
@@ -3559,7 +3598,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 val id = c.nextId()
                 pendingAcks[id] = { ok, out -> if (cont.isActive) cont.resumeWith(Result.success(ok to out)) }
                 cont.invokeOnCancellation { pendingAcks.remove(id) }
-                c.cmd(cmd, id)
+                transmitCommand(c, cmd, id)
             }
         } ?: (false to "No response from the device.")
     }
@@ -4198,13 +4237,12 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Subscribe the device-mic PCM stream (caps.mic). Safe to call repeatedly. */
     fun startMicPcm() {
         if (client == null) return
-        if (_device.value?.caps?.mic == false) return
+        if (_device.value?.caps?.mic != true) return
         // Spam loops and the live mic.pcm stream contend for the single-threaded companion loop on
         // current firmware (spam running => mic.pcm never serviced => audio tools show nothing), so
         // opening an audio tool auto-stops any running spam.
         stopAllBurstLoops(silent = false)
         setStream("mic.pcm", true)
-        _micPcmActive.value = true
     }
 
     /** Unsubscribe the device-mic PCM stream. */

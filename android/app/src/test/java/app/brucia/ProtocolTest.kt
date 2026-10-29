@@ -14,16 +14,18 @@ import org.junit.Test
 private class FakeTransport : Transport {
     val inbound = ArrayDeque<ByteArray>()
     val written = ArrayList<Byte>()
-    override val isOpen = true
+    override var isOpen = true
+    var readCalls = 0
     override fun write(bytes: ByteArray) { written.addAll(bytes.toList()) }
     override fun read(buf: ByteArray, timeoutMs: Int): Int {
+        readCalls++
         val chunk = inbound.removeFirstOrNull() ?: return 0
         val n = minOf(chunk.size, buf.size)
         for (i in 0 until n) buf[i] = chunk[i]
         if (n < chunk.size) inbound.addFirst(chunk.copyOfRange(n, chunk.size))
         return n
     }
-    override fun close() {}
+    override fun close() { isOpen = false }
 }
 
 private fun frame(obj: JSONObject): ByteArray {
@@ -52,6 +54,59 @@ class ProtocolTest {
         val obj = JSONObject(String(bytes, 4, len, Charsets.UTF_8))
         assertEquals(Kind.HELLO, obj.getInt("t"))
         assertEquals("Brucia", obj.getJSONObject("d").getString("app"))
+        assertEquals(BuildConfig.VERSION_NAME, obj.getJSONObject("d").getString("appVersion"))
+    }
+
+    @Test fun oversizedCommandIsRejectedBeforeWriting() {
+        val t = FakeTransport()
+        try {
+            CompanionClient(t).cmd("x".repeat(8192))
+            org.junit.Assert.fail("Expected oversized frame rejection")
+        } catch (_: IllegalArgumentException) {
+            assertTrue(t.written.isEmpty())
+        }
+    }
+
+    @Test fun subscriptionAckCannotCompletePendingCommand() {
+        var completed = false
+        val pending = mutableMapOf<Int, (Boolean, String) -> Unit>(101 to { _, _ -> completed = true })
+        app.brucia.protocol.routeCommandReply(
+            envelope(Kind.ACK, 4, JSONObject().put("ok", true)), pending, mutableMapOf())
+        assertTrue(pending.containsKey(101))
+        org.junit.Assert.assertFalse(completed)
+        app.brucia.protocol.routeCommandReply(
+            envelope(Kind.ACK, 101, JSONObject().put("ok", true)), pending, mutableMapOf())
+        assertTrue(completed)
+        assertTrue(pending.isEmpty())
+    }
+
+    @Test fun firmwareErrorCompletesOnlyMatchingRequest() {
+        var result: Pair<Boolean, String>? = null
+        var jsonOk: Boolean? = null
+        val pending = mutableMapOf<Int, (Boolean, String) -> Unit>(101 to { ok, out -> result = ok to out })
+        val pendingJson = mutableMapOf<Int, (Boolean, JSONObject?) -> Unit>(102 to { ok, _ -> jsonOk = ok })
+        app.brucia.protocol.routeCommandReply(
+            envelope(Kind.ERR, 101, JSONObject().put("code", 501).put("msg", "Not supported")), pending, pendingJson)
+        assertEquals(false to "Not supported", result)
+        assertTrue(pendingJson.containsKey(102))
+        assertNull(jsonOk)
+        app.brucia.protocol.routeCommandReply(
+            envelope(Kind.ERR, 102, JSONObject().put("msg", "Missing module")), pending, pendingJson)
+        assertEquals(false, jsonOk)
+        assertTrue(pendingJson.isEmpty())
+    }
+
+    @Test fun reconnectDoesNotReuseAnInFlightRequestId() {
+        val first = CompanionClient(FakeTransport()).nextId()
+        val second = CompanionClient(FakeTransport()).nextId()
+        assertTrue(second > first)
+    }
+
+    @Test fun closedTransportDoesNotSpinOnReads() {
+        val t = FakeTransport()
+        t.close()
+        assertNull(CompanionClient(t).readMessage(5000))
+        assertEquals(0, t.readCalls)
     }
 
     @Test fun readsOneFrame() {

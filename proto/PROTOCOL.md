@@ -31,7 +31,7 @@ feature logic            (wardriving, ir, rf, ... — never touches the wire)
   implemented today as `Serial`), Wi-Fi TCP/WebSocket, BLE (commands / light
   data only).
 - **Framing**: each frame = `uint32 length` (little-endian, payload bytes) +
-  `payload`. Simple, transport-agnostic, resync by reading length. Max frame
+  `payload`. Transport-agnostic; the length prefix is not a self-synchronizing marker. Max frame
   size is `COMPANION_MAX_FRAME` (8192 bytes) on the device side; larger
   payloads are rejected. (COBS may be added later for self-synchronizing
   streams.)
@@ -85,12 +85,26 @@ Sent in reply to `HELLO`:
   "modules":    ["wifi", "ble", "rf", "ir"],
   "transports": ["usb"],
   "mtu":        8192,
-  "battery":    87
+  "battery":    87,
+  "caps": {
+    "wifi": true, "ble": true, "cc1101": true, "nfc": true,
+    "ir": true, "mic": true, "speaker": true,
+    "nrf24": false, "fm": false, "lora": false, "eth": false
+  }
 }
 ```
 
-`modules`/`transports` are currently a static list (TODO: detect modules at
-runtime). `mtu` is `COMPANION_MAX_FRAME`. `battery` is the device's current
+`caps` is the per-module availability map. The app enables a module-dependent
+feature only for a literal JSON `true`; omitted, null or malformed flags leave it
+unavailable. Firmware without `caps` needs an update before these tools are enabled.
+Fixed onboard interfaces use board definitions; addressable radios/readers are
+probed at companion startup and cached to avoid disturbing active shared buses.
+Changing attached hardware requires restarting the device. Availability does not
+prove end-to-end operation: see [hardware capabilities](../docs/HARDWARE_CAPABILITIES.md).
+
+`modules` is a coarse compatibility list; it must not replace `caps` when gating
+tools. `transports` currently contains only `usb`. `mtu` is
+`COMPANION_MAX_FRAME`. `battery` is the device's current
 battery percentage (`getBattery()`), included so the app can show it right
 after connecting without waiting for the first `PING`/`PONG`.
 

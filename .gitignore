@@ -26,3 +26,10 @@ lib/mquickjs_headers/mqjs_stdlib_generator.exe
 .github/agents/Bruce-AI.agent.md
 .idea
 .ai
+
+# Python tool/test caches
+__pycache__/
+*.py[cod]
+
+# Legacy WebUI build intermediates
+/embedded_resources/web_interface/*.gz

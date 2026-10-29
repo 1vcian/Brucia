@@ -24,6 +24,7 @@ class UsbTransport(
     override val isOpen: Boolean
         get() = !broken && try { port.isOpen } catch (_: Exception) { false }
 
+    @Synchronized
     override fun write(bytes: ByteArray) {
         try {
             port.write(bytes, WRITE_TIMEOUT_MS)

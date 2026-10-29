@@ -3,27 +3,38 @@ name: build
 on:
   push:
     branches: [ main ]
-    paths: [ 'src/**', 'android/**', 'platformio.ini', 'boards/**' ]
+  pull_request:
+    branches: [ main, dev ]
   workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   firmware:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [lilygo-t-embed-cc1101, m5stack-core4mb, m5stack-cardputer]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.2.0
       - name: Build firmware
-        run: pio run -e lilygo-t-embed-cc1101
-      - name: Stage merged image for the web flasher
-        run: cp .pio/build/lilygo-t-embed-cc1101/firmware.factory.bin docs/firmware/brucia-t-embed-cc1101.bin
+        run: python3 tools/build_firmware.py -e ${{ matrix.board }}
       - uses: actions/upload-artifact@v4
         with:
-          name: brucia-firmware
-          path: .pio/build/lilygo-t-embed-cc1101/firmware.factory.bin
+          name: brucia-firmware-${{ matrix.board }}
+          path: Bruce-${{ matrix.board }}.bin
+          if-no-files-found: error
 
   android:
     runs-on: ubuntu-latest
@@ -36,6 +47,9 @@ jobs:
       - name: Unit tests (offload logic)
         working-directory: android
         run: ./gradlew :app:testDebugUnitTest --no-daemon
+      - name: Android lint
+        working-directory: android
+        run: ./gradlew :app:lintDebug --no-daemon
       - name: Build debug APK
         working-directory: android
         run: ./gradlew :app:assembleDebug --no-daemon
@@ -52,5 +66,17 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install pyserial
+      - name: Firmware bootstrap regression
+        run: python3 -m unittest discover -s tools -p test_build_firmware.py
+      - name: Release workflow regression (no publishing)
+        run: python3 -m unittest discover -s tools -p test_release.py
+      - name: BLE dependency callback regression
+        run: python3 -m unittest discover -s tools -p test_ble_dependency_patches.py
+      - name: Offline WebUI asset regression
+        run: python3 -m unittest discover -s tools -p test_web_resources.py
+      - name: Firmware base64 codec regression
+        run: python3 tools/test_firmware_codec.py
+      - name: Firmware frame reader regression
+        run: python3 tools/test_firmware_framing.py
       - name: End-to-end protocol test (mock device + client)
         run: python3 tools/test_protocol_e2e.py

@@ -83,9 +83,15 @@ def main():
         caps = recv(ser)
         print("<- CAPS:", json.dumps(caps, indent=2) if caps else "(no reply)")
 
+        if not caps or caps.get("t") != CAPS or caps.get("id") != 1:
+            sys.exit("FAIL: no valid CAPS; enter Brucia companion mode on the device and retry")
+
         print("-> PING")
         send(ser, PING, 2, {})
-        print("<- ", recv(ser))
+        pong = recv(ser)
+        print("<- ", pong)
+        if not pong or pong.get("t") != PONG or pong.get("id") != 2:
+            sys.exit("FAIL: no matching PONG")
 
         if args.cmd:
             print(f"-> CMD {args.cmd!r}")

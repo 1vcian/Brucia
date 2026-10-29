@@ -2,6 +2,11 @@ import os
 import re
 import glob
 
+try:
+    Import("env")
+except NameError:
+    env = None  # standalone maintenance/tests
+
 print("Patching library conflicts with ESP32 core...")
 
 # List of conflicts: (file_pattern, search_pattern, replace_pattern)
@@ -40,6 +45,43 @@ conflicts = [
         ".pio/libdeps/*/ESP PN32BLE/src/pn532_ble.h",
         r'#include <NimBLEDevice.h>',
         '#include <Arduino.h>\n#include <NimBLEDevice.h>'
+    ),
+    # These independent libraries used the same externally linked scanCallbacks
+    # class name with different bases/layouts, violating the C++ ODR under LTO.
+    (
+        ".pio/libdeps/*/ESP Chameleon Ultra/src/chameleonUltra.cpp",
+        r'\bscanCallbacks\b',
+        'BruciaChameleonScanCallbacks'
+    ),
+    (
+        ".pio/libdeps/*/ESP Amiibolink/src/amiibolink.cpp",
+        r'\bscanCallbacks\b',
+        'BruciaAmiibolinkScanCallbacks'
+    ),
+    (
+        ".pio/libdeps/*/ESP PN32BLE/src/pn532_ble.cpp",
+        r'\bscanCallbacks\b',
+        'BruciaPn532ScanCallbacks'
+    ),
+    # NimBLE 2.x takes const advertisements. Without the matching signature the
+    # old method silently overloads, so the target-discovery callback never runs.
+    (
+        ".pio/libdeps/*/ESP Chameleon Ultra/src/chameleonUltra.cpp",
+        r'void onResult\(NimBLEAdvertisedDevice\s*\*\s*advertisedDevice\)\s*\{',
+        '#ifdef NIMBLE_V2_PLUS\n'
+        '    void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override {\n'
+        '#else\n'
+        '    void onResult(NimBLEAdvertisedDevice *advertisedDevice) override {\n'
+        '#endif'
+    ),
+    (
+        ".pio/libdeps/*/ESP Amiibolink/src/amiibolink.cpp",
+        r'void onResult\(NimBLEAdvertisedDevice\s*\*\s*advertisedDevice\)\s*\{',
+        '#ifdef NIMBLE_V2_PLUS\n'
+        '    void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override {\n'
+        '#else\n'
+        '    void onResult(NimBLEAdvertisedDevice *advertisedDevice) override {\n'
+        '#endif'
     ),
     # ST25R3916-fork: support IRQ-less operation (I2C units have no interrupt
     # line). When int_pin < 0 we skip attaching the GPIO interrupt and poll the
@@ -203,6 +245,10 @@ conflicts = [
 ]
 
 for file_pattern, search, replace in conflicts:
+    if env is not None:
+        # Do not rewrite another board's dependencies during an unrelated build.
+        lib_root = os.path.join(env.subst("$PROJECT_LIBDEPS_DIR"), env.get("PIOENV"))
+        file_pattern = file_pattern.replace(".pio/libdeps/*/", lib_root + os.sep, 1)
     files = glob.glob(file_pattern)
     for file_path in files:
         try:
