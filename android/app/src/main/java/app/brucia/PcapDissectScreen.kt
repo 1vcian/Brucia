@@ -15,19 +15,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.brucia.wardrive.WardriveViewModel
-import app.brucia.wifi.Dot11Frame
-import app.brucia.wifi.PcapReader
+import app.brucia.wifi.PcapDissector
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/** One row in the packet list (kept small so a big capture doesn't blow up memory). */
-private data class PktRow(val n: Int, val label: String, val src: String, val dst: String, val bssid: String, val eapol: Boolean)
-
-private data class PcapSummary(
-    val frames: Int, val mgmt: Int, val ctrl: Int, val data: Int, val eapol: Int,
-    val bssids: List<Pair<String, Int>>, // top BSSIDs by frame count
-)
 
 /**
  * On-phone PCAP dissection - a Wireshark-lite for the 802.11 captures the device records in monitor
@@ -43,8 +36,8 @@ internal fun PcapDissectScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
     var fileName by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
-    var summary by remember { mutableStateOf<PcapSummary?>(null) }
-    var rows by remember { mutableStateOf<List<PktRow>>(emptyList()) }
+    var summary by remember { mutableStateOf<PcapDissector.Summary?>(null) }
+    var rows by remember { mutableStateOf<List<PcapDissector.Row>>(emptyList()) }
     var error by remember { mutableStateOf("") }
 
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -54,27 +47,14 @@ internal fun PcapDissectScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         scope.launch {
             try {
                 val bytes = withContext(Dispatchers.IO) {
-                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+                    context.contentResolver.openInputStream(uri)?.use { PcapDissector.readBounded(it) } ?: ByteArray(0)
                 }
-                val (sum, list) = withContext(Dispatchers.Default) {
-                    val recs = PcapReader.parse(bytes)
-                    if (recs.isEmpty()) return@withContext null to emptyList<PktRow>()
-                    var mgmt = 0; var ctrl = 0; var dataC = 0; var eapol = 0
-                    val bssidCount = HashMap<String, Int>()
-                    val list = ArrayList<PktRow>()
-                    recs.forEachIndexed { i, r ->
-                        val info = Dot11Frame.parse(r.frame)
-                        when (info.type) { 0 -> mgmt++; 1 -> ctrl++; 2 -> dataC++ }
-                        if (info.isEapol) eapol++
-                        if (info.addr3.isNotBlank()) bssidCount[info.addr3] = (bssidCount[info.addr3] ?: 0) + 1
-                        if (list.size < 1000) list.add(PktRow(i + 1, info.label, info.addr2, info.addr1, info.addr3, info.isEapol))
-                    }
-                    val top = bssidCount.entries.sortedByDescending { it.value }.take(8).map { it.key to it.value }
-                    PcapSummary(recs.size, mgmt, ctrl, dataC, eapol, top) to list
-                }
-                if (sum == null) error = "Not a classic pcap, or no frames found."
-                summary = sum
-                rows = list
+                val result = withContext(Dispatchers.Default) { PcapDissector.dissect(bytes) { ensureActive() } }
+                if (result == null) error = "Not a classic pcap, or no frames found."
+                summary = result?.summary
+                rows = result?.rows ?: emptyList()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 error = "Failed to read: ${e.message}"
             } finally {
@@ -116,7 +96,7 @@ internal fun PcapDissectScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 }
             }
 
-            Text("Packets (${minOf(rows.size, 1000)}${if (s.frames > 1000) " of ${s.frames}" else ""})",
+            Text("Packets (${minOf(rows.size, PcapDissector.MAX_ROWS)}${if (s.frames > PcapDissector.MAX_ROWS) " of ${s.frames}" else ""})",
                 fontWeight = FontWeight.SemiBold, color = cs.primary)
             rows.forEach { r ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {

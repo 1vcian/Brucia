@@ -8,6 +8,20 @@ development and recovery. Historical checks below are not proof for the current 
 
 - 113 production Kotlin files compiled with cached dependencies/generated resources;
   253 unit tests passed. The standalone subset passed 120 tests (overlapping).
+- 0.1.2 app (W06-W11): `./gradlew --offline :app:testDebugUnitTest`
+  passed 424/424 including `FeatureRegistryTest`, `CommandSessionTest` (13, fake
+  transport), `PcapDissectorTest` (7, synthetic pcaps), `IButtonServiceTest` (10),
+  `DeviceOperationTest` (8), `ClockServiceTest` (2), `WifiMacServiceTest` (3),
+  `ScriptServiceTest` (3), `DeviceAppearanceServiceTest` (4), `WifiJoinServiceTest` (3)
+  `EspNowServiceTest` (2), `SpeakerServiceTest` (10) and `MicRecordServiceTest` (3); `lintDebug` passed with no
+  findings in changed files. `CommandSession`
+  is wired into the ViewModel and the registry into MainActivity. No device test of either.
+- 0.1.2 firmware (W10): `tools/test_firmware_ibutton.py` passed 71 checks
+  (UBSan only; ASan hangs in this macOS shell); codec, framing, storage, web-resource and
+  build-tool tests passed; `lilygo-t-embed-cc1101` built successfully (RAM 47.1%, flash
+  25.6%). Other boards were not rebuilt (deferred to release). Build with PlatformIO's own
+  interpreter: `~/.platformio/penv/bin/python tools/build_firmware.py -e
+  lilygo-t-embed-cc1101 --pio ~/.platformio/penv/bin/pio` (default python3 3.15 is rejected).
 - 21 Python and seven website tests passed. Native storage/codec/framing, mock
   protocol E2E and AAC bounds with UBSan passed in the stabilization session.
 - T-Embed 0.1.1 firmware compiled and passed production Kotlin image preflight.

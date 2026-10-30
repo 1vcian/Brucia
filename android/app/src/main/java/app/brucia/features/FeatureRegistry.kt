@@ -3,7 +3,7 @@ package app.brucia.features
 /**
  * Pure-JVM feature catalog. This component has NO Android, Compose, transport or
  * ViewModel dependencies. It only describes and indexes the existing tools so they
- * can be enumerated and looked up; the UI wiring is a separate coordinator patch.
+ * can be enumerated and looked up; [app.brucia.MainActivity] renders from it.
  *
  * [tabId] is the legacy integer tab id used by [app.brucia.MainActivity]. It is kept
  * as a stable adapter so existing navigation keeps working. [id] is an internal,

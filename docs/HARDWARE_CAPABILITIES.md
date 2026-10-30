@@ -21,7 +21,7 @@ Do not confuse the standard CC1101 model with the Plus variant or another T-Embe
 | Si4713 FM transmitter | Not fitted | Driver availability plus I2C address probe | An actual Si4713 and its audio wiring |
 | LoRa SX127x / SX126x | Not fitted | LoRa driver initialization succeeds on a supported board | A LoRa-equipped board; CC1101 is not a LoRa modem |
 | W5500 Ethernet | Expansion | SPI VERSIONR identification | A real module and network link |
-| 125 kHz LF reader / iButton interface | Not fitted | No confirmed capability is reported by current firmware | A supported presence-check/configuration path before enabling companion controls |
+| 125 kHz LF reader / iButton interface | Not fitted | LF: no confirmed capability is reported by current firmware. iButton: reported when a non-zero iButton GPIO is configured on the device (Others > iButton > Setup pin); configured, not probed, since a 1-Wire bus only answers with a key present | LF: a supported presence-check/configuration path before enabling companion controls. iButton: read and RW1990 write with real keys on the configured pin |
 | GPS receiver | Not fitted | The companion currently uses phone location | Android permission, location fixes and exported coordinates |
 
 The standard board has 16 MB flash and 8 MB PSRAM. Its SPI wiring is SCK 11,

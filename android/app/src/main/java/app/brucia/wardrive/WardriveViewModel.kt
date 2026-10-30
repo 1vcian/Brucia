@@ -39,8 +39,33 @@ import app.brucia.wordlist.WordlistInfo
 import app.brucia.wordlist.WordlistStore
 import app.brucia.data.SavedItem
 import app.brucia.device.CliParse
+import app.brucia.BruciaLog
+import app.brucia.audio.MicRecordService
+import app.brucia.ble.BadBleService
+import app.brucia.ble.BleHidService
+import app.brucia.ble.BleMediaService
+import app.brucia.audio.SpeakerService
+import app.brucia.device.ClockService
+import app.brucia.device.DeviceAppearanceService
+import app.brucia.device.EspNowService
+import app.brucia.device.ScriptService
+import app.brucia.ibutton.IButtonService
+import app.brucia.ir.IrReceiveService
+import app.brucia.ir.TvBGoneService
+import app.brucia.lora.LoraService
+import app.brucia.net.EthernetService
+import app.brucia.nfc.NfcToolsService
 import app.brucia.protocol.CompanionClient
 import app.brucia.protocol.Kind
+import app.brucia.session.BurstLoop
+import app.brucia.session.BurstLoopRegistry
+import app.brucia.session.CommandRunner
+import app.brucia.session.JsonCommandRunner
+import app.brucia.wifi.BrucegotchiService
+import app.brucia.wifi.KarmaService
+import app.brucia.wifi.ResponderService
+import app.brucia.wifi.WifiJoinService
+import app.brucia.wifi.WifiMacService
 import app.brucia.ir.IrButton
 import app.brucia.ir.IrParser
 import app.brucia.subghz.DecodedSignal
@@ -65,8 +90,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -376,16 +399,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // way to stop. Instead we run a cancellable loop of SHORT (~8s) bursts back to back: between
     // bursts the device + link are free, so the user can Stop (<=2s latency) and the mic.pcm
     // audio tools get serviced again. [bleSpamActive] drives the UI Start/Stop toggle.
-    private val _bleSpamActive = MutableStateFlow(false)
-    val bleSpamActive: StateFlow<Boolean> = _bleSpamActive.asStateFlow()
-    private var bleSpamJob: Job? = null
+    private val bleSpamLoop by lazy { burstLoop(_bleSpamStatus) }
+    val bleSpamActive: StateFlow<Boolean> get() = bleSpamLoop.active
 
     // Wi-Fi beacon spam uses the same abortable short-burst loop model as BLE spam above.
     private val _beaconStatus = MutableStateFlow("")
     val beaconStatus: StateFlow<String> = _beaconStatus.asStateFlow()
-    private val _beaconActive = MutableStateFlow(false)
-    val beaconActive: StateFlow<Boolean> = _beaconActive.asStateFlow()
-    private var beaconSpamJob: Job? = null
+    private val beaconLoop by lazy { burstLoop(_beaconStatus) }
+    val beaconActive: StateFlow<Boolean> get() = beaconLoop.active
 
     // Batched MIFARE key-dictionary attack state + optional user-imported keys.
     private val _mifare = MutableStateFlow(MifareAttackState())
@@ -399,14 +420,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val _irLearned = MutableStateFlow<List<IrButton>>(emptyList())
     val irLearned: StateFlow<List<IrButton>> = _irLearned.asStateFlow()
 
-    // Fixed-contract IR actions (ir_tvbgone / ir_rx / ir_tx_raw). Status lines drive the UI.
-    private val _irTvBGoneStatus = MutableStateFlow("")
-    val irTvBGoneStatus: StateFlow<String> = _irTvBGoneStatus.asStateFlow()
-    private val _irRxStatus = MutableStateFlow("")
-    val irRxStatus: StateFlow<String> = _irRxStatus.asStateFlow()
-    // The last decoded receive, held until the user saves or re-arms RX.
-    private val _irRxResult = MutableStateFlow<IrButton?>(null)
-    val irRxResult: StateFlow<IrButton?> = _irRxResult.asStateFlow()
+    // IR receive/capture and TV-B-Gone status lines live in IrReceiveService / TvBGoneService.
 
     private val savedDao = BruciaDb.get(app).savedDao()
     val savedNfc: StateFlow<List<SavedItem>> =
@@ -421,16 +435,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val _lastRf = MutableStateFlow<String?>(null)
     val lastRf: StateFlow<String?> = _lastRf.asStateFlow()
 
-    // Advanced NFC status lines. _nfcNdefStatus is shared by both NDEF-push entry points
-    // (the NFC screen's push card and the Spam hub tile) so the behaviour never drifts.
-    private val _nfcNdefStatus = MutableStateFlow("")
-    val nfcNdefStatus: StateFlow<String> = _nfcNdefStatus.asStateFlow()
-    private val _nfcEmvStatus = MutableStateFlow("")
-    val nfcEmvStatus: StateFlow<String> = _nfcEmvStatus.asStateFlow()
-    private val _nfcUidStatus = MutableStateFlow("")
-    val nfcUidStatus: StateFlow<String> = _nfcUidStatus.asStateFlow()
-    private val _nfcAdvStatus = MutableStateFlow("")
-    val nfcAdvStatus: StateFlow<String> = _nfcAdvStatus.asStateFlow()
 
     private val _wigleStatus = MutableStateFlow<WigleUploadStatus>(WigleUploadStatus.Idle)
     val wigleStatus: StateFlow<WigleUploadStatus> = _wigleStatus.asStateFlow()
@@ -474,11 +478,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // Pending command callbacks keyed by request id, so concurrent in-flight commands
-    // do not clobber each other (see cmd() id correlation).
-    private val pendingAcks = java.util.concurrent.ConcurrentHashMap<Int, (Boolean, String) -> Unit>()
-    // ACK callbacks that need the full response object (e.g. mifare_keycheck's found[] array).
-    private val pendingJsonAcks = java.util.concurrent.ConcurrentHashMap<Int, (Boolean, JSONObject?) -> Unit>()
+    // Command/reply correlation for the current link; replaced (and closed) on every connect/disconnect.
+    @Volatile private var session: app.brucia.session.CommandSession? = null
     // Per-pull byte buffers keyed by the fs_read request id.
     private val fileReader = DeviceFileReader()
     private val fileTransferMutex = Mutex()
@@ -528,7 +529,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         disconnect()
         transport = t
         _transportKind.value = t.kind
-        client = CompanionClient(t)
+        val c = CompanionClient(t)
+        client = c
+        session = app.brucia.session.CommandSession(c, t, preflight = { command ->
+            if (command.startsWith("rfid125_read"))
+                check(_device.value?.caps?.lfRfid == true) { "No confirmed 125 kHz reader" }
+            if (command.startsWith("ibutton_"))
+                check(_device.value?.caps?.ibutton == true) { "No confirmed iButton interface" }
+        }, onCallbackError = { e -> app.brucia.BruciaLog.w("VM", "disconnect callback", e) })
         lastPongAt = companionNowMs()
         // Stay "Connecting..." until the first CAPS/DeviceInfo handshake arrives.
         _status.value = "Connecting..."
@@ -554,6 +562,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun startCompanionLoops() {
         val c = client ?: return
+        val s = session ?: return
         readJob?.cancel()
         pingJob?.cancel()
         readJob = viewModelScope.launch(Dispatchers.IO) {
@@ -612,7 +621,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 // re-themes the app accent. The device always wins; app-side theme_set updates _device
                 // immediately. Cheap (cached caps) and no device redraw (helloSeen already true). Skip
                 // while a command is awaiting its ACK so we don't interleave during a long blocking op.
-                if (pendingAcks.isEmpty() && pendingJsonAcks.isEmpty()) c.hello()
+                if (!s.hasPending) c.hello()
                 // Link watchdog: if the device has stopped answering (no PONG/CAPS for ~26s, i.e.
                 // ~3 missed pings) while we believe we are connected, it most likely rebooted out of
                 // companion mode (the USB-CDC can stay open, so every command just errors and the UI
@@ -623,7 +632,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 // etc.) runs synchronously on the device's single loop, so it can't PONG mid-run.
                 // Don't declare "restarted" while a command is still awaiting its ACK - only after a
                 // long absolute silence (covers brucegotchi) or 26s with no command in flight.
-                val cmdPending = pendingAcks.isNotEmpty() || pendingJsonAcks.isNotEmpty()
+                val cmdPending = s.hasPending
                 val silentMs = companionNowMs() - lastPongAt
                 if (_device.value != null && ((!cmdPending && silentMs > 26000L) || silentMs > 650000L)) {
                     _device.value = null
@@ -758,31 +767,12 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Empty the command log. */
     fun clearCommandLog() { _commandLog.value = emptyList() }
 
-    /** Convert local send failures into the same completion path as firmware ERR. */
-    private fun transmitCommand(c: CompanionClient, command: String, id: Int) {
-        try {
-            check(client === c && transport?.isOpen == true) { "USB connection is closed or changed" }
-            if (command.startsWith("rfid125_read"))
-                check(_device.value?.caps?.lfRfid == true) { "No confirmed 125 kHz reader" }
-            if (command.startsWith("ibutton_"))
-                check(_device.value?.caps?.ibutton == true) { "No confirmed iButton interface" }
-            c.cmd(command, id)
-            check(transport?.isOpen == true) { "USB write failed" }
-        } catch (e: Exception) {
-            val reply = JSONObject().put("t", Kind.ERR).put("id", id)
-                .put("d", JSONObject().put("msg", e.message ?: "Unable to send command"))
-            app.brucia.protocol.routeCommandReply(reply, pendingAcks, pendingJsonAcks)
-        }
-    }
-
     /** Bounded command completion; callbacks return on the main dispatcher. */
     private fun dispatchCmd(cmd: String, cb: ((Boolean, String) -> Unit)? = null) {
-        val c = client ?: run { cb?.invoke(false, "Not connected."); return }
+        val s = session ?: run { cb?.invoke(false, "Not connected."); return }
         val logId = logCmdStart(cmd)
         viewModelScope.launch(Dispatchers.IO) {
-            val id = c.nextId()
-            val result = app.brucia.protocol.awaitReply(pendingAcks, id, 650_000,
-                "No response from the device.") { transmitCommand(c, cmd, id) }
+            val result = s.await(cmd, 650_000)
             logCmdDone(logId, result.first, result.second)
             withContext(Dispatchers.Main) { cb?.invoke(result.first, result.second) }
         }
@@ -790,12 +780,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Like [dispatchCmd] but routes the full ACK data object to the callback. */
     private fun dispatchCmdJson(cmd: String, cb: (Boolean, JSONObject?) -> Unit) {
-        val c = client ?: run { cb(false, null); return }
+        val s = session ?: run { cb(false, null); return }
         val logId = logCmdStart(cmd)
         viewModelScope.launch(Dispatchers.IO) {
-            val id = c.nextId()
-            val result = app.brucia.protocol.awaitReply(pendingJsonAcks, id, 650_000,
-                JSONObject().put("msg", "No response from the device.")) { transmitCommand(c, cmd, id) }
+            val result = s.awaitJson(cmd, 650_000)
             logCmdDone(logId, result.first, result.second?.toString() ?: "")
             withContext(Dispatchers.Main) { cb(result.first, result.second) }
         }
@@ -807,17 +795,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // Default ACK wait must exceed the burst duration: bounded ops (spam/deauth/jammer) only ACK
     // AFTER running for SPAM_BURST_SECS, so a shorter timeout would always report "no response".
     private suspend fun sendAwait(cmd: String, timeoutMs: Long = (SPAM_BURST_SECS + 4) * 1000L): Pair<Boolean, String> {
-        val c = client ?: return false to "Not connected."
+        val s = session ?: return false to "Not connected."
         val logId = logCmdStart(cmd)
         try {
-            val res = withTimeoutOrNull(timeoutMs) {
-                suspendCancellableCoroutine<Pair<Boolean, String>> { cont ->
-                    val id = c.nextId()
-                    pendingAcks[id] = { ok, out -> if (cont.isActive) cont.resumeWith(Result.success(ok to out)) }
-                    cont.invokeOnCancellation { pendingAcks.remove(id) }
-                    transmitCommand(c, cmd, id)
-                }
-            } ?: (false to "No response from the device.")
+            val res = s.await(cmd, timeoutMs)
             logCmdDone(logId, res.first, res.second)
             return res
         } catch (ce: kotlinx.coroutines.CancellationException) {
@@ -827,43 +808,22 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Shared engine for the abortable short-burst loops (BLE/Wi-Fi spam, Wi-Fi deauth, the NRF24
-     * ops). Instead of one long blocking command (which froze the device + whole companion link for
-     * its full duration with no way to abort), it launches a cancellable loop that fires SHORT (~8s)
-     * bounded commands back to back and awaits each ACK before the next, so bursts are sequential
-     * and never queued. Between bursts the device + link are free: the user can Stop within ~8s and
-     * contending streams (mic.pcm) get serviced again. [active] both gates the loop and drives the
-     * UI Start/Stop toggle; [cmd] builds each burst's command; [onReject] fires once on a hard
-     * rejection (a non-blank failure, e.g. missing module) and ends the loop; [onStopped] runs when
-     * the loop ends, but only for the current job (a restart supersedes an older one). [getJob]/
-     * [setJob] let the caller hold the Job so Stop/disconnect can cancel it.
-     */
-    private fun launchBurstLoop(
-        getJob: () -> Job?,
-        setJob: (Job?) -> Unit,
-        active: MutableStateFlow<Boolean>,
-        cmd: () -> String,
-        onReject: (String) -> Unit = {},
-        onStopped: () -> Unit = {},
-    ) {
-        active.value = true
-        val job = viewModelScope.launch(Dispatchers.IO) {
-            val myJob = coroutineContext[Job]
-            try {
-                while (isActive && active.value && transport?.isOpen == true) {
-                    val (ok, out) = sendAwait(cmd())
-                    if (!ok && out.isNotBlank()) { onReject(out); break }
-                }
-            } finally {
-                if (getJob() === myJob) {
-                    active.value = false
-                    onStopped()
-                }
-            }
+    /** [sendAwait] for commands whose ACK data object matters (eth_status, lora_recv). */
+    private suspend fun sendAwaitJson(cmd: String, timeoutMs: Long): Pair<Boolean, JSONObject?> {
+        val s = session ?: return false to JSONObject().put("msg", "Not connected.")
+        val logId = logCmdStart(cmd)
+        try {
+            val res = s.awaitJson(cmd, timeoutMs)
+            logCmdDone(logId, res.first, res.second?.toString() ?: "")
+            return res
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            logCmdDone(logId, false, "Stopped.")
+            throw ce
         }
-        setJob(job)
     }
+
+    /** Per-burst ACK wait: bounded ops only ACK after running for SPAM_BURST_SECS. */
+    private val burstTimeoutMs = (SPAM_BURST_SECS + 4) * 1000L
 
     /**
      * Start continuous, abortable BLE advertisement spam for one platform's pairing popup
@@ -877,38 +837,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun startBleSpam(target: String, copies: Int = DEFAULT_SPAM_COPIES) {
         if (client == null) { _bleSpamStatus.value = "Connect the device over USB first."; return }
-        // If a spam loop is already running, stop it first (restart cleanly, never stack two loops).
-        stopBleSpam(silent = true)
         // A live mic.pcm stream and spam contend for the single-threaded companion loop; drop it.
         if (_micPcmActive.value) stopMicPcm()
         val n = copies.coerceIn(1, 100)
-        _bleSpamActive.value = true
-        _bleSpamStatus.value = "Sending $target... (Stop to end)"
-        bleSpamJob = viewModelScope.launch(Dispatchers.IO) {
-            val myJob = coroutineContext[Job]
-            try {
-                while (isActive && _bleSpamActive.value && transport?.isOpen == true) {
-                    val (ok, out) = sendAwait("ble_spam_platform $target $SPAM_BURST_SECS $n")
-                    // A hard rejection (e.g. unsupported target) ends the loop and shows why.
-                    if (!ok && out.isNotBlank()) { _bleSpamStatus.value = out; break }
-                }
-            } finally {
-                // Only the current job updates shared UI state (a restart supersedes the old job).
-                if (bleSpamJob === myJob) {
-                    _bleSpamActive.value = false
-                    if (_bleSpamStatus.value.startsWith("Sending")) _bleSpamStatus.value = "Stopped."
-                }
-            }
-        }
+        bleSpamLoop.start("Sending $target... (Stop to end)", { "ble_spam_platform $target $SPAM_BURST_SECS $n" }, burstTimeoutMs)
     }
 
     /** Stop the BLE spam loop. [silent] keeps the status line (used when restarting). */
-    fun stopBleSpam(silent: Boolean = false) {
-        bleSpamJob?.cancel()
-        bleSpamJob = null
-        _bleSpamActive.value = false
-        if (!silent) _bleSpamStatus.value = "Stopped."
-    }
+    fun stopBleSpam(silent: Boolean = false) = bleSpamLoop.stop(silent)
 
     /** Apple ProximityPair popups; delegates to [startBleSpam] ("ios"). */
     fun bleSpam(copies: Int = DEFAULT_SPAM_COPIES) = startBleSpam("ios", copies)
@@ -934,7 +870,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             Kind.ACK, Kind.ERR -> {
-                val out = app.brucia.protocol.routeCommandReply(msg, pendingAcks, pendingJsonAcks)
+                val out = session?.route(msg) ?: ""
                 if (out.isNotEmpty()) {
                     val lines = out.split("\n").filter { it.isNotBlank() }
                     _console.value = (_console.value + lines).takeLast(500)
@@ -1221,11 +1157,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // ~2s and other commands/streams get serviced between bursts. Only one AP is deauthed at a time
     // (single-threaded device); [deauthTarget] holds its BSSID so a per-AP card shows Stop only on
     // the AP currently being deauthed.
-    private val _deauthActive = MutableStateFlow(false)
-    val deauthActive: StateFlow<Boolean> = _deauthActive.asStateFlow()
+    private val deauthLoop by lazy { burstLoop() }
+    val deauthActive: StateFlow<Boolean> get() = deauthLoop.active
     private val _deauthTarget = MutableStateFlow("")
     val deauthTarget: StateFlow<String> = _deauthTarget.asStateFlow()
-    private var deauthJob: Job? = null
 
     /**
      * Start continuous, abortable Wi-Fi deauth of [bssid] on [channel] (authorized testing only).
@@ -1235,24 +1170,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun startDeauth(bssid: String, channel: Int) {
         if (client == null) { _console.value = (_console.value + "> deauth: connect the device first").takeLast(500); return }
-        stopDeauth(silent = true)
         if (_micPcmActive.value) stopMicPcm()
         _deauthTarget.value = bssid
         _console.value = (_console.value + "> wifi_deauth $bssid ch$channel loop").takeLast(500)
-        launchBurstLoop(
-            getJob = { deauthJob },
-            setJob = { deauthJob = it },
-            active = _deauthActive,
-            cmd = { "wifi_deauth $bssid $channel $SPAM_BURST_SECS" },
-            onStopped = { _deauthTarget.value = "" },
-        )
+        deauthLoop.start("", { "wifi_deauth $bssid $channel $SPAM_BURST_SECS" }, burstTimeoutMs, onEnd = { _deauthTarget.value = "" })
     }
 
     /** Stop the Wi-Fi deauth loop. [silent] is accepted for a uniform stop-method signature. */
     fun stopDeauth(silent: Boolean = false) {
-        deauthJob?.cancel()
-        deauthJob = null
-        _deauthActive.value = false
+        deauthLoop.stop(silent)
         _deauthTarget.value = ""
     }
 
@@ -1373,40 +1299,18 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      * TV-B-Gone power-off sweep (ir_tvbgone [region]); region is "na" or "eu".
      * Fire + ACK; the ACK `out` is surfaced on [irTvBGoneStatus]. Authorized use only.
      */
-    fun irTvBGone(region: String = "na") {
-        if (client == null) { _irTvBGoneStatus.value = "Connect the device over USB first."; return }
-        _irTvBGoneStatus.value = "TV-B-Gone ($region) running..."
-        dispatchCmd("ir_tvbgone $region") { ok, out ->
-            _irTvBGoneStatus.value = if (ok) out.ifBlank { "TV-B-Gone ($region) done." }
-                else out.ifBlank { "TV-B-Gone ($region) failed." }
-        }
-    }
+    fun irTvBGone(region: String = "na") = tvbGone.run(region)
 
     /**
      * Arm the receiver once (ir_rx, ~10s). The decoded signal is parsed and held in
      * [irRxResult] so the user can review it and choose to save it with [saveLearnedIr].
      */
-    fun irReceiveOnce() {
-        if (client == null) { _irRxStatus.value = "Connect the device over USB first."; return }
-        _irRxResult.value = null
-        _irRxStatus.value = "Receiving - point a remote at the device and press a button (10s)..."
-        dispatchCmd("ir_rx") { ok, out ->
-            if (!ok) { _irRxStatus.value = out.ifBlank { "Receive failed." }; return@dispatchCmd }
-            val parsed = IrParser.parse(out).firstOrNull()
-            _irRxResult.value = parsed
-            _irRxStatus.value = when {
-                parsed != null -> "Received: ${parsed.name} (${if (parsed.raw) "raw" else parsed.protocol})"
-                out.isNotBlank() -> out
-                else -> "No signal decoded."
-            }
-        }
-    }
+    fun irReceiveOnce() = irRx.receiveOnce()
 
     /** Save a received/decoded button into the learned-IR list and persist it for later replay. */
     fun saveLearnedIr(button: IrButton) {
         _irLearned.value = listOf(button) + _irLearned.value
-        _irRxResult.value = null
-        _irRxStatus.value = "Saved: ${button.name}"
+        irRx.markSaved(button)
         viewModelScope.launch(Dispatchers.IO) {
             savedDao.insert(SavedItem(
                 type = "ir",
@@ -1426,8 +1330,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // --- Custom IR remote: a user-built grid of captured buttons, persisted on the phone ---
     private val _remoteKeys = MutableStateFlow<List<IrButton>>(emptyList())
     val remoteKeys: StateFlow<List<IrButton>> = _remoteKeys.asStateFlow()
-    private val _remoteCapture = MutableStateFlow("")
-    val remoteCapture: StateFlow<String> = _remoteCapture.asStateFlow()
     private val remotePrefs by lazy {
         getApplication<Application>().getSharedPreferences("ir_remote", android.content.Context.MODE_PRIVATE)
     }
@@ -1464,26 +1366,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Capture one IR signal (ir_rx) and add it to the custom remote under [label]. */
-    fun captureRemoteKey(label: String) {
-        if (client == null) { _remoteCapture.value = "Connect the device over USB first."; return }
-        _remoteCapture.value = "Point a remote at the device and press the button (10s)..."
-        dispatchCmd("ir_rx") { ok, out ->
-            if (!ok) { _remoteCapture.value = out.ifBlank { "Capture failed." }; return@dispatchCmd }
-            val parsed = IrParser.parse(out).firstOrNull()
-            if (parsed == null) { _remoteCapture.value = "No signal decoded - try again."; return@dispatchCmd }
-            val named = parsed.copy(name = label.trim().ifBlank { parsed.name })
-            _remoteKeys.value = _remoteKeys.value + named
-            saveRemoteKeys()
-            _remoteCapture.value = "Saved: ${named.name}"
-        }
-    }
+    fun captureRemoteKey(label: String) = irRx.captureKey(label)
 
     /** Transmit a custom-remote button. */
     fun pressRemoteKey(b: IrButton) {
-        if (client == null) { _remoteCapture.value = "Connect the device over USB first."; return }
+        if (client == null) { irRx.noteCapture("Connect the device over USB first."); return }
         val (khz, csv) = b.toTxRawArgs()
         if (b.raw && csv.isNotBlank()) irTxRaw(khz, csv) else sendCommand(b.toCli())
-        _remoteCapture.value = "Sent: ${b.name}"
+        irRx.noteCapture("Sent: ${b.name}")
     }
 
     fun deleteRemoteKey(index: Int) {
@@ -1868,55 +1758,24 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      * is reported on the shared [nfcNdefStatus] line. This is the single entry point used by
      * both the NFC screen's push card and the Spam hub's NFC tile, so the two can never drift.
      */
-    fun nfcNdefPush(type: String, payload: String) {
-        if (client == null) { _nfcNdefStatus.value = "Connect the device over USB first."; return }
-        val p = payload.trim()
-        if (p.isEmpty()) { _nfcNdefStatus.value = "Enter a payload first."; return }
-        _nfcNdefStatus.value = "Pushing NDEF ($type) - tap a device..."
-        dispatchCmd("nfc_ndef_push $type $p") { ok, out ->
-            _nfcNdefStatus.value = if (ok) out.ifBlank { "NDEF pushed." } else out.ifBlank { "NDEF push failed." }
-        }
-    }
+    fun nfcNdefPush(type: String, payload: String) = nfcTools.pushNdef(type, payload)
 
     /** Read an EMV bank card (masked / read-only): nfc_emv_read -> masked PAN/expiry/scheme. */
-    fun nfcEmvRead() {
-        if (client == null) { _nfcEmvStatus.value = "Connect the device over USB first."; return }
-        _nfcEmvStatus.value = "Reading card - hold it on the reader..."
-        dispatchCmd("nfc_emv_read") { ok, out ->
-            _nfcEmvStatus.value = if (ok) out.ifBlank { "No card data." } else out.ifBlank { "EMV read failed." }
-        }
-    }
+    fun nfcEmvRead() = nfcTools.readEmv()
 
     /** Write a UID onto a magic / UID-writable card: nfc_write_uid <hexuid>. */
-    fun nfcWriteUid(hex: String) {
-        if (client == null) { _nfcUidStatus.value = "Connect the device over USB first."; return }
-        val h = hex.trim().replace(" ", "")
-        if (h.isEmpty()) { _nfcUidStatus.value = "Enter a hex UID first."; return }
-        _nfcUidStatus.value = "Writing UID $h..."
-        dispatchCmd("nfc_write_uid $h") { ok, out ->
-            _nfcUidStatus.value = if (ok) out.ifBlank { "UID written." } else out.ifBlank { "Write failed." }
-        }
-    }
+    fun nfcWriteUid(hex: String) = nfcTools.writeUid(hex)
 
     /** Amiibo helper: nfc_amiibo <action>. Shows whatever the firmware ACKs back. */
-    fun nfcAmiibo(action: String) = runNfcAdv("nfc_amiibo $action", "Amiibo ($action)")
+    fun nfcAmiibo(action: String) = nfcTools.amiibo(action)
     /** MIFARE nested key-recovery attack: mifare_nested. */
-    fun mifareNested() = runNfcAdv("mifare_nested", "Nested attack")
+    fun mifareNested() = nfcTools.nested()
     /** MIFARE mfkey32 key-recovery attack: mifare_mfkey32. */
-    fun mifareMfkey32() = runNfcAdv("mifare_mfkey32", "mfkey32 attack")
+    fun mifareMfkey32() = nfcTools.mfkey32()
     /** SRIX / ST25TB (ISO14443B) read: srix_read [secs]. Reports the tag JSON or a timeout. */
-    fun srixRead(secs: Int = 8) = runNfcAdv("srix_read $secs", "SRIX read")
+    fun srixRead(secs: Int = 8) = nfcTools.srixRead(secs)
     /** 125 kHz LF read: rfid125_read [secs]. Only boards with the UART LF reader return a tag. */
-    fun rfid125Read(secs: Int = 8) = runNfcAdv("rfid125_read $secs", "125kHz read")
-
-    /** Simple command+status tile helper: send [cmd], report its ACK out on [nfcAdvStatus]. */
-    private fun runNfcAdv(cmd: String, label: String) {
-        if (client == null) { _nfcAdvStatus.value = "Connect the device over USB first."; return }
-        _nfcAdvStatus.value = "$label running..."
-        dispatchCmd(cmd) { ok, out ->
-            _nfcAdvStatus.value = if (ok) out.ifBlank { "$label done." } else out.ifBlank { "$label failed." }
-        }
-    }
+    fun rfid125Read(secs: Int = 8) = nfcTools.rfid125Read(secs)
 
     // --- MIFARE key-dictionary attack (bundled defaults + optional user keys) ---
     /** Import extra MIFARE keys from a text file (one 12-hex key per line). */
@@ -2022,8 +1881,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Gate every entry point, including composite screens, then correlate the SUB result. */
     private fun setStream(stream: String, on: Boolean, channel: Int? = null, bssid: String? = null): Boolean {
-        val c = client
-        if (c == null || (on && _device.value?.caps?.allowsStream(stream) != true)) {
+        val s = session
+        if (s == null || (on && _device.value?.caps?.allowsStream(stream) != true)) {
             updateStreamState(stream, false)
             return false
         }
@@ -2037,15 +1896,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         updateStreamState(stream, on)
-        val id = c.nextId()
+        val id = s.nextId()
         pendingStreamIds[stream] = id
         if (on) activeStreams.add(stream) else activeStreams.remove(stream)
         refreshConnectionNotification()
         viewModelScope.launch(Dispatchers.IO) {
             streamWriteMutex.withLock {
-                if (client !== c || pendingStreamIds[stream] != id) return@withLock
+                if (session !== s || pendingStreamIds[stream] != id) return@withLock
                 val logId = logCmdStart("SUB $stream ${if (on) "on" else "off"}")
-                pendingAcks[id] = { ok, out ->
+                s.expect(id) { ok, out ->
                     logCmdDone(logId, ok, out)
                     if (pendingStreamIds.remove(stream, id) && !ok) {
                         activeStreams.remove(stream)
@@ -2054,15 +1913,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                         refreshConnectionNotification()
                     }
                 }
-                try {
-                    c.sub(stream, on, channel, bssid, id)
-                    if (transport?.isOpen != true) pendingAcks.remove(id)?.invoke(false, "USB write failed")
-                } catch (e: Exception) {
-                    pendingAcks.remove(id)?.invoke(false, e.message ?: "Unable to set stream")
-                }
+                s.subscribe(stream, on, channel, bssid, id)
             }
             delay(8000)
-            pendingAcks.remove(id)?.invoke(false, "No stream acknowledgement from the device")
+            s.fail(id, "No stream acknowledgement from the device")
         }
         return true
     }
@@ -2183,8 +2037,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // Per-characteristic read values, keyed by characteristic UUID.
     private val _gattReads = MutableStateFlow<Map<String, String>>(emptyMap())
     val gattReads: StateFlow<Map<String, String>> = _gattReads.asStateFlow()
-    private val _badbleStatus = MutableStateFlow("")
-    val badbleStatus: StateFlow<String> = _badbleStatus.asStateFlow()
 
     /**
      * Connect to [mac] over GATT and discover its services. Discovered characteristics arrive as
@@ -2229,14 +2081,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      * Run a DuckyScript over BLE HID (ble_badble <script> -> ACK {ok,out}). This is the real
      * device-execution path the USB-disabled BadUSB screen points to. Authorized use only.
      */
-    fun bleBadble(script: String) {
-        if (client == null) { _badbleStatus.value = "Connect the device over USB first."; return }
-        if (script.isBlank()) { _badbleStatus.value = "Script is empty."; return }
-        _badbleStatus.value = "Running over BLE..."
-        dispatchCmd("ble_badble $script") { ok, out ->
-            _badbleStatus.value = if (ok) out.ifBlank { "Done." } else out.ifBlank { "Failed." }
-        }
-    }
+    fun bleBadble(script: String) = badBle.run(script)
 
     // --- Station sniffer (nearby Wi-Fi clients via the "wifi.sta" stream) ---
     fun startStationSniff() {
@@ -2365,31 +2210,28 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         _nrf24MjDevices.map { m -> m.values.sortedByDescending { it.lastSeen } }
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _nrf24Scanning = MutableStateFlow(false)
-    val nrf24Scanning: StateFlow<Boolean> = _nrf24Scanning.asStateFlow()
-    private val _nrf24Sniffing = MutableStateFlow(false)
-    val nrf24Sniffing: StateFlow<Boolean> = _nrf24Sniffing.asStateFlow()
+    // Scan and sniff are two loops sharing the _nrf24Status line.
+    private val nrf24ScanLoop by lazy { burstLoop(_nrf24Status) }
+    private val nrf24SniffLoop by lazy { burstLoop(_nrf24Status) }
+    val nrf24Scanning: StateFlow<Boolean> get() = nrf24ScanLoop.active
+    val nrf24Sniffing: StateFlow<Boolean> get() = nrf24SniffLoop.active
     private val _nrf24Status = MutableStateFlow("")
     val nrf24Status: StateFlow<String> = _nrf24Status.asStateFlow()
 
     // Jammer and MouseJack each run for a fixed window and ACK on completion; their status
     // lines are separate so the two cards never clobber each other.
-    private val _nrf24Jamming = MutableStateFlow(false)
-    val nrf24Jamming: StateFlow<Boolean> = _nrf24Jamming.asStateFlow()
+    private val nrf24JammerLoop by lazy { burstLoop(_nrf24JammerStatus) }
+    val nrf24Jamming: StateFlow<Boolean> get() = nrf24JammerLoop.active
     private val _nrf24JammerStatus = MutableStateFlow("")
     val nrf24JammerStatus: StateFlow<String> = _nrf24JammerStatus.asStateFlow()
-    private val _nrf24MjRunning = MutableStateFlow(false)
-    val nrf24MjRunning: StateFlow<Boolean> = _nrf24MjRunning.asStateFlow()
+    private val nrf24MjLoop by lazy { burstLoop(_nrf24MjStatus) }
+    val nrf24MjRunning: StateFlow<Boolean> get() = nrf24MjLoop.active
     private val _nrf24MjStatus = MutableStateFlow("")
     val nrf24MjStatus: StateFlow<String> = _nrf24MjStatus.asStateFlow()
 
     // Each NRF24 op runs a bounded device command that blocks the single-threaded link for its full
     // window, so (like the spam loops) they run as cancellable loops of ~2s bursts; these hold the
     // Jobs that Stop/disconnect cancel.
-    private var nrf24ScanJob: Job? = null
-    private var nrf24SniffJob: Job? = null
-    private var nrf24JammerJob: Job? = null
-    private var nrf24MjJob: Job? = null
 
     private fun nrf24ErrMessage(out: String) = out.ifBlank { "No NRF24 module on this device." }
 
@@ -2401,26 +2243,12 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun startNrf24Scan(seconds: Int = 20) {
         if (client == null) { _nrf24Status.value = "Connect the device over USB first."; return }
-        stopNrf24Scan(silent = true)
         if (_micPcmActive.value) stopMicPcm()
         _nrf24Channels.value = emptyMap()
-        _nrf24Status.value = "Scanning 2.4GHz... (Stop to end)"
-        launchBurstLoop(
-            getJob = { nrf24ScanJob },
-            setJob = { nrf24ScanJob = it },
-            active = _nrf24Scanning,
-            cmd = { "nrf24_scan $SPAM_BURST_SECS" },
-            onReject = { _nrf24Status.value = nrf24ErrMessage(it) },
-            onStopped = { if (_nrf24Status.value.startsWith("Scanning")) _nrf24Status.value = "Scan stopped." },
-        )
+        nrf24ScanLoop.start("Scanning 2.4GHz... (Stop to end)", { "nrf24_scan $SPAM_BURST_SECS" }, burstTimeoutMs, "Scan stopped.")
     }
 
-    fun stopNrf24Scan(silent: Boolean = false) {
-        nrf24ScanJob?.cancel()
-        nrf24ScanJob = null
-        _nrf24Scanning.value = false
-        if (!silent && _nrf24Status.value.startsWith("Scanning")) _nrf24Status.value = "Scan stopped."
-    }
+    fun stopNrf24Scan(silent: Boolean = false) = nrf24ScanLoop.stop(silent)
 
     /**
      * Start the ESB sniffer as a cancellable loop of ~2s `nrf24_sniff` bursts; devices arrive via
@@ -2430,25 +2258,11 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun startNrf24Sniff(seconds: Int = 20) {
         if (client == null) { _nrf24Status.value = "Connect the device over USB first."; return }
-        stopNrf24Sniff(silent = true)
         if (_micPcmActive.value) stopMicPcm()
-        _nrf24Status.value = "Sniffing ESB devices... (Stop to end)"
-        launchBurstLoop(
-            getJob = { nrf24SniffJob },
-            setJob = { nrf24SniffJob = it },
-            active = _nrf24Sniffing,
-            cmd = { "nrf24_sniff $SPAM_BURST_SECS" },
-            onReject = { _nrf24Status.value = nrf24ErrMessage(it) },
-            onStopped = { if (_nrf24Status.value.startsWith("Sniffing")) _nrf24Status.value = "Sniff stopped." },
-        )
+        nrf24SniffLoop.start("Sniffing ESB devices... (Stop to end)", { "nrf24_sniff $SPAM_BURST_SECS" }, burstTimeoutMs, "Sniff stopped.")
     }
 
-    fun stopNrf24Sniff(silent: Boolean = false) {
-        nrf24SniffJob?.cancel()
-        nrf24SniffJob = null
-        _nrf24Sniffing.value = false
-        if (!silent && _nrf24Status.value.startsWith("Sniffing")) _nrf24Status.value = "Sniff stopped."
-    }
+    fun stopNrf24Sniff(silent: Boolean = false) = nrf24SniffLoop.stop(silent)
 
     fun clearNrf24Devices() { _nrf24Devices.value = emptyMap() }
 
@@ -2461,61 +2275,31 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun startNrf24Jammer() {
         if (client == null) { _nrf24JammerStatus.value = "Connect the device over USB first."; return }
-        stopNrf24Jammer(silent = true)
         if (_micPcmActive.value) stopMicPcm()
-        _nrf24JammerStatus.value = "Jamming 2.4GHz... (Stop to end)"
-        launchBurstLoop(
-            getJob = { nrf24JammerJob },
-            setJob = { nrf24JammerJob = it },
-            active = _nrf24Jamming,
-            cmd = { "nrf24_jammer $SPAM_BURST_SECS" },
-            onReject = { _nrf24JammerStatus.value = nrf24ErrMessage(it) },
-            onStopped = { if (_nrf24JammerStatus.value.startsWith("Jamming")) _nrf24JammerStatus.value = "Jammer stopped." },
-        )
+        nrf24JammerLoop.start("Jamming 2.4GHz... (Stop to end)", { "nrf24_jammer $SPAM_BURST_SECS" }, burstTimeoutMs, "Jammer stopped.")
     }
 
-    fun stopNrf24Jammer(silent: Boolean = false) {
-        nrf24JammerJob?.cancel()
-        nrf24JammerJob = null
-        _nrf24Jamming.value = false
-        if (!silent && _nrf24JammerStatus.value.startsWith("Jamming")) _nrf24JammerStatus.value = "Jammer stopped."
-    }
+    fun stopNrf24Jammer(silent: Boolean = false) = nrf24JammerLoop.stop(silent)
 
     // --- Sub-GHz jammer (CC1101) --- cancellable loop of ~Ns `subghz_jammer <freqKHz> <secs>` bursts.
-    private var subghzJammerJob: Job? = null
-    private val _subghzJamming = MutableStateFlow(false)
-    val subghzJamming: StateFlow<Boolean> = _subghzJamming.asStateFlow()
+    private val subghzJammerLoop by lazy { burstLoop(_subghzJammerStatus) }
+    val subghzJamming: StateFlow<Boolean> get() = subghzJammerLoop.active
     private val _subghzJammerStatus = MutableStateFlow("")
     val subghzJammerStatus: StateFlow<String> = _subghzJammerStatus.asStateFlow()
 
     /** Start the CC1101 jammer at [freqKHz] (authorized use only) as abortable ~Ns bursts. */
     fun startSubghzJammer(freqKHz: Int) {
         if (client == null) { _subghzJammerStatus.value = "Connect the device over USB first."; return }
-        stopSubghzJammer(silent = true)
         if (_micPcmActive.value) stopMicPcm()
         val f = freqKHz.coerceIn(300000, 928000)
-        _subghzJammerStatus.value = "Jamming ${f / 1000.0} MHz... (Stop to end)"
-        launchBurstLoop(
-            getJob = { subghzJammerJob },
-            setJob = { subghzJammerJob = it },
-            active = _subghzJamming,
-            cmd = { "subghz_jammer $f $SPAM_BURST_SECS" },
-            onReject = { _subghzJammerStatus.value = if (it.isBlank()) "Jammer failed." else it },
-            onStopped = { if (_subghzJammerStatus.value.startsWith("Jamming")) _subghzJammerStatus.value = "Jammer stopped." },
-        )
+        subghzJammerLoop.start("Jamming ${f / 1000.0} MHz... (Stop to end)", { "subghz_jammer $f $SPAM_BURST_SECS" }, burstTimeoutMs, "Jammer stopped.")
     }
 
-    fun stopSubghzJammer(silent: Boolean = false) {
-        subghzJammerJob?.cancel()
-        subghzJammerJob = null
-        _subghzJamming.value = false
-        if (!silent && _subghzJammerStatus.value.startsWith("Jamming")) _subghzJammerStatus.value = "Jammer stopped."
-    }
+    fun stopSubghzJammer(silent: Boolean = false) = subghzJammerLoop.stop(silent)
 
     // --- ARP spoof / NetCut (device joins the target Wi-Fi, then poisons target<->gateway) ---
-    private var arpSpoofJob: Job? = null
-    private val _arpSpoofActive = MutableStateFlow(false)
-    val arpSpoofActive: StateFlow<Boolean> = _arpSpoofActive.asStateFlow()
+    private val arpSpoofLoop by lazy { burstLoop(_arpSpoofStatus) }
+    val arpSpoofActive: StateFlow<Boolean> get() = arpSpoofLoop.active
     private val _arpSpoofStatus = MutableStateFlow("")
     val arpSpoofStatus: StateFlow<String> = _arpSpoofStatus.asStateFlow()
 
@@ -2528,95 +2312,43 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         if (ssid.isBlank() || targetIp.isBlank() || gwIp.isBlank()) {
             _arpSpoofStatus.value = "Fill SSID, target IP and gateway IP."; return
         }
-        stopArpSpoof(silent = true)
         if (_micPcmActive.value) stopMicPcm()
-        _arpSpoofStatus.value = "Spoofing $targetIp via $gwIp... (Stop to end)"
-        launchBurstLoop(
-            getJob = { arpSpoofJob },
-            setJob = { arpSpoofJob = it },
-            active = _arpSpoofActive,
-            cmd = { "arp_spoof $ssid $pass $targetIp $gwIp $SPAM_BURST_SECS" },
-            onReject = { _arpSpoofStatus.value = if (it.isBlank()) "ARP spoof failed." else it },
-            onStopped = { if (_arpSpoofStatus.value.startsWith("Spoofing")) _arpSpoofStatus.value = "Stopped." },
-        )
+        arpSpoofLoop.start("Spoofing $targetIp via $gwIp... (Stop to end)", { "arp_spoof $ssid $pass $targetIp $gwIp $SPAM_BURST_SECS" }, burstTimeoutMs, "Stopped.")
     }
 
-    fun stopArpSpoof(silent: Boolean = false) {
-        arpSpoofJob?.cancel()
-        arpSpoofJob = null
-        _arpSpoofActive.value = false
-        if (!silent && _arpSpoofStatus.value.startsWith("Spoofing")) _arpSpoofStatus.value = "Stopped."
-    }
+    fun stopArpSpoof(silent: Boolean = false) = arpSpoofLoop.stop(silent)
 
     // --- IR jammer --- abortable loop of ~Ns `ir_jammer <secs>` bursts.
-    private var irJammerJob: Job? = null
-    private val _irJamming = MutableStateFlow(false)
-    val irJamming: StateFlow<Boolean> = _irJamming.asStateFlow()
+    private val irJammerLoop by lazy { burstLoop(_irJammerStatus) }
+    val irJamming: StateFlow<Boolean> get() = irJammerLoop.active
     private val _irJammerStatus = MutableStateFlow("")
     val irJammerStatus: StateFlow<String> = _irJammerStatus.asStateFlow()
 
     fun startIrJammer() {
         if (client == null) { _irJammerStatus.value = "Connect the device over USB first."; return }
-        stopIrJammer(silent = true)
         if (_micPcmActive.value) stopMicPcm()
-        _irJammerStatus.value = "Jamming IR... (Stop to end)"
-        launchBurstLoop(
-            getJob = { irJammerJob },
-            setJob = { irJammerJob = it },
-            active = _irJamming,
-            cmd = { "ir_jammer $SPAM_BURST_SECS" },
-            onReject = { _irJammerStatus.value = if (it.isBlank()) "Jammer failed." else it },
-            onStopped = { if (_irJammerStatus.value.startsWith("Jamming")) _irJammerStatus.value = "Jammer stopped." },
-        )
+        irJammerLoop.start("Jamming IR... (Stop to end)", { "ir_jammer $SPAM_BURST_SECS" }, burstTimeoutMs, "Jammer stopped.")
     }
 
-    fun stopIrJammer(silent: Boolean = false) {
-        irJammerJob?.cancel()
-        irJammerJob = null
-        _irJamming.value = false
-        if (!silent && _irJammerStatus.value.startsWith("Jamming")) _irJammerStatus.value = "Jammer stopped."
-    }
+    fun stopIrJammer(silent: Boolean = false) = irJammerLoop.stop(silent)
 
     // --- BLE iBeacon advertiser --- abortable loop of ~Ns `ble_ibeacon <secs> [uuid]` bursts.
-    private var ibeaconJob: Job? = null
-    private val _ibeaconActive = MutableStateFlow(false)
-    val ibeaconActive: StateFlow<Boolean> = _ibeaconActive.asStateFlow()
+    private val ibeaconLoop by lazy { burstLoop(_ibeaconStatus) }
+    val ibeaconActive: StateFlow<Boolean> get() = ibeaconLoop.active
     private val _ibeaconStatus = MutableStateFlow("")
     val ibeaconStatus: StateFlow<String> = _ibeaconStatus.asStateFlow()
 
     fun startIbeacon(uuid: String = "") {
         if (client == null) { _ibeaconStatus.value = "Connect the device over USB first."; return }
-        stopIbeacon(silent = true)
         if (_micPcmActive.value) stopMicPcm()
         val u = uuid.trim()
-        _ibeaconStatus.value = "Broadcasting iBeacon... (Stop to end)"
-        launchBurstLoop(
-            getJob = { ibeaconJob },
-            setJob = { ibeaconJob = it },
-            active = _ibeaconActive,
-            cmd = { if (u.isEmpty()) "ble_ibeacon $SPAM_BURST_SECS" else "ble_ibeacon $SPAM_BURST_SECS $u" },
-            onReject = { _ibeaconStatus.value = if (it.isBlank()) "iBeacon failed." else it },
-            onStopped = { if (_ibeaconStatus.value.startsWith("Broadcasting")) _ibeaconStatus.value = "Stopped." },
-        )
+        ibeaconLoop.start("Broadcasting iBeacon... (Stop to end)", { if (u.isEmpty()) "ble_ibeacon $SPAM_BURST_SECS" else "ble_ibeacon $SPAM_BURST_SECS $u" }, burstTimeoutMs, "Stopped.")
     }
 
-    fun stopIbeacon(silent: Boolean = false) {
-        ibeaconJob?.cancel()
-        ibeaconJob = null
-        _ibeaconActive.value = false
-        if (!silent && _ibeaconStatus.value.startsWith("Broadcasting")) _ibeaconStatus.value = "Stopped."
-    }
+    fun stopIbeacon(silent: Boolean = false) = ibeaconLoop.stop(silent)
 
     // --- BLE media-control hijack (one-shot): ble_media <mac> ---
-    private val _bleMediaStatus = MutableStateFlow("")
-    val bleMediaStatus: StateFlow<String> = _bleMediaStatus.asStateFlow()
-    fun bleMedia(mac: String) {
-        val m = mac.trim()
-        if (client == null) { _bleMediaStatus.value = "Connect the device over USB first."; return }
-        if (!Regex("^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$").matches(m)) { _bleMediaStatus.value = "Enter a MAC like AA:BB:CC:DD:EE:FF."; return }
-        _bleMediaStatus.value = "Connecting to $m..."
-        dispatchCmd("ble_media $m") { ok, out -> _bleMediaStatus.value = out.ifBlank { if (ok) "Sent." else "Failed." } }
-    }
+    fun bleMedia(mac: String) = bleMediaService.send(mac)
 
     // --- Sub-GHz brute force (bounded one-shot): subghz_bruteforce <proto> <freqHz> <bits> <secs> ---
     private val _subBruteActive = MutableStateFlow(false)
@@ -2760,28 +2492,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun startNrf24MouseJack(text: String = "") {
         if (client == null) { _nrf24MjStatus.value = "Connect the device over USB first."; return }
-        stopNrf24MouseJack(silent = true)
         if (_micPcmActive.value) stopMicPcm()
         _nrf24MjDevices.value = emptyMap()
-        _nrf24MjStatus.value = "MouseJack running... (Stop to end)"
         val trimmed = text.trim()
         val cmd = if (trimmed.isEmpty()) "nrf24_mousejack $SPAM_BURST_SECS" else "nrf24_mousejack $SPAM_BURST_SECS $trimmed"
-        launchBurstLoop(
-            getJob = { nrf24MjJob },
-            setJob = { nrf24MjJob = it },
-            active = _nrf24MjRunning,
-            cmd = { cmd },
-            onReject = { _nrf24MjStatus.value = nrf24ErrMessage(it) },
-            onStopped = { if (_nrf24MjStatus.value.startsWith("MouseJack")) _nrf24MjStatus.value = "MouseJack stopped." },
-        )
+        nrf24MjLoop.start("MouseJack running... (Stop to end)", { cmd }, burstTimeoutMs, "MouseJack stopped.")
     }
 
-    fun stopNrf24MouseJack(silent: Boolean = false) {
-        nrf24MjJob?.cancel()
-        nrf24MjJob = null
-        _nrf24MjRunning.value = false
-        if (!silent && _nrf24MjStatus.value.startsWith("MouseJack")) _nrf24MjStatus.value = "MouseJack stopped."
-    }
+    fun stopNrf24MouseJack(silent: Boolean = false) = nrf24MjLoop.stop(silent)
 
     // --- LoRa (config / send / receive) ----------------------------------------
     // lora_config applies the radio parameters; lora_send transmits one message; lora_recv runs
@@ -2789,12 +2507,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // may also return the packet directly in its ACK). Disabled when disconnected.
     private val _loraPackets = MutableStateFlow<List<LoraPacket>>(emptyList())
     val loraPackets: StateFlow<List<LoraPacket>> = _loraPackets.asStateFlow()
-    private val _loraStatus = MutableStateFlow("")
-    val loraStatus: StateFlow<String> = _loraStatus.asStateFlow()
-    private val _loraReceiving = MutableStateFlow(false)
-    val loraReceiving: StateFlow<Boolean> = _loraReceiving.asStateFlow()
 
-    private fun loraErrMessage(out: String) = out.ifBlank { "No LoRa module on this device." }
 
     /** Append a LoRa packet from an EVENT lora.rx data object or an lora_recv ACK data object. */
     private fun addLoraPacket(r: JSONObject) {
@@ -2812,112 +2525,36 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      * Apply the LoRa radio configuration (lora_config <freqMHz> [bw] [sf] [cr]). Blank optional
      * fields are omitted. The final ACK is reflected on the status line.
      */
-    fun loraConfig(freqMHz: String, bw: String = "", sf: String = "", cr: String = "") {
-        if (client == null) { _loraStatus.value = "Connect the device over USB first."; return }
-        val freq = freqMHz.trim()
-        if (freq.isEmpty()) { _loraStatus.value = "Enter a frequency in MHz."; return }
-        val args = listOf(freq, bw.trim(), sf.trim(), cr.trim())
-        // Keep positional ordering: drop only trailing blanks so bw/sf/cr stay in place.
-        val tail = args.drop(1).dropLastWhile { it.isEmpty() }
-        val cmd = ("lora_config " + (listOf(freq) + tail).joinToString(" ")).trim()
-        _loraStatus.value = "Applying LoRa config..."
-        dispatchCmd(cmd) { ok, out ->
-            _loraStatus.value = if (ok) out.ifBlank { "LoRa configured." } else loraErrMessage(out)
-        }
-    }
+    fun loraConfig(freqMHz: String, bw: String = "", sf: String = "", cr: String = "") = lora.configure(freqMHz, bw, sf, cr)
 
     /** Transmit one LoRa message (lora_send <text>). The ACK result is shown on the status line. */
-    fun loraSend(text: String) {
-        if (client == null) { _loraStatus.value = "Connect the device over USB first."; return }
-        val msg = text.trim()
-        if (msg.isEmpty()) { _loraStatus.value = "Enter a message to send."; return }
-        _loraStatus.value = "Sending..."
-        dispatchCmd("lora_send $msg") { ok, out ->
-            _loraStatus.value = if (ok) out.ifBlank { "Sent." } else loraErrMessage(out)
-        }
-    }
+    fun loraSend(text: String) = lora.send(text)
 
     /**
      * Listen for LoRa packets for [seconds] (lora_recv <secs>). Packets arrive via EVENT lora.rx;
      * a short recv may also return one directly in its ACK data. Fire-and-ack; stop is local.
      */
-    fun loraRecv(seconds: Int = 20) {
-        if (client == null) { _loraStatus.value = "Connect the device over USB first."; return }
-        _loraReceiving.value = true
-        _loraStatus.value = "Listening for LoRa packets (${seconds}s)..."
-        dispatchCmdJson("lora_recv $seconds") { ok, d ->
-            _loraReceiving.value = false
-            if (ok) {
-                // A packet may be returned directly in the ACK data object.
-                d?.optJSONObject("data")?.let { addLoraPacket(it) }
-                _loraStatus.value = d?.optString("out").orEmpty().ifBlank { "Receive complete." }
-            } else {
-                _loraStatus.value = loraErrMessage(d?.optString("out").orEmpty())
-            }
-        }
-    }
+    fun loraRecv(seconds: Int = 20) = lora.receive(seconds)
 
-    fun stopLoraRecv() { _loraReceiving.value = false }
+    fun stopLoraRecv() = lora.stopReceive()
 
     fun clearLoraPackets() { _loraPackets.value = emptyList() }
 
     // --- Ethernet (status / config) --------------------------------------------
     // eth_status reports link state + IP; eth_config applies network settings. Disabled when
     // disconnected.
-    private val _ethStatus = MutableStateFlow<EthStatus?>(null)
-    val ethStatus: StateFlow<EthStatus?> = _ethStatus.asStateFlow()
-    private val _ethMessage = MutableStateFlow("")
-    val ethMessage: StateFlow<String> = _ethMessage.asStateFlow()
-
-    private fun ethErrMessage(out: String) = out.ifBlank { "No Ethernet on this device." }
 
     /** Query Ethernet link + IP (eth_status). The ACK data carries {link, ip}. */
-    fun ethStatus() {
-        if (client == null) { _ethMessage.value = "Connect the device over USB first."; return }
-        _ethMessage.value = "Querying Ethernet..."
-        dispatchCmdJson("eth_status") { ok, d ->
-            if (ok) {
-                _ethStatus.value = EthStatus(
-                    link = d?.optBoolean("link", false) ?: false,
-                    ip = d?.optString("ip").orEmpty(),
-                    detail = d?.optString("out").orEmpty(),
-                )
-                _ethMessage.value = ""
-            } else {
-                _ethMessage.value = ethErrMessage(d?.optString("out").orEmpty())
-            }
-        }
-    }
+    fun ethStatus() = ethernet.refresh()
 
     /** Apply Ethernet configuration (eth_config <...>); [args] is the raw argument string. */
-    fun ethConfig(args: String) {
-        if (client == null) { _ethMessage.value = "Connect the device over USB first."; return }
-        val a = args.trim()
-        val cmd = if (a.isEmpty()) "eth_config" else "eth_config $a"
-        _ethMessage.value = "Applying Ethernet config..."
-        dispatchCmd(cmd) { ok, out ->
-            _ethMessage.value = if (ok) out.ifBlank { "Ethernet configured." } else ethErrMessage(out)
-            if (ok) ethStatus()
-        }
-    }
+    fun ethConfig(args: String) = ethernet.configure(args)
 
     /** DHCP-starvation flood over Ethernet: eth_dhcp_starve [secs]. Authorized use only. */
-    fun ethDhcpStarve(secs: Int = 10) {
-        if (client == null) { _ethMessage.value = "Connect the device over USB first."; return }
-        _ethMessage.value = "DHCP starvation running (${secs}s)..."
-        dispatchCmd("eth_dhcp_starve $secs") { ok, out ->
-            _ethMessage.value = if (ok) out.ifBlank { "DHCP starvation done." } else ethErrMessage(out)
-        }
-    }
+    fun ethDhcpStarve(secs: Int = 10) = ethernet.dhcpStarve(secs)
 
     /** MAC-flooding over Ethernet: eth_mac_flood [secs]. Authorized use only. */
-    fun ethMacFlood(secs: Int = 10) {
-        if (client == null) { _ethMessage.value = "Connect the device over USB first."; return }
-        _ethMessage.value = "MAC flooding running (${secs}s)..."
-        dispatchCmd("eth_mac_flood $secs") { ok, out ->
-            _ethMessage.value = if (ok) out.ifBlank { "MAC flooding done." } else ethErrMessage(out)
-        }
-    }
+    fun ethMacFlood(secs: Int = 10) = ethernet.macFlood(secs)
 
     // --- FM audio transmitter --------------------------------------------------
     // Streams 16 kHz mono 16-bit PCM to the device as base64 fm_audio_data chunks, paced to
@@ -2967,15 +2604,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Suspend until the begin ACK arrives (or a short timeout), returning ok + message. */
     private suspend fun fmBegin(cmd: String): Pair<Boolean, String> {
-        val c = client ?: return false to "Not connected."
-        return withTimeoutOrNull(4000) {
-            suspendCancellableCoroutine<Pair<Boolean, String>> { cont ->
-                val id = c.nextId()
-                pendingAcks[id] = { ok, out -> if (cont.isActive) cont.resumeWith(Result.success(ok to out)) }
-                cont.invokeOnCancellation { pendingAcks.remove(id) }
-                transmitCommand(c, cmd, id)
-            }
-        } ?: (false to "No response from the device.")
+        val s = session ?: return false to "Not connected."
+        return s.await(cmd, 4000)
     }
 
     /**
@@ -3048,48 +2678,22 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         if (client == null) { _beaconStatus.value = "Connect the device over USB first."; return }
         val list = ssids.map { it.trim() }.filter { it.isNotEmpty() }
         if (list.isEmpty()) { _beaconStatus.value = "Add at least one SSID or a number of fake APs."; return }
-        stopBeaconSpam(silent = true)
         if (_micPcmActive.value) stopMicPcm()
-        _beaconActive.value = true
-        _beaconStatus.value = "Broadcasting ${list.size} SSID(s)... (Stop to end)"
         val payload = list.joinToString("\n")
         _console.value = (_console.value + "> wifi_beacon_spam loop (${list.size} SSIDs)").takeLast(500)
-        beaconSpamJob = viewModelScope.launch(Dispatchers.IO) {
-            val myJob = coroutineContext[Job]
-            try {
-                while (isActive && _beaconActive.value && transport?.isOpen == true) {
-                    val (ok, out) = sendAwait("wifi_beacon_spam $SPAM_BURST_SECS $payload")
-                    if (!ok && out.isNotBlank()) { _beaconStatus.value = out; break }
-                }
-            } finally {
-                if (beaconSpamJob === myJob) {
-                    _beaconActive.value = false
-                    if (_beaconStatus.value.startsWith("Broadcasting")) _beaconStatus.value = "Stopped."
-                }
-            }
-        }
+        beaconLoop.start("Broadcasting ${list.size} SSID(s)... (Stop to end)", { "wifi_beacon_spam $SPAM_BURST_SECS $payload" }, burstTimeoutMs)
     }
 
     /** Stop the Wi-Fi beacon spam loop. [silent] keeps the status line (used when restarting). */
-    fun stopBeaconSpam(silent: Boolean = false) {
-        beaconSpamJob?.cancel()
-        beaconSpamJob = null
-        _beaconActive.value = false
-        if (!silent) _beaconStatus.value = "Stopped."
-    }
+    fun stopBeaconSpam(silent: Boolean = false) = beaconLoop.stop(silent)
 
     /**
      * Stop every abortable short-burst loop at once (BLE/Wi-Fi spam, Wi-Fi deauth, all NRF24 ops).
      * Used on [disconnect] and whenever an audio stream (mic.pcm) needs the single-threaded link.
      */
     private fun stopAllBurstLoops(silent: Boolean) {
-        stopBleSpam(silent = silent)
-        stopBeaconSpam(silent = silent)
-        stopDeauth(silent = silent)
-        stopNrf24Scan(silent = silent)
-        stopNrf24Sniff(silent = silent)
-        stopNrf24Jammer(silent = silent)
-        stopNrf24MouseJack(silent = silent)
+        burstLoops.stopAll(silent)
+        _deauthTarget.value = ""
     }
 
     /**
@@ -3405,21 +3009,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         activeStreams.clear()
         pendingStreamIds.clear()
         fileReader.disconnect()
-        val failedAcks = pendingAcks.keys.mapNotNull { pendingAcks.remove(it) }
-        val failedJsonAcks = pendingJsonAcks.keys.mapNotNull { pendingJsonAcks.remove(it) }
         readJob?.cancel()
         readJob = null
         pingJob?.cancel()
         pingJob = null
+        val closing = session
+        session = null
         client = null
         transport?.close()
         transport = null
-        failedAcks.forEach { callback ->
-            try { callback(false, "Disconnected") } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "disconnect callback", e) }
-        }
-        failedJsonAcks.forEach { callback ->
-            try { callback(false, JSONObject().put("msg", "Disconnected")) } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "disconnect callback", e) }
-        }
+        closing?.close("Disconnected")
         _status.value = "Disconnected"
         _transportKind.value = "none"
         _wardriving.value = false
@@ -3540,20 +3139,20 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         if (_device.value?.features?.verifiedFiles != true)
             return app.brucia.files.FileReadResult(error = "Update device firmware to enable verified file transfers")
         app.brucia.files.DeviceFilePush.pathError(path)?.let { return app.brucia.files.FileReadResult(error = it) }
-        val c = client ?: return app.brucia.files.FileReadResult(error = "Not connected.")
-        val id = c.nextId()
+        val s = session ?: return app.brucia.files.FileReadResult(error = "Not connected.")
+        val id = s.nextId()
         return fileTransferMutex.withLock {
         try {
             fileReader.read(id) {
-                pendingJsonAcks[id] = { ok, data ->
+                s.expectJson(id) { ok, data ->
                     fileReader.reply(id, ok, data?.optLong("size", -1) ?: -1,
                         data?.optString("msg")?.ifBlank { data.optString("out") } ?: "",
                         data?.optLong("crc32", -1) ?: -1)
                 }
-                transmitCommand(c, "fs_read $path", id)
+                s.transmit("fs_read $path", id)
             }
         } finally {
-            pendingJsonAcks.remove(id)
+            s.release(id)
         }
         }
     }
@@ -3630,11 +3229,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Await one command's ACK without logging the full command text (used for base64 file chunks). */
-    private suspend fun sendNoLog(cmd: String, c: CompanionClient, expectedSize: Int, timeoutMs: Long = 8000): Pair<Boolean, String> {
-        if (client !== c) return false to "Connection changed; upload stopped."
-        val id = c.nextId()
-        val result = app.brucia.protocol.awaitReply(pendingJsonAcks, id, timeoutMs,
-            JSONObject().put("msg", "No response from the device.")) { transmitCommand(c, cmd, id) }
+    private suspend fun sendNoLog(cmd: String, s: app.brucia.session.CommandSession, expectedSize: Int, timeoutMs: Long = 8000): Pair<Boolean, String> {
+        if (session !== s) return false to "Connection changed; upload stopped."
+        val result = s.awaitJson(cmd, timeoutMs)
         val data = result.second
         val ok = result.first && data?.optLong("size", -1) == expectedSize.toLong()
         return ok to if (ok) "" else data?.optString("msg")?.ifBlank { "File write size mismatch" } ?: "File write failed"
@@ -3650,8 +3247,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         if (_device.value?.features?.verifiedFiles != true) {
             onDone(false, "Update device firmware to enable verified file transfers"); return
         }
-        val c = client
-        if (c == null) { onDone(false, "Not connected."); return }
+        val s = session
+        if (s == null) { onDone(false, "Not connected."); return }
         app.brucia.files.DeviceFilePush.pathError(path)?.let { onDone(false, it); return }
         if (bytes.size > 16 * 1024 * 1024) { onDone(false, "File exceeds 16 MiB transfer limit"); return }
         val chunks = app.brucia.files.DeviceFilePush.chunk(bytes)
@@ -3662,7 +3259,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 var last = ""
                 for ((i, ch) in chunks.withIndex()) {
                     val b64 = Base64.encodeToString(ch, Base64.NO_WRAP)
-                    val (cok, out) = sendNoLog(app.brucia.files.DeviceFilePush.command(path, i, b64), c, ch.size)
+                    val (cok, out) = sendNoLog(app.brucia.files.DeviceFilePush.command(path, i, b64), s, ch.size)
                     last = out
                     if (!cok) { ok = false; break }
                 }
@@ -3881,122 +3478,126 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     //   clock_get                -> ACK {ok, out:"<iso>"}
     //   clock_set <epoch>        -> ACK {ok, out}
 
-    private val _scriptOutput = MutableStateFlow("")
-    val scriptOutput: StateFlow<String> = _scriptOutput.asStateFlow()
 
-    private val _ibuttonStatus = MutableStateFlow("")
-    val ibuttonStatus: StateFlow<String> = _ibuttonStatus.asStateFlow()
+    // Feature services talk to the device through this seam; it adds the command log and keeps
+    // blocking USB writes off the main thread (viewModelScope dispatches on Main).
+    private val commandRunner = CommandRunner { cmd, timeoutMs ->
+        withContext(Dispatchers.IO) { sendAwait(cmd, timeoutMs) }
+    }
+    private val jsonRunner = JsonCommandRunner { cmd, timeoutMs ->
+        withContext(Dispatchers.IO) { sendAwaitJson(cmd, timeoutMs) }
+    }
 
-    private val _clockStatus = MutableStateFlow("")
-    val clockStatus: StateFlow<String> = _clockStatus.asStateFlow()
+    // Abortable short-burst loops. Every loop registers with [burstLoops] when first built, so
+    // stopAllBurstLoops() cannot miss one. Lazy: a loop that never started needs no stopping.
+    private val burstLoops = BurstLoopRegistry()
+    private fun burstLoop(line: MutableStateFlow<String> = MutableStateFlow("")) =
+        BurstLoop(viewModelScope, commandRunner, { transport?.isOpen == true }, burstLoops, line)
+
+    // LoRa and Ethernet (optional modules; replies carry structured data, hence jsonRunner).
+    private val lora = LoraService(viewModelScope, commandRunner, jsonRunner, isConnected = { session != null }) { addLoraPacket(it) }
+    val loraStatus: StateFlow<String> = lora.status
+    val loraReceiving: StateFlow<Boolean> = lora.receiving
+    private val ethernet = EthernetService(viewModelScope, commandRunner, jsonRunner, isConnected = { session != null })
+    val ethStatus: StateFlow<EthStatus?> = ethernet.status
+    val ethMessage: StateFlow<String> = ethernet.message
+
+    // Advanced NFC lines (NDEF push, EMV, UID write, advanced tiles), independent of each other.
+    // nfcNdefStatus is shared by the NFC screen's push card and the Spam hub's NFC tile.
+    private val nfcTools = NfcToolsService(viewModelScope, commandRunner, isConnected = { session != null })
+    val nfcNdefStatus: StateFlow<String> = nfcTools.ndefStatus
+    val nfcEmvStatus: StateFlow<String> = nfcTools.emvStatus
+    val nfcUidStatus: StateFlow<String> = nfcTools.uidStatus
+    val nfcAdvStatus: StateFlow<String> = nfcTools.advStatus
+
+    // IR receive/capture and TV-B-Gone (declared after commandRunner: property init order).
+    private val irRx = IrReceiveService(viewModelScope, commandRunner, isConnected = { session != null }) { key ->
+        _remoteKeys.value = _remoteKeys.value + key
+        saveRemoteKeys()
+    }
+    val irRxStatus: StateFlow<String> = irRx.rxStatus
+    val irRxResult: StateFlow<IrButton?> = irRx.rxResult
+    val remoteCapture: StateFlow<String> = irRx.captureStatus
+    private val tvbGone = TvBGoneService(viewModelScope, commandRunner, isConnected = { session != null })
+    val irTvBGoneStatus: StateFlow<String> = tvbGone.status
+
+    // BLE HID / BadBLE / media control (authorized use; see the ble/ services).
+    private val bleHid = BleHidService(viewModelScope, commandRunner, isConnected = { session != null })
+    val bleHidStatus: StateFlow<String> = bleHid.status
+    private val badBle = BadBleService(viewModelScope, commandRunner, isConnected = { session != null })
+    val badbleStatus: StateFlow<String> = badBle.status
+    private val bleMediaService = BleMediaService(viewModelScope, commandRunner, isConnected = { session != null })
+    val bleMediaStatus: StateFlow<String> = bleMediaService.status
+
+    private val ibutton = IButtonService(
+        viewModelScope, commandRunner,
+        isConnected = { session != null },
+        hasInterface = { _device.value?.caps?.ibutton == true }, // same source as the session preflight
+    )
+    val ibuttonStatus: StateFlow<String> = ibutton.status
+    val ibuttonBusy: StateFlow<Boolean> = ibutton.busy
+
+    private val clock = ClockService(viewModelScope, commandRunner, isConnected = { session != null })
+    val clockStatus: StateFlow<String> = clock.status
+
+    private val script = ScriptService(viewModelScope, commandRunner, isConnected = { session != null })
+    val scriptOutput: StateFlow<String> = script.output
+
+    private val espNow = EspNowService(viewModelScope, commandRunner, isConnected = { session != null })
+    val espnowStatus: StateFlow<String> = espNow.status
 
     // --- Audio (speaker / mic) + ESP-NOW (fixed contract; firmware built in parallel) ---
-    private val _speakerStatus = MutableStateFlow("")
-    val speakerStatus: StateFlow<String> = _speakerStatus.asStateFlow()
+    private val speaker = SpeakerService(viewModelScope, commandRunner, isConnected = { session != null })
+    val speakerStatus: StateFlow<String> = speaker.status
 
-    private val _micStatus = MutableStateFlow("")
-    val micStatus: StateFlow<String> = _micStatus.asStateFlow()
+    private val micRecorder = MicRecordService(viewModelScope, commandRunner, isConnected = { session != null })
+    val micStatus: StateFlow<String> = micRecorder.status
 
-    private val _espnowStatus = MutableStateFlow("")
-    val espnowStatus: StateFlow<String> = _espnowStatus.asStateFlow()
 
     /** Run a JavaScript source on the device; the captured output lands on [scriptOutput]. */
-    fun scriptRun(src: String) {
-        if (client == null) { _scriptOutput.value = "Connect the device over USB first."; return }
-        if (src.isBlank()) { _scriptOutput.value = "Nothing to run."; return }
-        _scriptOutput.value = "Running..."
-        dispatchCmd("script_run $src") { ok, out ->
-            _scriptOutput.value = if (ok) out.ifBlank { "(no output)" } else out.ifBlank { "Script failed." }
-        }
-    }
+    fun scriptRun(src: String) = script.run(src)
 
-    fun clearScriptOutput() { _scriptOutput.value = "" }
+    /** Clear the script output (kept while a script is still running). */
+    fun clearScriptOutput() = script.clear()
 
     /** Read an iButton / 1-Wire id; result surfaced on [ibuttonStatus]. */
-    fun ibuttonRead() {
-        if (client == null) { _ibuttonStatus.value = "Connect the device over USB first."; return }
-        _ibuttonStatus.value = "Reading - touch an iButton to the probe..."
-        dispatchCmd("ibutton_read") { ok, out ->
-            _ibuttonStatus.value = if (ok) out.ifBlank { "No iButton read." } else out.ifBlank { "Read failed." }
-        }
-    }
+    fun ibuttonRead() = ibutton.read()
 
     /** Write a hex id onto a writable iButton; result surfaced on [ibuttonStatus]. */
-    fun ibuttonWrite(hex: String) {
-        if (client == null) { _ibuttonStatus.value = "Connect the device over USB first."; return }
-        if (hex.isBlank()) { _ibuttonStatus.value = "Enter an id to write."; return }
-        _ibuttonStatus.value = "Writing $hex..."
-        dispatchCmd("ibutton_write $hex") { ok, out ->
-            _ibuttonStatus.value = if (ok) out.ifBlank { "Wrote $hex." } else out.ifBlank { "Write failed." }
-        }
-    }
+    fun ibuttonWrite(hex: String) = ibutton.write(hex)
+
+    /** Cancel the in-flight iButton read/write; its late reply is ignored. */
+    fun ibuttonStop() = ibutton.stop()
 
     /** Read the device clock; result surfaced on [clockStatus]. */
-    fun clockGet() {
-        if (client == null) { _clockStatus.value = "Connect the device over USB first."; return }
-        _clockStatus.value = "Reading clock..."
-        dispatchCmd("clock_get") { ok, out ->
-            _clockStatus.value = if (ok) out.ifBlank { "(no time)" } else out.ifBlank { "Clock read failed." }
-        }
-    }
+    fun clockGet() = clock.get()
 
     /** Set the device clock from a Unix epoch (seconds); result surfaced on [clockStatus]. */
-    fun clockSet(epoch: Long) {
-        if (client == null) { _clockStatus.value = "Connect the device over USB first."; return }
-        _clockStatus.value = "Syncing clock..."
-        dispatchCmd("clock_set $epoch") { ok, out ->
-            _clockStatus.value = if (ok) out.ifBlank { "Clock synced." } else out.ifBlank { "Clock sync failed." }
-        }
-    }
+    fun clockSet(epoch: Long) = clock.set(epoch)
 
     // --- Device theme / LED control (device UI color wins; app matches via DeviceInfo.themeRgb565) ---
-    private val _themeStatus = MutableStateFlow("")
-    val themeStatus: StateFlow<String> = _themeStatus.asStateFlow()
+    // Success reflects the color in the app immediately, without waiting for the next CAPS.
+    private val appearance = DeviceAppearanceService(
+        viewModelScope, commandRunner, isConnected = { session != null },
+        onThemeApplied = { rgb565 -> _device.value = _device.value?.copy(themeRgb565 = rgb565) },
+        onLedApplied = { rgb -> _device.value = _device.value?.copy(ledRgb = rgb) },
+    )
+    val themeStatus: StateFlow<String> = appearance.status
 
     /** Set the device UI theme color from an 0xRRGGBB value (converted to RGB565 for the device). */
-    fun setDeviceTheme(rgb: Int) {
-        if (client == null) { _themeStatus.value = "Connect the device over USB first."; return }
-        val r = (rgb shr 16) and 0xFF; val g = (rgb shr 8) and 0xFF; val b = rgb and 0xFF
-        val rgb565 = ((r and 0xF8) shl 8) or ((g and 0xFC) shl 3) or (b shr 3)
-        dispatchCmd("theme_set %04x".format(rgb565)) { ok, out ->
-            _themeStatus.value = out.ifBlank { if (ok) "Theme set." else "Failed." }
-            // Reflect immediately in the app without waiting for the next CAPS.
-            if (ok) _device.value = _device.value?.copy(themeRgb565 = rgb565)
-        }
-    }
+    fun setDeviceTheme(rgb: Int) = appearance.setTheme(rgb)
 
     /** Set the device LED color (0xRRGGBB). */
-    fun setDeviceLedColor(rgb: Int) {
-        if (client == null) { _themeStatus.value = "Connect the device over USB first."; return }
-        dispatchCmd("led_set %06x".format(rgb and 0xFFFFFF)) { ok, out ->
-            _themeStatus.value = out.ifBlank { if (ok) "LED set." else "Failed." }
-            if (ok) _device.value = _device.value?.copy(ledRgb = rgb and 0xFFFFFF)
-        }
-    }
+    fun setDeviceLedColor(rgb: Int) = appearance.setLedColor(rgb)
 
     /** Persist the current device theme/LED config to flash (the Theme "Save" button). */
-    fun saveDeviceConfig() {
-        if (client == null) { _themeStatus.value = "Connect the device over USB first."; return }
-        dispatchCmd("config_save") { ok, out ->
-            _themeStatus.value = if (ok) "Saved to device." else "Save failed: ${out.ifBlank { "error" }}"
-        }
-    }
+    fun saveDeviceConfig() = appearance.save()
 
     /** Onboard LED brightness 0..100 %: led_bright <pct>. */
-    fun setLedBright(pct: Int) {
-        if (client == null) { _themeStatus.value = "Connect the device over USB first."; return }
-        dispatchCmd("led_bright ${pct.coerceIn(0, 100)}") { ok, out ->
-            _themeStatus.value = out.ifBlank { if (ok) "LED brightness set." else "Failed." }
-        }
-    }
+    fun setLedBright(pct: Int) = appearance.setLedBright(pct)
 
     /** Onboard LED animation 0..9 (0=solid): led_effect <n>. */
-    fun setLedEffect(effect: Int) {
-        if (client == null) { _themeStatus.value = "Connect the device over USB first."; return }
-        dispatchCmd("led_effect ${effect.coerceIn(0, 9)}") { ok, out ->
-            _themeStatus.value = out.ifBlank { if (ok) "LED effect set." else "Failed." }
-        }
-    }
+    fun setLedEffect(effect: Int) = appearance.setLedEffect(effect)
 
     /** Device screen brightness 0..100 %: scr_bright <pct>. */
     fun setScreenBright(pct: Int) {
@@ -4005,226 +3606,95 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Speaker volume (bruceConfig.soundVolume 0-100 via companion `speaker_volume <pct>`) ---
-    private val _speakerVolume = MutableStateFlow(100)
-    val speakerVolume: StateFlow<Int> = _speakerVolume.asStateFlow()
+    val speakerVolume: StateFlow<Int> = speaker.volume
 
     /** Set the device speaker volume (0-100). Persists in the device config. */
-    fun setSpeakerVolume(pct: Int) {
-        val v = pct.coerceIn(0, 100)
-        _speakerVolume.value = v
-        if (client == null) { _speakerStatus.value = "Connect the device over USB first."; return }
-        dispatchCmd("speaker_volume $v") { ok, out ->
-            _speakerStatus.value = if (ok) out.ifBlank { "Volume ${v}%" } else out.ifBlank { "Volume failed." }
-        }
-    }
+    fun setSpeakerVolume(pct: Int) = speaker.setVolume(pct)
 
     /** Play a tone on the device speaker: speaker_tone <freqHz> <ms>. Result on [speakerStatus]. */
-    fun speakerTone(freqHz: Int, ms: Int) {
-        if (client == null) { _speakerStatus.value = "Connect the device over USB first."; return }
-        if (freqHz <= 0 || ms <= 0) { _speakerStatus.value = "Enter a frequency and duration."; return }
-        _speakerStatus.value = "Playing ${freqHz}Hz for ${ms}ms..."
-        dispatchCmd("speaker_tone $freqHz $ms") { ok, out ->
-            _speakerStatus.value = if (ok) out.ifBlank { "Tone played." } else out.ifBlank { "Tone failed." }
-        }
-    }
+    fun speakerTone(freqHz: Int, ms: Int) = speaker.tone(freqHz, ms)
 
-    // --- Song player: sequence speaker_tone commands to play a melody (RTTTL / meme presets) ---
-    private var songJob: Job? = null
-    private val _songPlaying = MutableStateFlow("")
-    val songPlaying: StateFlow<String> = _songPlaying.asStateFlow()
+    // --- Song player: the whole RTTTL string goes to the native on-device player (speaker_song,
+    // async on the device, so speaker_stop can interrupt it) ---
+    val songPlaying: StateFlow<String> = speaker.songPlaying
 
-    /** Play a melody on the device by sending the whole RTTTL string to the native on-device player
-     *  (one command -> correct timing, no per-note USB round-trips). [name] for status. */
-    fun playSong(name: String, rtttl: String) {
-        if (client == null) { _speakerStatus.value = "Connect the device over USB first."; return }
-        _songPlaying.value = name
-        // Play in the BACKGROUND on the device (speaker_song = async) so Stop (speaker_stop) can
-        // actually interrupt it. The old blocking speaker_rtttl kept the device busy, so cancelling
-        // the app coroutine did nothing and the melody played to the end.
-        dispatchCmd("speaker_song $rtttl") { ok, out ->
-            if (!ok) { _songPlaying.value = ""; _speakerStatus.value = out.ifBlank { "Song failed." } }
-        }
-    }
+    /** Play a melody on the device; [name] is shown while it plays. */
+    fun playSong(name: String, rtttl: String) = speaker.playSong(name, rtttl)
 
-    fun stopSong() {
-        songJob?.cancel()
-        songJob = null
-        _songPlaying.value = ""
-        if (client != null) dispatchCmd("speaker_stop")
-    }
+    fun stopSong() = speaker.stopSong()
 
     /** Play an audio file on the device speaker: speaker_play <path>. Result on [speakerStatus]. */
-    fun speakerPlay(path: String) {
-        if (client == null) { _speakerStatus.value = "Connect the device over USB first."; return }
-        val p = path.trim()
-        if (p.isEmpty()) { _speakerStatus.value = "Enter a file path first."; return }
-        _speakerStatus.value = "Playing $p..."
-        dispatchCmd("speaker_play $p") { ok, out ->
-            _speakerStatus.value = if (ok) out.ifBlank { "Playback started." } else out.ifBlank { "Playback failed." }
-        }
-    }
+    fun speakerPlay(path: String) = speaker.playFile(path)
 
     /** Record from the device mic for [secs] seconds: mic_record <secs>. Saved path on [micStatus]. */
-    fun micRecord(secs: Int) {
-        if (client == null) { _micStatus.value = "Connect the device over USB first."; return }
-        if (secs <= 0) { _micStatus.value = "Enter a duration in seconds."; return }
-        _micStatus.value = "Recording ${secs}s..."
-        dispatchCmd("mic_record $secs") { ok, out ->
-            _micStatus.value = if (ok) out.ifBlank { "Recording saved." } else out.ifBlank { "Recording failed." }
-        }
-    }
+    fun micRecord(secs: Int) = micRecorder.record(secs)
 
     // --- Wi-Fi MAC (Bruce "Change MAC" parity) --------------------------------
-    private val _wifiMac = MutableStateFlow("")
-    val wifiMac: StateFlow<String> = _wifiMac.asStateFlow()
+    private val wifiMacService = WifiMacService(viewModelScope, commandRunner, isConnected = { session != null })
+    val wifiMac: StateFlow<String> = wifiMacService.status
 
     /** Ask the device for its current STA MAC: wifi_get_mac. */
-    fun getWifiMac() {
-        if (client == null) { _wifiMac.value = "Connect the device over USB first."; return }
-        dispatchCmd("wifi_get_mac") { ok, out ->
-            _wifiMac.value = if (ok) out.trim() else "error: ${out.ifBlank { "failed" }}"
-        }
-    }
+    fun getWifiMac() = wifiMacService.get()
 
     /** Set the device STA MAC: wifi_set_mac <mac|random>. Result on [wifiMac]. */
-    fun setWifiMac(mac: String) {
-        if (client == null) { _wifiMac.value = "Connect the device over USB first."; return }
-        val m = mac.trim().ifBlank { "random" }
-        _wifiMac.value = "Setting..."
-        dispatchCmd("wifi_set_mac $m") { ok, out ->
-            _wifiMac.value = if (ok) out.trim().ifBlank { "MAC set." } else "error: ${out.ifBlank { "failed" }}"
-        }
-    }
+    fun setWifiMac(mac: String) = wifiMacService.set(mac)
 
     // --- Brucegotchi (Pwnagotchi parity): headless WPA-handshake collector -----
-    private val _brucegotchiStatus = MutableStateFlow("")
-    val brucegotchiStatus: StateFlow<String> = _brucegotchiStatus.asStateFlow()
+    // Long, bounded, early-stoppable ops. The stop frame goes straight to the device (polled by
+    // the firmware mid-run, never ACKed), so it is neither logged nor awaited.
+    private val directStop = CommandRunner { cmd, _ ->
+        withContext(Dispatchers.IO) {
+            try { client?.cmd(cmd) } catch (e: Exception) { BruciaLog.d("Op", "$cmd: ${e.message}") }
+        }
+        true to ""
+    }
+    private val responder = ResponderService(viewModelScope, commandRunner, isConnected = { session != null }, stopRunner = directStop)
+    private val karma = KarmaService(viewModelScope, commandRunner, isConnected = { session != null }, stopRunner = directStop)
+    private val brucegotchi = BrucegotchiService(viewModelScope, commandRunner, isConnected = { session != null }, stopRunner = directStop)
+    val brucegotchiStatus: StateFlow<String> = brucegotchi.status
 
     // --- BLE HID presenter / keyboard (parity with Bruce BLE Keyboard / Presenter) ---
-    private val _bleHidStatus = MutableStateFlow("off")
-    val bleHidStatus: StateFlow<String> = _bleHidStatus.asStateFlow()
-    fun bleHidBegin() {
-        if (client == null) { _bleHidStatus.value = "Connect the device over USB first."; return }
-        _bleHidStatus.value = "Starting..."
-        dispatchCmd("ble_hid_begin") { ok, out -> _bleHidStatus.value = if (ok) out.ifBlank { "advertising" } else out.ifBlank { "failed" } }
-    }
-    fun bleHidEnd() { if (client != null) dispatchCmd("ble_hid_end") { _, _ -> _bleHidStatus.value = "off" } }
-    fun bleHidRefresh() { if (client != null) dispatchCmd("ble_hid_status") { ok, out -> if (ok) _bleHidStatus.value = out } }
-    fun bleHidKey(name: String) { if (client != null) dispatchCmd("ble_hid_key $name") { ok, out -> if (!ok) _bleHidStatus.value = out } }
-    fun bleHidType(text: String) { if (client != null && text.isNotEmpty()) dispatchCmd("ble_hid_type $text") { ok, out -> if (!ok) _bleHidStatus.value = out } }
+    fun bleHidBegin() = bleHid.begin()
+    fun bleHidEnd() = bleHid.end()
+    fun bleHidRefresh() = bleHid.refresh()
+    fun bleHidKey(name: String) = bleHid.key(name)
+    fun bleHidType(text: String) = bleHid.type(text)
 
     // --- Responder (LLMNR/NBT-NS poisoning), headless. Authorized use only; needs Wi-Fi joined. ---
-    /**
-     * Early-stop for the long one-shot blocking ops (karma / responder / jam_detect / brucegotchi):
-     * sends a generic "stop" the firmware polls mid-run. Sent directly (not via the serialized queue,
-     * which is blocked behind the still-running command).
-     */
-    fun stopLongOp() {
-        val c = client ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            try { c.cmd("stop") } catch (e: Exception) { app.brucia.BruciaLog.d("Op", "stop: ${e.message}") }
-        }
-    }
-
-    private val _responderStatus = MutableStateFlow("")
-    val responderStatus: StateFlow<String> = _responderStatus.asStateFlow()
-    private val _responderRunning = MutableStateFlow(false)
-    val responderRunning: StateFlow<Boolean> = _responderRunning.asStateFlow()
-    fun startResponder(secs: Int) {
-        if (client == null) { _responderStatus.value = "Connect the device over USB first."; return }
-        _responderRunning.value = true
-        _responderStatus.value = "Running ${secs}s - join the device to the target Wi-Fi first (Connect tool). Answering LLMNR/NBT-NS name queries with the device IP (authorized use)... (Stop to end early)"
-        dispatchCmd("responder $secs") { ok, out ->
-            _responderRunning.value = false
-            _responderStatus.value = if (ok) "Done - ${out.ifBlank { "finished" }}" else "Failed: ${out.ifBlank { "error" }}"
-        }
-    }
+    val responderStatus: StateFlow<String> = responder.status
+    val responderRunning: StateFlow<Boolean> = responder.running
+    fun startResponder(secs: Int) = responder.start(secs)
+    /** End Responder early: the firmware polls "stop" mid-run and still ACKs the result. */
+    fun stopResponder() = responder.stop()
 
     // --- Karma (evil-twin probe-response lure), headless. Authorized use only. ---
-    private val _karmaStatus = MutableStateFlow("")
-    val karmaStatus: StateFlow<String> = _karmaStatus.asStateFlow()
-    private val _karmaRunning = MutableStateFlow(false)
-    val karmaRunning: StateFlow<Boolean> = _karmaRunning.asStateFlow()
-
+    val karmaStatus: StateFlow<String> = karma.status
+    val karmaRunning: StateFlow<Boolean> = karma.running
     /** Run the headless Karma attack for [secs] seconds: karma <secs>. Authorized use only. */
-    fun startKarma(secs: Int) {
-        if (client == null) { _karmaStatus.value = "Connect the device over USB first."; return }
-        _karmaRunning.value = true
-        _karmaStatus.value = "Running ${secs}s - the device answers clients' probe requests to lure them (authorized use). The device screen shows Karma... (Stop to end early)"
-        dispatchCmd("karma $secs") { ok, out ->
-            _karmaRunning.value = false
-            _karmaStatus.value = if (ok) "Done - ${out.ifBlank { "finished" }}" else "error: ${out.ifBlank { "failed" }}"
-        }
-    }
+    fun startKarma(secs: Int) = karma.start(secs)
+    fun stopKarma() = karma.stop()
 
-    private val _brucegotchiRunning = MutableStateFlow(false)
-    val brucegotchiRunning: StateFlow<Boolean> = _brucegotchiRunning.asStateFlow()
-
+    val brucegotchiRunning: StateFlow<Boolean> = brucegotchi.running
     /** Run the headless Brucegotchi for [secs] seconds: brucegotchi <secs>. Authorized use only. */
-    fun startBrucegotchi(secs: Int) {
-        if (client == null) { _brucegotchiStatus.value = "Connect the device over USB first."; return }
-        _brucegotchiRunning.value = true
-        _brucegotchiStatus.value = "Running ${secs}s - the device screen shows the gotchi, handshakes save to /BrucePCAP/handshakes... (Stop to end early)"
-        dispatchCmd("brucegotchi $secs") { ok, out ->
-            _brucegotchiRunning.value = false
-            _brucegotchiStatus.value = if (ok) "Done - $out" else "error: ${out.ifBlank { "failed" }}"
-        }
-    }
-
-    /**
-     * Stop a running Brucegotchi early. Sent as a direct framed command (NOT via the serialized
-     * command queue, which is blocked behind the still-running brucegotchi): the firmware polls the
-     * serial for this during its run and ends the loop.
-     */
-    fun stopBrucegotchi() {
-        val c = client ?: return
-        _brucegotchiStatus.value = "Stopping..."
-        viewModelScope.launch(Dispatchers.IO) {
-            try { c.cmd("brucegotchi_stop") } catch (e: Exception) { app.brucia.BruciaLog.d("Brucegotchi", "stop: ${e.message}") }
-        }
-    }
+    fun startBrucegotchi(secs: Int) = brucegotchi.start(secs)
+    /** Stop Brucegotchi early (brucegotchi_stop, polled by the firmware mid-run). */
+    fun stopBrucegotchi() = brucegotchi.stop()
 
     // --- Wi-Fi station join (Bruce "Connect to Wifi" parity) ------------------
-    private val _wifiJoinStatus = MutableStateFlow("")
-    val wifiJoinStatus: StateFlow<String> = _wifiJoinStatus.asStateFlow()
+    private val wifiJoinService = WifiJoinService(viewModelScope, commandRunner, isConnected = { session != null })
+    val wifiJoinStatus: StateFlow<String> = wifiJoinService.status
 
     /** Ask the device whether its station is connected: wifi_status. */
-    fun wifiStatus() {
-        if (client == null) { _wifiJoinStatus.value = "Connect the device over USB first."; return }
-        dispatchCmd("wifi_status") { ok, out ->
-            _wifiJoinStatus.value = if (ok) out.trim() else "error: ${out.ifBlank { "failed" }}"
-        }
-    }
+    fun wifiStatus() = wifiJoinService.refresh()
 
     /** Join an AP: wifi_connect <ssid>\x1f<pass> (0x1F lets ssid/pass contain spaces). */
-    fun wifiJoin(ssid: String, pass: String) {
-        if (client == null) { _wifiJoinStatus.value = "Connect the device over USB first."; return }
-        val s = ssid.trim()
-        if (s.isEmpty()) { _wifiJoinStatus.value = "Enter an SSID first."; return }
-        _wifiJoinStatus.value = "Connecting (up to ~10s)..."
-        dispatchCmd("wifi_connect $s\u001f$pass") { ok, out ->
-            _wifiJoinStatus.value = if (ok) "Connected - IP ${out.trim()}" else "Failed: ${out.ifBlank { "timeout" }}"
-        }
-    }
+    fun wifiJoin(ssid: String, pass: String) = wifiJoinService.join(ssid, pass)
 
     /** Drop the device's station link: wifi_disconnect. */
-    fun wifiLeave() {
-        if (client == null) { _wifiJoinStatus.value = "Connect the device over USB first."; return }
-        dispatchCmd("wifi_disconnect") { ok, out ->
-            _wifiJoinStatus.value = if (ok) "Disconnected." else "error: ${out.ifBlank { "failed" }}"
-        }
-    }
+    fun wifiLeave() = wifiJoinService.leave()
 
     /** Broadcast a message over ESP-NOW: espnow_send <message>. Result on [espnowStatus]. */
-    fun espnowSend(message: String) {
-        if (client == null) { _espnowStatus.value = "Connect the device over USB first."; return }
-        val m = message.trim()
-        if (m.isEmpty()) { _espnowStatus.value = "Enter a message first."; return }
-        _espnowStatus.value = "Broadcasting..."
-        dispatchCmd("espnow_send $m") { ok, out ->
-            _espnowStatus.value = if (ok) out.ifBlank { "Broadcast sent." } else out.ifBlank { "Broadcast failed." }
-        }
-    }
+    fun espnowSend(message: String) = espNow.send(message)
 
     // --- Audio suite: device-mic PCM stream + speaker PCM playback -------------
     // The audio source is the ESP device mic (stream "mic.pcm") and the ESP speaker
@@ -4433,10 +3903,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      * dual tone straight to I2S at full scale (gain carries the volume, like the RTTTL songs) so it
      * is actually audible - the earlier generator path came out ~10x too quiet.
      */
-    fun sendDtmf(key: Char, ms: Int = 200) {
-        if (client == null) { _themeStatus.value = "Connect the device over USB first."; return }
-        dispatchCmd("speaker_dtmf $key $ms")
-    }
+    fun sendDtmf(key: Char, ms: Int = 200) = speaker.dtmf(key, ms)
 
     // --- DTMF decoder: ESP mic in listening mode -> Goertzel decode on the phone -> digits -------
     // The device mic chunks arrive on [micPcm]; we run each through the Goertzel detector and build

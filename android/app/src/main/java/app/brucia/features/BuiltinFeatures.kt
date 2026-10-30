@@ -1,8 +1,8 @@
 package app.brucia.features
 
 /**
- * The built-in Brucia feature catalog, extracted verbatim from the `toolCategories`
- * list in [app.brucia.MainActivity]. Titles, descriptions, category/tool order, tab
+ * The built-in Brucia feature catalog (the single source for the home grid, search and
+ * capability gating in [app.brucia.MainActivity]). Titles, descriptions, category/tool order, tab
  * ids and caps are preserved exactly; a null cap keeps its existing meaning (always
  * available). The Wi-Fi gate (cap = "wifi") on the dictionary/WPA tools is kept;
  * operation-level gating is a later migration.
@@ -10,7 +10,7 @@ package app.brucia.features
  * Each feature carries a FROZEN stable string id, derived deterministically from the
  * category and tool (reverse-DNS: "org.brucia.<categorySlug>.<toolSlug>"). These ids
  * are frozen constants here, NOT computed from localized labels at runtime. The full
- * legacy-tab -> stable-id mapping is listed in RESULT.md for coordinator review.
+ * legacy-tab -> stable-id mapping below was reviewed and frozen by the coordinator (W06).
  *
  * Source inventory: 50 tools across 11 categories (navigation order preserved).
  */

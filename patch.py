@@ -58,9 +58,17 @@ if not isfile(join(FRAMEWORK_DIR,mcu, "lib", ".patched")):
 # Web assets are generated entirely locally. No build-time source uploads or
 # dependence on the uptime/behavior of a remote minification service.
 from pathlib import Path
+import importlib.util
 import sys
-sys.path.insert(0, env.get("PROJECT_DIR"))
-from tools.web_resources import embed_web
+
+# Load by file path: inside PlatformIO's SCons another top-level "tools" package can
+# already be imported, which shadows this project's tools/ directory.
+_spec = importlib.util.spec_from_file_location(
+    "brucia_web_resources", Path(env.get("PROJECT_DIR")) / "tools" / "web_resources.py")
+_web_resources = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _web_resources
+_spec.loader.exec_module(_web_resources)
+embed_web = _web_resources.embed_web
 
 project_dir = Path(env.get("PROJECT_DIR"))
 changed = embed_web(

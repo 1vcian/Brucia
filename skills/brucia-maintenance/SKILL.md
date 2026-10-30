@@ -31,7 +31,7 @@ current until their app/firmware pair has passed acceptance.
   still coordinates most lifecycles. Prefer extracting one tested responsibility
   at a time; avoid broad mechanical splits.
 - `files/DeviceFileReader`, `audio/RecordingBuffer`, `mitm/HttpWire`,
-  `protocol/AwaitReply` and `update/` contain extracted contracts and unit tests.
+  `protocol/AwaitReply`, `session/CommandSession` (per-link command/reply correlation) and `update/` contain extracted contracts and unit tests.
 - Managed file transfers require `features.verified_files`; size/CRC and request
   identity must agree. Uploads are not yet atomic. Failed exports retain audio.
 - Module presence, driver initialization and physical verification are different.
@@ -76,7 +76,7 @@ interfaces, preserving the current protocol and standalone firmware behavior.
 
 ## Workers
 
-No Claude worker has been launched. Preparation alone does not authorize launch;
+W07 is the first launched worker (2026-10-30, worktree; see T07). Preparation alone does not authorize launch;
 follow the user's current instructions. For an explicitly requested delegation,
 read `references/workers.md`: truthful scoped briefs, allowlisted source copies,
 actual isolation, fresh input hashes and coordinator review before integration.

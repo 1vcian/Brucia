@@ -15,23 +15,44 @@ static bool keyLoaded = false;
 // Helpers
 // ---------------------------------------------------------------------------
 
-static String bufferToHexStr(const byte *buf, int len, const char *sep = ":") {
-    String s;
-    for (int i = 0; i < len; i++) {
-        if (buf[i] < 0x10) s += '0';
-        s += String(buf[i], HEX);
-        if (i < len - 1) s += sep;
-    }
-    s.toUpperCase();
-    return s;
+static String bufferToHexStr(const byte *buf, const char *sep = ":") {
+    char out[24]; // 16 hex + 7 one-char separators + NUL
+    ibuttonFormatId(buf, out, sizeof(out), sep);
+    return String(out);
 }
 
-static bool bufferCrcValid() { return OneWire::crc8(keyBuffer, 7) == keyBuffer[7]; }
+static bool bufferCrcValid() { return ibuttonCrc8(keyBuffer, 7) == keyBuffer[7]; }
+
+namespace { // file-local adapters (avoid ODR clashes with other units)
+// OneWire adapter for the shared ibuttonReadRom() core.
+struct OneWireBus : IButtonBus {
+    OneWire &ow;
+    explicit OneWireBus(OneWire &w) : ow(w) {}
+    bool reset() override { return ow.reset() != 0; }
+    void write(uint8_t v) override { ow.write(v); }
+    void readBytes(uint8_t *buf, size_t len) override { ow.read_bytes(buf, (uint16_t)len); }
+    void delayMs(uint32_t ms) override { delay(ms); }
+};
+
+// Standalone menu: Esc cancels, CRC retries keep the "keep key on the contact" screen.
+struct MenuBus : OneWireBus {
+    using OneWireBus::OneWireBus;
+    bool cancelled() override { return check(EscPress); }
+    void onRetry(int attempt) override {
+        tft.fillScreen(bruceConfig.bgColor);
+        drawMainBorderWithTitle("iButton");
+        padprintln("Reading... attempt " + String(attempt + 2));
+        padprintln("CRC mismatch, retrying...");
+        padprintln("");
+        padprintln("Keep key on the contact!");
+    }
+};
+} // namespace
 
 static void displayStatus() {
     drawMainBorderWithTitle("iButton");
     if (keyLoaded) {
-        padprintln("UID: " + bufferToHexStr(keyBuffer, 8));
+        padprintln("UID: " + bufferToHexStr(keyBuffer));
         if (!bufferCrcValid()) {
             tft.setTextColor(TFT_RED);
             padprintln("CRC ERROR!");
@@ -78,47 +99,28 @@ static void writeByte_RW1990(byte data) {
 // ---------------------------------------------------------------------------
 
 static bool readKey(int maxRetries = 20) {
-    for (int attempt = 0; attempt < maxRetries; attempt++) {
-        if (check(EscPress)) return false;
-        if (oneWire->reset() == 0) return false;
-
-        oneWire->write(0x33);
-        oneWire->read_bytes(keyBuffer, 8);
-
-        if (bufferCrcValid()) {
-            keyLoaded = true;
-            return true;
-        }
-
-        tft.fillScreen(bruceConfig.bgColor);
-        drawMainBorderWithTitle("iButton");
-        padprintln("Reading... attempt " + String(attempt + 2));
-        padprintln("CRC mismatch, retrying...");
-        padprintln("");
-        padprintln("Keep key on the contact!");
-        delay(100);
-    }
-
-    // Retries exhausted — still store what we got
-    keyLoaded = true;
-    return false;
+    MenuBus bus(*oneWire);
+    IButtonResult r = ibuttonReadRom(bus, keyBuffer, maxRetries, true, 100);
+    // Retries exhausted (CRC_ERROR): still store what we got
+    if (r == IBUTTON_SUCCESS || r == IBUTTON_CRC_ERROR) keyLoaded = true;
+    return r == IBUTTON_SUCCESS;
 }
 
-static void writeKey() {
+static void writeKey(OneWire &ow) {
     uint8_t pin = bruceConfigPins.iButton;
 
-    oneWire->skip();
-    oneWire->reset();
-    oneWire->write(0x33);
+    ow.skip();
+    ow.reset();
+    ow.write(0x33);
 
-    oneWire->skip();
-    oneWire->reset();
-    oneWire->write(0x3C);
+    ow.skip();
+    ow.reset();
+    ow.write(0x3C);
     delay(50);
 
-    oneWire->skip();
-    oneWire->reset();
-    oneWire->write(0xD1);
+    ow.skip();
+    ow.reset();
+    ow.write(0xD1);
     delay(50);
 
     digitalWrite(pin, LOW);
@@ -128,9 +130,9 @@ static void writeKey() {
     digitalWrite(pin, HIGH);
     delay(10);
 
-    oneWire->skip();
-    oneWire->reset();
-    oneWire->write(0xD5);
+    ow.skip();
+    ow.reset();
+    ow.write(0xD5);
     delay(50);
 
     for (byte i = 0; i < 8; i++) {
@@ -138,56 +140,36 @@ static void writeKey() {
         delayMicroseconds(25);
     }
 
-    oneWire->reset();
-    oneWire->skip();
-    oneWire->write(0xD1);
+    ow.reset();
+    ow.skip();
+    ow.write(0xD1);
     delayMicroseconds(16);
-    oneWire->reset();
+    ow.reset();
 }
 
 // ---------------------------------------------------------------------------
 // Brucia companion: headless read / emulate (no UI). Reuses keyBuffer + writeKey().
+// Callers check ibuttonPinUsable() first.
 // ---------------------------------------------------------------------------
 
 IButtonResult ibutton_read_headless(String &idHexOut) {
     OneWire ow(bruceConfigPins.iButton);
-    for (int attempt = 0; attempt < 10; attempt++) {
-        if (ow.reset() != 0) {
-            ow.write(0x33); // Read ROM
-            ow.read_bytes(keyBuffer, 8);
-            if (OneWire::crc8(keyBuffer, 7) == keyBuffer[7]) {
-                keyLoaded = true;
-                idHexOut = bufferToHexStr(keyBuffer, 8, ""); // 16 continuous hex chars
-                return IBUTTON_SUCCESS;
-            }
-        }
-        delay(30);
-    }
-    return IBUTTON_NO_KEY;
+    OneWireBus bus(ow);
+    byte id[8];
+    // Retry on no presence too: the key may touch the contact a moment after the command.
+    IButtonResult r = ibuttonReadRom(bus, id, 10, false, 30);
+    if (r != IBUTTON_SUCCESS) return r;
+    memcpy(keyBuffer, id, 8);
+    keyLoaded = true;
+    idHexOut = bufferToHexStr(keyBuffer, ""); // 16 continuous hex chars
+    return IBUTTON_SUCCESS;
 }
 
 IButtonResult ibutton_write_headless(const String &idHex) {
-    String hex = idHex;
-    hex.replace(":", "");
-    hex.replace(" ", "");
-    hex.trim();
-    if (hex.length() != 16) return IBUTTON_FAILURE; // need exactly 8 bytes
-    for (int i = 0; i < 16; i++) {
-        char c = hex[i];
-        bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-        if (!ok) return IBUTTON_FAILURE;
-    }
-    for (int i = 0; i < 8; i++) {
-        keyBuffer[i] = (byte)strtoul(hex.substring(i * 2, i * 2 + 2).c_str(), nullptr, 16);
-    }
+    if (!ibuttonParseId(idHex.c_str(), keyBuffer)) return IBUTTON_FAILURE; // need exactly 8 bytes
     keyLoaded = true;
-
-    // writeKey() uses the file-scope `oneWire`; point it at a local instance for the op.
     OneWire ow(bruceConfigPins.iButton);
-    OneWire *prev = oneWire;
-    oneWire = &ow;
-    writeKey();
-    oneWire = prev;
+    writeKey(ow);
     return IBUTTON_SUCCESS;
 }
 
@@ -230,7 +212,7 @@ static IButtonResult saveKey() {
     file.println("Version 1");
     file.println("Device type: DS1990A");
     file.print("UID: ");
-    file.println(bufferToHexStr(keyBuffer, 8, " "));
+    file.println(bufferToHexStr(keyBuffer, " "));
     file.print("CRC: ");
     if (keyBuffer[7] < 0x10) file.print('0');
     file.println(keyBuffer[7], HEX);
@@ -257,12 +239,8 @@ static IButtonResult loadKey() {
         line.trim();
         if (!line.startsWith("UID:")) continue;
 
-        String hex = line.substring(line.indexOf(':') + 1);
-        hex.trim();
-        hex.replace(" ", "");
-        if (hex.length() != 16) continue;
-
-        for (int i = 0; i < 8; i++) tmp[i] = strtoul(hex.substring(i * 2, i * 2 + 2).c_str(), NULL, 16);
+        String hex = line.substring(line.indexOf(':') + 1); // "AA BB .." as written by saveKey()
+        if (!ibuttonParseId(hex.c_str(), tmp)) continue;
         found = true;
         break;
     }
@@ -304,7 +282,7 @@ static void doWrite() {
 
     tft.fillScreen(bruceConfig.bgColor);
     drawMainBorderWithTitle("Write iButton");
-    padprintln("UID: " + bufferToHexStr(keyBuffer, 8));
+    padprintln("UID: " + bufferToHexStr(keyBuffer));
     padprintln("");
     padprintln("Touch blank key to writer...");
     padprintln("[Esc] Cancel");
@@ -314,7 +292,7 @@ static void doWrite() {
         delay(50);
     }
 
-    writeKey();
+    writeKey(*oneWire);
     displaySuccess("Key written!");
     delay(1500);
 }

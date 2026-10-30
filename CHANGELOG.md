@@ -5,14 +5,69 @@ All notable changes to Brucia are documented here. Brucia is a fork of
 that offloads computation to the phone. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the app/firmware release.
 
-## Unreleased
+## [0.1.2] - 2026-10-30
+
+App and T-Embed CC1101 firmware, published to the private BruciaDev repo. Hardware
+features remain pending on-device acceptance (see TESTS.md).
+
 
 - Extracted the Android tool catalog into a pure-JVM validated feature registry
   (`features/FeatureRegistry` + `BuiltinFeatures`): 50 tools / 11 categories, titles,
   descriptions, caps (incl. the Wi-Fi gate) and order preserved; lookup by stable ID
   or legacy tab ID (absent lookups return null); duplicate/blank-ID validation and
-  defensive copies; unit-tested. Not yet wired into the UI — `MainActivity` still owns
-  the live catalog; registry adoption is a later coordinator step.
+  defensive copies; unit-tested. `MainActivity` now renders the home grid, search and
+  capability gating from it; its duplicate local catalog was removed.
+- Extracted command/reply correlation into a pure-JVM `session/CommandSession`: register
+  before send; release on reply, timeout, cancellation or local send failure (reported as
+  ERR, never thrown); injected caps preflight; idempotent `close` that fails each pending
+  command once and ignores late replies. Unit-tested with a fake transport. Wired into
+  `WardriveViewModel`: commands, stream SUB acks, file reads/uploads, ACK/ERR routing and
+  the ping watchdog use one session per connection; the duplicated pending maps are gone.
+  A late reply after disconnect no longer appears in the console.
+- PCAP dissect analysis moved to a pure-JVM, unit-tested `wifi/PcapDissector`. Captures
+  over 32 MiB are now rejected instead of read whole; leaving the screen cancels the
+  analysis; BSSIDs with equal counts are listed in a stable order.
+- iButton read/write moved to a unit-tested `ibutton/IButtonService` behind a small
+  `session/CommandRunner` interface. Waits at most 10 s (was 650 s), can be stopped from
+  the Gadgets screen, ignores replies from superseded operations and validates the
+  16-hex id before sending.
+- Device clock and Wi-Fi MAC moved to unit-tested services on a shared single-owner
+  `session/DeviceOperation` (also used by iButton). They wait at most 10 s (was 650 s) and
+  reject an implausible epoch or a malformed MAC before sending.
+- Script runner, device theme/LED controls, device Wi-Fi join and ESP-NOW moved to the
+  same tested services. Bounded waits (script 25 s, join 30 s, others 10 s) replace the
+  650 s default; rapid theme/LED changes keep only the latest result; an oversized script
+  is rejected before sending; clearing the script output no longer drops a running
+  script's result.
+- Speaker (volume, tone, file, song, DTMF) and mic recording moved to tested services with
+  bounded waits (tone 15 s, file 10 min, recording its length + 10 s). A tone above
+  20 kHz is rejected before sending, and a late reply no longer clears the name of a newer
+  song. Known firmware limit: `speaker_play` blocks the link until the file ends.
+- IR: receive-once and custom-remote key capture now decode the firmware's one-line `ir_rx`
+  reply ("NEC addr=.. cmd=.." or "raw: .."); before, they never produced a result on the
+  device. IR receive/capture and TV-B-Gone moved to tested services (waits 20 s and 75 s).
+- BLE HID keyboard/presenter, BadBLE and media control moved to tested services. HID waits
+  at most 10 s (was 650 s), stopping HID never leaves a stale "Starting...", and key presses
+  no longer interfere with a pending start.
+- LoRa and Ethernet moved to tested services with bounded waits taken from the firmware
+  (LoRa receive and the Ethernet tests wait their duration plus a margin); a late LoRa
+  reply no longer delivers a stale packet or clears a newer receive indicator.
+- NFC advanced tools (NDEF push, masked EMV read, UID write, Amiibo, nested, mfkey32, SRIX,
+  125 kHz) moved to one tested service with four independent status lines and waits taken
+  from the firmware (NDEF 75 s, timed reads their duration + 15 s, unsupported-headless
+  tools 10 s).
+- Fixed: "Stop all" (and the link watchdog) left the Sub-GHz jammer, IR jammer, ARP spoof and
+  iBeacon loops running. All 11 burst loops now run on one tested engine and register with
+  a registry, so stopping all cannot miss one.
+- Responder, Karma and Brucegotchi run on a tested long-operation engine: Stop asks the
+  device to end early and still shows the final result; Responder and Karma have their own
+  Stop instead of a shared one.
+- Firmware iButton: one Arduino-free core (`ibutton_core`) shared by the device menu, `.ibtn`
+  loading and the companion, with a native host test. Companion iButton commands now refuse
+  with "iButton pin not configured" (ERR 409) instead of driving the default GPIO0, and CAPS
+  reports `ibutton` when a pin is configured on the device, which enables the app controls.
+- Build: `patch.py` loads `tools/web_resources.py` by path, so another `tools` package
+  imported inside PlatformIO no longer breaks the pre-build step.
 
 ## [0.1.1] - 2026-10-30
 

@@ -145,7 +145,15 @@ static void runScriptRun(const String &src, uint32_t id) {
 
 // --- Brucia iButton: headless 1-Wire read / emulate (RW1990). Reuses ibutton.cpp. --------
 #ifndef LITE_VERSION
+// Refuse before touching any GPIO: 0 is the unset default (GPIO0 is a boot strap pin), -1 is off.
+static bool iButtonPinReady(uint32_t id) {
+    if (ibuttonPinUsable(bruceConfigPins.iButton, GPIO_NUM_MAX)) return true;
+    sendErr(id, 409, "iButton pin not configured");
+    return false;
+}
+
 static void runIButtonRead(uint32_t id) {
+    if (!iButtonPinReady(id)) return;
     String hex;
     if (ibutton_read_headless(hex) == IBUTTON_SUCCESS) {
         String out = "id=" + hex;
@@ -156,6 +164,7 @@ static void runIButtonRead(uint32_t id) {
 }
 
 static void runIButtonWrite(const String &arg, uint32_t id) {
+    if (!iButtonPinReady(id)) return;
     String a = arg;
     a.trim();
     if (a.length() == 0) {

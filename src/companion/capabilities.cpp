@@ -4,6 +4,7 @@
 #include "modules/rfid/RFIDInterface.h"
 #include <globals.h>
 #if !defined(LITE_VERSION)
+#include "modules/others/ibutton_core.h"
 #include "modules/rfid/ST25R3916.h"
 #endif
 #include "modules/rfid/PN532.h"
@@ -278,6 +279,12 @@ void sendCaps(uint32_t id) {
     caps["lora"] = companionLoraPresent();
     // Ethernet (W5500): runtime SPI probe (false when no module is actually attached / not wired).
     caps["eth"] = companionW5500Present();
+#if !defined(LITE_VERSION)
+    // iButton: configured pin only, not probed (a 1-Wire bus answers only with a key present).
+    caps["ibutton"] = ibuttonPinUsable(bruceConfigPins.iButton, GPIO_NUM_MAX);
+#else
+    caps["ibutton"] = false;
+#endif
     caps["wifi"] = true;
     caps["ble"] = true;
     d["features"]["verified_files"] = true; // correlated chunks, size/CRC32 completion, empty/spaced writes

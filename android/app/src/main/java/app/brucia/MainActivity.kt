@@ -1203,86 +1203,11 @@ private fun ApMap(aps: List<ApObservation>, track: List<Pair<Double, Double>>, m
 // Crack) still work. `tab = HOME` shows the dashboard instead of a tool.
 private const val HOME = -1
 
-// [cap] is the hardware capability this tool needs (null = always available). When the
-// connected device reports that capability false, the tool page is shown disabled and its
-// home card is greyed. See DeviceCaps / capsAllow / capMessage.
-private data class ToolEntry(val tab: Int, val title: String, val desc: String, val cap: String? = null)
-private data class ToolCategory(val name: String, val shortName: String, val tools: List<ToolEntry>)
-
-private val toolCategories = listOf(
-    ToolCategory("Wi-Fi", "Wi-Fi", listOf(
-        ToolEntry(0, "Wardrive", "Scan and map nearby access points", cap = "wifi"),
-        ToolEntry(7, "Crack", "Crack captured handshakes and PMKIDs", cap = "wifi"),
-        ToolEntry(11, "Sniffer", "Sniff nearby Wi-Fi client stations", cap = "wifi"),
-        ToolEntry(15, "Probes", "Profile client probe requests - who seeks which networks", cap = "wifi"),
-        ToolEntry(17, "Monitor", "Monitor your own network - live packet list and pcap export", cap = "wifi"),
-        ToolEntry(30, "Evil Portal", "Fake AP + captive login page - capture credentials (authorized use)", cap = "wifi"),
-        ToolEntry(26, "Channels", "Live 2.4GHz channel congestion and best-channel advice", cap = "wifi"),
-        ToolEntry(33, "MAC", "View, set or randomize the device Wi-Fi MAC", cap = "wifi"),
-        ToolEntry(34, "Connect", "Join the device to a Wi-Fi network", cap = "wifi"),
-        ToolEntry(38, "Karma", "Evil-twin probe-response lure (authorized use)", cap = "wifi"),
-        ToolEntry(35, "Brucegotchi", "Pwnagotchi-style WPA handshake collector (authorized use)", cap = "wifi"),
-    )),
-    ToolCategory("Sub-GHz", "Sub-GHz", listOf(
-        ToolEntry(2, "RF", "Capture, decode and replay sub-GHz signals", cap = "cc1101"),
-    )),
-    ToolCategory("Radio", "Radio", listOf(
-        ToolEntry(14, "FM", "Broadcast audio over the FM transmitter", cap = "fm"),
-        ToolEntry(22, "LoRa", "Configure, send and receive LoRa packets", cap = "lora"),
-    )),
-    ToolCategory("2.4GHz", "2.4G", listOf(
-        ToolEntry(13, "NRF24", "2.4GHz scanner, ESB sniffer and MouseJack", cap = "nrf24"),
-        ToolEntry(32, "ESP-NOW", "Broadcast a short message over ESP-NOW (any ESP32)"),
-    )),
-    ToolCategory("NFC", "NFC", listOf(
-        ToolEntry(3, "NFC", "Read, emulate and attack NFC tags", cap = "nfc"),
-    )),
-    ToolCategory("BLE & IR", "BLE/IR", listOf(
-        ToolEntry(5, "BLE", "Scan Bluetooth Low Energy devices", cap = "ble"),
-        ToolEntry(1, "IR", "Send and browse infrared remotes", cap = "ir"),
-        ToolEntry(37, "IR Remote", "Build your own IR remote - capture buttons, tap to send", cap = "ir"),
-        ToolEntry(39, "BLE Remote", "BLE presenter + keyboard - control a PC over Bluetooth", cap = "ble"),
-        ToolEntry(4, "BadUSB", "Run Ducky keystroke-injection scripts"),
-    )),
-    ToolCategory("Spam", "Spam", listOf(
-        ToolEntry(49, "Spam BLE", "Bluetooth pairing-popup floods (iOS/Android/Windows/Samsung)", cap = "ble"),
-        ToolEntry(50, "Spam Wi-Fi", "Beacon flood: broadcast fake Wi-Fi networks", cap = "wifi"),
-        ToolEntry(51, "Spam NFC", "NFC NDEF push (tap-to-send)", cap = "nfc"),
-    )),
-    ToolCategory("Intercept", "MITM", listOf(
-        ToolEntry(18, "MITM", "On-phone HTTPS intercepting proxy - authorized use only"),
-        ToolEntry(31, "Network Scan", "Scan the Wi-Fi for hosts, open ports, versions and likely CVEs (on-phone)"),
-        ToolEntry(40, "Responder", "LLMNR/NBT-NS name poisoning (authorized use)", cap = "wifi"),
-        ToolEntry(44, "WIDS", "Detect deauth / evil-twin attacks around you (defensive)", cap = "wifi"),
-        ToolEntry(46, "RF Fingerprint", "Record a place's RF signature and detect new devices", cap = "wifi"),
-        ToolEntry(47, "RF Timeline", "Persistent history of Wi-Fi/BLE devices seen over time", cap = "wifi"),
-    )),
-    ToolCategory("Device", "Device", listOf(
-        ToolEntry(6, "Device info", "Device info and CLI commands"),
-        ToolEntry(8, "Console", "Raw serial console"),
-        ToolEntry(9, "Remote", "Mirror and control the device screen"),
-        ToolEntry(10, "Files", "Browse the device SD / LittleFS"),
-        ToolEntry(12, "Updates", "Update the app and the device firmware"),
-        ToolEntry(23, "Ethernet", "Wired network status and configuration", cap = "eth"),
-    )),
-    ToolCategory("Audio", "Audio", listOf(
-        ToolEntry(25, "Audio", "All mic visualizations live in parallel - spectrum, waterfall, scope, SSTV", cap = "mic"),
-        ToolEntry(29, "Oscilloscope", "2D time-domain scope plus XY / dual-mic vectorscope", cap = "mic"),
-        ToolEntry(27, "SSTV", "Decode (live cascade, all modes) and transmit slow-scan TV", cap = "mic"),
-        ToolEntry(28, "Tone", "Detect tones / DTMF and generate them", cap = "mic"),
-    )),
-    ToolCategory("Tools", "Tools", listOf(
-        ToolEntry(21, "Report", "Session report and heuristic insights from everything captured"),
-        ToolEntry(19, "Scripts", "Write and run JavaScript on the device"),
-        ToolEntry(41, "Macros", "Chain device commands into saved, one-tap automations"),
-        ToolEntry(42, "RF Map 3D", "3D map of the RF sources around you (Wi-Fi/BLE/sub-GHz)"),
-        ToolEntry(43, "Bug Sweep", "Find hidden transmitters (bugs/spy-cams) by signal strength"),
-        ToolEntry(45, "PCAP dissect", "Open an 802.11 capture and dissect it (Wireshark-lite, on-phone)"),
-        ToolEntry(48, "Geo signals", "Pin sub-GHz/IR signals to a GPS spot and replay on return"),
-        ToolEntry(20, "Gadgets", "iButton read / write and device clock"),
-        ToolEntry(24, "Utilities", "Offline phone tools - passwords, hashes, base64, MAC vendor, Wi-Fi QR"),
-    )),
-)
+// The tool catalog lives in [app.brucia.features.BuiltinFeatures] (pure JVM, validated,
+// unit-tested). A tool's `cap` is the hardware capability it needs (null = always available).
+// When the connected device reports that capability false, the tool page is shown disabled
+// and its home card is greyed. See DeviceCaps / capsAllow / capMessage.
+private val toolCategories = app.brucia.features.BuiltinFeatures.registry.categories
 
 /** Material (Google) icon for a category, shown on the home grid buttons. */
 private fun categoryIcon(name: String): androidx.compose.ui.graphics.vector.ImageVector {
@@ -1366,8 +1291,7 @@ private fun toolIcon(title: String): androidx.compose.ui.graphics.vector.ImageVe
 }
 
 /** The capability a tab requires, or null if it is always available. */
-private fun capForTab(tab: Int): String? =
-    toolCategories.firstNotNullOfOrNull { c -> c.tools.firstOrNull { it.tab == tab }?.cap }
+private fun capForTab(tab: Int): String? = app.brucia.features.BuiltinFeatures.registry.byTabId(tab)?.cap
 
 /** Whether [caps] permits a tool needing capability [cap] (null cap is always allowed). */
 private fun capsAllow(caps: DeviceCaps, cap: String?): Boolean = caps.allows(cap)
@@ -1473,7 +1397,7 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
                     onSelectCategory = { idx ->
                         val cat = toolCategories.getOrNull(idx)
                         // A single-tool category has no useful sub-list: open the tool directly.
-                        if (cat != null && cat.tools.size == 1) tab = cat.tools[0].tab else category = idx
+                        if (cat != null && cat.features.size == 1) tab = cat.features[0].tabId else category = idx
                     },
                 )
             } else {
@@ -1830,14 +1754,14 @@ private fun HomeDashboard(
             )
             if (query.isNotBlank()) {
                 val q = query.trim()
-                val matches = toolCategories.flatMap { it.tools }
-                    .filter { it.title.contains(q, true) || it.desc.contains(q, true) }
+                val matches = app.brucia.features.BuiltinFeatures.registry.features
+                    .filter { it.title.contains(q, true) || it.description.contains(q, true) }
                 if (matches.isEmpty()) {
                     Text("No tools match \"$q\".", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 } else {
                     matches.forEach { tool ->
                         val available = caps == null || capsAllow(caps, tool.cap)
-                        ToolCard(tool, available, updateAvailable && tool.tab == 12, if (tool.tab == 12) updateLabel else "", onOpen)
+                        ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen)
                     }
                 }
             } else {
@@ -1847,10 +1771,10 @@ private fun HomeDashboard(
                 // menu reads as one uniform grid.
                 val cells: List<@Composable (Modifier) -> Unit> = buildList {
                     toolCategories.forEachIndexed { idx, cat ->
-                        val anyAvail = caps == null || cat.tools.any { capsAllow(caps, it.cap) }
+                        val anyAvail = caps == null || cat.features.any { capsAllow(caps, it.cap) }
                         // Flag the category that holds the Updates tool (tab 12) when a newer app or
                         // firmware release is available, so the user sees it from the home grid.
-                        val catBadge = updateAvailable && cat.tools.any { it.tab == 12 }
+                        val catBadge = updateAvailable && cat.features.any { it.tabId == 12 }
                         add { m -> CategoryButton(cat, anyAvail, modifier = m, badge = catBadge) { onSelectCategory(idx) } }
                     }
                     add { m -> GridCell(Icons.Filled.Palette, "Theme", "App + device colors & LED", connected, m) { onOpen(36) } }
@@ -1912,10 +1836,10 @@ private fun HomeDashboard(
                 color = cs.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, bottom = 6.dp),
             )
-            cat.tools.forEach { tool ->
+            cat.features.forEach { tool ->
                 // Unknown caps (disconnected) -> everything shown normally.
                 val available = caps == null || capsAllow(caps, tool.cap)
-                ToolCard(tool, available, updateAvailable && tool.tab == 12, if (tool.tab == 12) updateLabel else "", onOpen)
+                ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen)
             }
             Spacer(Modifier.height(10.dp))
         }
@@ -2022,9 +1946,9 @@ private fun openUrl(context: Context, url: String) {
 }
 
 @Composable
-private fun CategoryButton(cat: ToolCategory, available: Boolean, modifier: Modifier = Modifier, badge: Boolean = false, onClick: () -> Unit) =
+private fun CategoryButton(cat: app.brucia.features.FeatureCategory, available: Boolean, modifier: Modifier = Modifier, badge: Boolean = false, onClick: () -> Unit) =
     GridCell(categoryIcon(cat.name), cat.name,
-        "${cat.tools.size} tool${if (cat.tools.size == 1) "" else "s"}", available, modifier, badge = badge, onClick = onClick)
+        "${cat.features.size} tool${if (cat.features.size == 1) "" else "s"}", available, modifier, badge = badge, onClick = onClick)
 
 /** One square icon+label tile used by the home category grid (categories and the Support cell). */
 @Composable
@@ -2075,10 +1999,10 @@ private fun GridCell(
 }
 
 @Composable
-private fun ToolCard(tool: ToolEntry, available: Boolean, badge: Boolean = false, badgeText: String = "", onOpen: (Int) -> Unit) {
+private fun ToolCard(tool: app.brucia.features.FeatureDescriptor, available: Boolean, badge: Boolean = false, badgeText: String = "", onOpen: (Int) -> Unit) {
     val cs = MaterialTheme.colorScheme
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpen(tool.tab) },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpen(tool.tabId) },
         colors = CardDefaults.cardColors(
             containerColor = if (available) cs.surface else cs.surfaceVariant.copy(alpha = 0.4f),
         ),
@@ -2100,7 +2024,7 @@ private fun ToolCard(tool: ToolEntry, available: Boolean, badge: Boolean = false
                     style = MaterialTheme.typography.titleMedium,
                     color = if (available) cs.onSurface else cs.onSurfaceVariant,
                 )
-                Text(tool.desc, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                Text(tool.description, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 if (badge) {
                     Text(
                         (badgeText.ifBlank { "Update available" }) + " - tap to install",
@@ -4748,6 +4672,7 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val device by vm.device.collectAsState()
     val caps = device?.caps
     val ibuttonStatus by vm.ibuttonStatus.collectAsState()
+    val ibuttonBusy by vm.ibuttonBusy.collectAsState()
     val clockStatus by vm.clockStatus.collectAsState()
     val speakerStatus by vm.speakerStatus.collectAsState()
     val micStatus by vm.micStatus.collectAsState()
@@ -4790,11 +4715,15 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     Text("No confirmed iButton interface", color = cs.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(8.dp))
-                Button(
-                    enabled = connected && caps?.ibutton == true,
-                    onClick = { vm.ibuttonRead() },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Read") }
+                if (ibuttonBusy) {
+                    OutlinedButton(onClick = { vm.ibuttonStop() }, modifier = Modifier.fillMaxWidth()) { Text("Stop") }
+                } else {
+                    Button(
+                        enabled = connected && caps?.ibutton == true,
+                        onClick = { vm.ibuttonRead() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Read") }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
@@ -4806,7 +4735,7 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
                     )
                     Button(
-                        enabled = connected && caps?.ibutton == true && hex.isNotBlank(),
+                        enabled = connected && caps?.ibutton == true && hex.isNotBlank() && !ibuttonBusy,
                         onClick = { vm.ibuttonWrite(hex.trim()) },
                     ) { Text("Write") }
                 }
@@ -5080,7 +5009,7 @@ private fun ResponderScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 if (!rRunning) {
                     Button(enabled = connected, onClick = { vm.startResponder(secs) }, modifier = Modifier.fillMaxWidth()) { Text("Start (${secs}s)") }
                 } else {
-                    Button(onClick = { vm.stopLongOp() }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
+                    Button(onClick = { vm.stopResponder() }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
                 }
                 if (rStatus.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
@@ -5142,7 +5071,7 @@ private fun KarmaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 if (!kRunning) {
                     Button(enabled = connected, onClick = { vm.startKarma(secs) }, modifier = Modifier.fillMaxWidth()) { Text("Start (${secs}s)") }
                 } else {
-                    Button(onClick = { vm.stopLongOp() }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
+                    Button(onClick = { vm.stopKarma() }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
                 }
                 if (kStatus.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
