@@ -1,12 +1,15 @@
 {
   "name": "Brucia",
-  "version": "0.6.3",
+  "version": "0.1.2",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
-        { "path": "firmware/brucia-t-embed-cc1101.bin", "offset": 0 }
+        {
+          "path": "firmware/brucia-t-embed-cc1101.bin",
+          "offset": 0
+        }
       ]
     }
   ]
