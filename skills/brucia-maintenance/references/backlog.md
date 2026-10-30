@@ -1,8 +1,10 @@
 # Work queue — single operational ledger
 
-Updated 2026-10-30. Target: `VERSION` (currently 0.1.1). 0.1.1 is committed and
-published to the private BruciaDev repo (APK + T-Embed CC1101 firmware); fresh
-app-release + unit-test and T-Embed/LITE firmware builds passed. Radio/hardware
+Updated 2026-10-30. Target: `VERSION` (currently 0.1.2). 0.1.2 is committed, tagged and
+published to the private BruciaDev repo (APK + T-Embed CC1101 firmware) by `release.sh`:
+Python/site/native firmware/protocol E2E tests, 424 unit tests + lint, T-Embed build and
+signed release APK passed. Only lilygo-t-embed-cc1101 was rebuilt (other boards at public
+release, community-tested). Radio/hardware
 features remain pending on-device acceptance (S05). See [TESTS.md](../../../TESTS.md)
 for evidence. Recheck environment constraints before assuming an earlier
 build/Git/network blocker persists.
