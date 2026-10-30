@@ -281,6 +281,7 @@ static const int MIC_FFT_N = 256;          // short window per service call
 static const int MIC_BINS = 16;            // small, so one frame holds the array
 
 void micStart() {
+    micPcmStop();
     subMic = true;
     micLastEmit = 0;
 }
@@ -362,6 +363,7 @@ static int micPcmFill = 0;               // samples accumulated in micPcmBuf so 
 static int16_t micPcmBuf[MIC_PCM_CHUNK]; // assembles one chunk across service calls
 
 void micPcmStart() {
+    micStop();
     subPcm = true;
     micPcmFill = 0;
     // The I2S peripheral is opened lazily in micPcmService() (first call), so a transient

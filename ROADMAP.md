@@ -1,268 +1,180 @@
 # Brucia roadmap
 
-Brucia pairs cheap ESP32 hardware as a radio/sensor front-end with a phone as the
-compute, storage and GUI. This file tracks what works, how to test it on real
-hardware, and where help is wanted.
+These are proposals and extensions, not a list of missing capabilities. They complement the current
+[architecture](ARCHITECTURE.md). Reliability and functional verification come first;
+new demos should follow evidence from real tests.
 
-Research-platform proposals are tracked separately in
-[Research platform ideas](docs/RESEARCH_IDEAS.md): portable experiment bundles,
-hardware diagnostics, reproducible recipes, synchronized evidence and offline replay.
-These are proposals; completing the functional audit remains the immediate priority.
+## Current decision: stabilize before expanding
 
-**Current scope:** stabilize and verify existing features before adding new ones.
-The ideas backlog also records protocol expansion, optional modules, pentest tools,
-signal generators and creative/community extensions. Check existing implementations
-first; several proposed audio tools already exist and need validation, not duplication.
+The user explicitly prioritized making everything already present work correctly.
+Do not start the backlog below before completing the existing functional audit,
+fixes and appropriate regression checks. Keep unavailable physical tests pending;
+do not substitute compilation or simulation for hardware acceptance.
 
-Contributions are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md) and
-[ARCHITECTURE.md](ARCHITECTURE.md). Items tagged **[help wanted]** are good first
-tasks; **[priority]** is what matters most right now.
+Before implementing any proposal, inventory the existing code, UI and tests:
+many related tools are already present. Extend those paths instead of duplicating
+them. In particular, DTMF generation/decoding, SSTV RX/TX, audio spectrum/waterfall,
+oscilloscope/vectorscope, WAV/PNG exports and an RTTTL melody composer already
+exist. Firmware MIDI playback references do not establish a complete BLE MIDI
+controller. Existing implementation is not proof of end-to-end correctness.
 
----
+The most useful direction for Brucia is to make an experiment easy to reproduce,
+understand and share. The phone already provides storage, computation and a usable
+screen; the next step is to connect those advantages into a research workflow.
 
-## Status (v0.8.14)
+| Priority | Idea | What the researcher gets | First proof of value |
+|---|---|---|---|
+| 1 | Portable experiment bundles | One export containing raw captures, device capabilities, app/firmware versions, settings, annotations, timestamps and SHA-256 hashes. A redacted copy can be shared without publishing credentials or locations. | Import a bundle on a second phone, reproduce its analysis offline and verify every artifact hash. Explicitly record that a hash proves integrity, not origin or truth. |
+| 1 | Hardware doctor | A guided inventory with chip identification, initialization results and optional loopback tests. Distinguish absent, detected, initialized, tested and unknown; explain which tools each result enables. | A stock T-Embed reports its real modules, keeps absent add-ons disabled, and records an actionable reason for each failed test without hanging or rebooting. |
+| 1 | Experiments with assertions | Extend macros into bounded test recipes: prerequisites, parameters, expected events, assertions, cancellation and cleanup. Save results alongside captures. | Run a passive scan recipe twice; disconnect halfway through one run; show the failed step and release every resource. Offline fixtures exercise the same recipe engine. |
+| 2 | One synchronized evidence timeline | Align Wi-Fi, BLE, Sub-GHz and audio observations with device events and researcher notes. Preserve original timestamps, estimated clock offsets, gaps and dropped-event counters. | Correlate a controlled stimulus across two streams and report measured timing uncertainty. Do not infer identity or causation merely from temporal overlap. |
+| 2 | Replayable sessions and a virtual device | Reopen a recorded session and replay its protocol traffic into the real app UI without a radio. Publish synthetic fixtures with no personal data. | A contributor reproduces a reported UI/protocol bug from an attached fixture; the fixture becomes a regression test. Simulated and live data are visibly distinct. |
+| 2 | Before/after experiments | Compare two captures from a controlled setup: configuration changes, channel occupancy, signal distribution and observed protocol behavior. | Produce a report that separates measured changes from hypotheses, and includes duration, sample count, calibration and missing data. RSSI is not presented as a precise distance measurement. |
+| 2 | Protocol decoder workbench | Inspect raw pulses/bytes, annotate fields, test a decoder against a corpus and explain why a match was made. A decoder SDK enables contributions independently of the Android UI. | Add a decoder with known-answer and malformed-input fixtures; compare competing decoders and show uncertainty instead of silently choosing a label. |
+| 3 | Community verification receipts | Share opt-in test results keyed by board revision, module, firmware commit and app version. Maintainers can see reproducible failures and actual hardware coverage. | A report can be generated locally, inspected/redacted, and attached manually to an issue. No automatic telemetry or upload. A passing build is never labeled hardware-verified. |
+| 3 | Multiple capture nodes | Let one session combine several supported boards for simultaneous observations, with explicit ownership of radios and measured clock drift. | Two nodes capture the same controlled event, recover from a node loss and retain provenance for every sample. Start with a bench setup before attempting field synchronization. |
 
-### Done
-- **Split architecture**: the ESP captures/transmits; the phone computes, stores and
-  visualizes. Companion protocol v0 over USB-CDC (length-prefixed JSON: HELLO / CAPS /
-  CMD / ACK / ERR / EVENT / DATA / SUB / PING / PONG). See [proto/PROTOCOL.md](proto/PROTOCOL.md).
-- **Runtime capability detection**: the device reports a real `caps{}` object on connect
-  (`cc1101, nfc, nrf24, fm, ir, mic, speaker, lora, eth, wifi, ble`) via compile-time
-  board macros + runtime I2C/SPI probes; every app page is gated accordingly.
-- **Full tool set** (gated per hardware):
-  - Wi-Fi: wardrive (GPS, offline map, WiGLE/KML/GPX export, RSSI position estimate),
-    on-phone WPA/WPA2 + PMKID crack (rockyou/SecLists), deauth, station/probe sniffers,
-    beacon spam, monitor mode (pcap/Wireshark, PSK decrypt), ARP-MITM + on-phone HTTPS proxy.
-  - Sub-GHz (CC1101): capture/CSV, .sub import/export, OOK + rolling-code decode, spectrum
-    waterfall, replay, raw TX, De Bruijn, jammer, config.
-  - NFC/RFID (PN532), IR (1648-code catalog, TV-B-Gone, raw), BLE (scan, GATT explorer,
-    spam hub, BadBLE), NRF24 (scan/sniff/jammer/MouseJack, optional add-on).
-  - **Audio (device mic/speaker)**: spectrum, waterfall, SSTV RX/TX (Robot36/72, Martin,
-    Scottie), tone/DTMF detector + generator, oscilloscope - all DSP on the phone over the
-    `mic.pcm` / `spkr_pcm` streams.
-  - Tools: on-device BruceJS scripting, iButton, clock, ESP-NOW, FM (gated), session report
-    + OSINT, remote screen mirror + nav, console, file manager, offline Utilities.
-- **Background lifecycle**: foreground service (`connectedDevice`) + wake lock so the link
-  survives screen-off.
-- **Distribution**: signed release APKs; multi-board web flasher (61 boards) + themed on-site
-  wiki at the GitHub Pages site.
+## Dependencies and tradeoffs
 
-### Added since 0.6.x (phone-driven, caps-gated)
-- **Evil Portal / evil twin**: device-side fake AP + captive page (default or a pushed HTML
-  template), optional deauth + clone-a-nearby-network targeting; captured credentials stream to
-  the app live (companion `evil_portal_start/stop/status`, EVENT `evil.cred`).
-- **Jammers**: Sub-GHz (`subghz_jammer`), IR (`ir_jammer`), 2.4GHz (NRF24); **Sub-GHz brute force**
-  (`subghz_bruteforce`); **Wi-Fi jam/deauth detector** (`jam_detect`).
-- **BLE**: iBeacon advertiser (`ble_ibeacon`), media-control hijack (`ble_media`), plus the existing
-  scan / spam / BadBLE / GATT explorer.
-- **Beacon spam**: broadcasts many same-name networks via zero-width-char suffixes (up to 256).
-- **ARP spoof / NetCut** MITM (`arp_spoof`) with an in-app target form.
-- **Phone-powered "beyond" tools**: on-device **Network Scanner** (nmap-lite: host/port/service
-  discovery + CVE heuristics, all on the phone), live **Channel Analyzer**, audio **Record**
-  (WAV + spectrum/waterfall/scope PNGs) on every audio tool, a **Tone song player** (meme RTTTL
-  melodies via `speaker_rtttl`), speaker **volume** control.
-- **Theme sync**: the app matches the device's UI color (the device wins) and can set the device
-  theme + LED (`theme_set`/`led_set`, CAPS reports `theme`/`led`).
-- **UX**: home is an icon grid of categories (Material icons) with a Support tile; module-gated
-  tools are shown greyed with a "Needs <module>" hint instead of hidden; USB auto-connect; a
-  compact footer (Home / Cmds / Help with wiki + donations).
-- **Flashing**: reliable in-app flashing of the ESP32-S3 (1200-baud touch to enter the ROM
-  bootloader + USB re-enumeration + a READ_REG bootloader check, so it writes for real instead of
-  faking success) and an in-app **board selector** to flash any published per-board image.
+- **Bundles, recipes and replay** need stable event types, correlated command results,
+  cancellation and bounded buffers. They should reuse the existing transport and
+  protocol rather than introduce a separate command path.
+- **Hardware doctor** must distinguish electronic identification from an actual
+  end-to-end test. A microphone or speaker often has no readable chip ID; pin
+  definitions and successful driver initialization cannot prove the transducer works.
+- **Decoder extensions** need a versioned input/output contract, resource limits and
+  license/attribution rules. Benchmark a small isolated decoder interface before
+  selecting a plugin runtime.
+- **Multiple nodes and public verification** are later work. First make a single-node
+  session reliable, exportable and replayable.
 
-### Verification status (honest)
-- **LilyGo T-Embed CC1101 (ESP32-S3)**: the reference board - verified on real hardware
-  (flash, boot, companion HELLO/CAPS + PING/PONG, correct caps, live wardrive + BLE scan).
-  See [docs/HARDWARE_VERIFICATION.md](docs/HARDWARE_VERIFICATION.md).
-- **Audio path**: verified live on the T-Embed over USB from an Android phone - the `mic.pcm`
-  stream drives the Spectrum (live peak-frequency + level), Waterfall and Oscilloscope in
-  parallel on a real acoustic signal. SSTV TX and speaker playback on a real transmission are
-  still to be exercised end to end, but the capture->DSP pipeline is confirmed on hardware.
-- **All other boards (~70 build targets)**: build-verified by CI only - **not** runtime
-  tested. Treat them as experimental until someone verifies them (see below).
+## Suggested first milestone
 
----
+After the current audit, build a small vertical slice: **hardware inventory → passive
+capture recipe → portable bundle → offline replay → report**. It should work from a
+fresh installation and contain enough evidence for someone else to reproduce the
+result. That is a stronger platform foundation than adding more unrelated buttons.
 
-## Testing the devices  **[help wanted]**
+## Protocols and optional hardware backlog
 
-The single biggest way to help: **verify Brucia on a board you own** and report the result.
-CI proves a board *builds*; only a person with the hardware can prove it *runs*.
+- Extend compatible Sub-GHz and IR decoders/encoders with known-answer captures,
+  malformed-input tests and separate receive/transmit verification. Evaluate
+  Flipper code and formats per component, checking licenses and attribution.
+- Expand NFC parsing and compatible read/write/emulation operations within PN532
+  limits. Do not advertise universal cloning or Flipper NFC emulation parity.
+- Consider LF RFID, iButton, NRF24/ESB, LoRa, Ethernet and GNSS modules. Specify
+  electrical requirements, driver ownership, pin conflicts and operation-level
+  capability gates. Missing hardware keeps its actions disabled.
+- Keep rolling-code recognition separate from generation of accepted commands;
+  protocol identification does not provide cryptographic keys or fresh counters.
 
-### Verification levels
-- **L0 - builds**: produced by CI (`Build and Push Releases`). Already true for all boards.
-- **L1 - boots + companion**: the board boots Brucia, enters companion mode, and the app
-  gets a correct `caps{}` (matches the board's real modules) with working PING/PONG.
-- **L2 - modules live**: each capability the board reports actually works end to end.
+## Red-team, blue-team and analysis backlog
 
-### Per-board checklist (to claim a board "verified")
-1. **Flash**: use the [web flasher](https://1vcian.me/BruciaDev/) (pick your board in the
-   dropdown) or `~/.pio-venv/bin/pio run -e <env> -t upload`. Confirm the write verifies and
-   the device reboots into Brucia. (You cannot brick an ESP32 by flashing - BOOT+RESET
-   re-enters download mode if anything goes wrong.)
-2. **Boot (L1)**: the device shows the Brucia UI; the top-level **Brucia App** entry enters
-   companion mode.
-3. **Connect (L1)**: open the Android app, **Connect over USB**. Confirm HELLO/CAPS returns,
-   the device card shows the right board/chip, and `caps{}` matches the hardware (e.g. no
-   CC1101 -> `cc1101:false`). Confirm PING keeps the battery fresh.
-4. **Modules (L2)**: for every `true` cap, run its tool once:
-   - wifi -> Wardrive sees APs; Sniffer/Monitor stream.
-   - cc1101 -> Sub-GHz RX shows a capture; TX a known-safe signal.
-   - nfc -> read a tag you own. ir -> send a code. ble -> scan.
-   - mic -> Spectrum/Oscilloscope react to sound. speaker -> Tone plays.
-   - nrf24 (if the module is attached) -> scan. lora/eth (if wired) -> status.
-   - Remote mirror renders the screen and `nav` moves the UI.
-5. **Report**: open an issue titled `verify: <board>` with the board name, the `caps{}` JSON
-   (visible in the app's Device info / Console `info`), which modules passed/failed, and the
-   firmware/app version. We will mark the board verified in the matrix below.
+These combine consolidation of existing tools with possible extensions. Inventory
+each existing implementation before deciding what actually needs to be added.
 
-### Board status matrix
-| Board | Chip | Flash | L1 boot+companion | L2 modules |
-|---|---|---|---|---|
-| LilyGo T-Embed CC1101 | ESP32-S3 | yes | verified | wardrive + BLE + CC1101 + audio live |
-| all other ~70 targets | mixed | builds in CI | not tested | not tested |
+| Area | Candidate scope |
+|---|---|
+| Wi-Fi pentest workspace | Repeatable discovery, lab deauth/disassociation, handshake/PMKID capture, phone-side dictionary verification, Evil Twin/captive-portal exercises and before/after remediation checks. Record driver, WPA3 and PMF limitations. |
+| Network auditor | Host/port discovery, service identification, TLS/configuration checks and explicitly scoped default-credential tests with attempt limits. |
+| Lab MITM | Consolidate ARP, DNS/HTTP observation and HTTPS proxy workflows on configured test clients. A trusted lab CA does not bypass certificate pinning. |
+| BLE GATT auditor | Compare services and read/write permissions before and after pairing/authentication; bounded robustness tests. |
+| HID lab | Versioned Ducky scripts, action preview, controlled execution and outcome evidence. Separate BLE pairing requirements from board-specific USB support. |
+| Replay lab | Compare IR/Sub-GHz captures and test replay acceptance on owned receivers, distinguishing static and dynamic protocols. |
+| NFC lab | Default-key audits on owned compatible tags, dump comparisons and supported write/emulation tests. |
+| NRF24/ESB lab | Compatible-device analysis and controlled unauthenticated-packet acceptance tests with an optional module. |
+| Hardware interfaces | UART consoles and I2C/SPI/debug-interface analysis with documented voltage levels and suitable adapters. |
+| Protocol robustness | Bounded message mutation against explicit lab targets, recording responses, crashes and recovery. |
+| Defensive baseline | New-device/service observations, explainable WIDS alerts, local IoT inventory and repeatable remediation verification. |
 
-(Help us fill this in - each verified board becomes a row.)
+Every active experiment needs an explicit target, bounded duration/rate, reliable
+Stop and cleanup, and evidence distinguishing a sent command from confirmed impact.
 
-### Known hardware notes
-- Shared SPI bus on the T-Embed (CC1101 / SD / NRF24 / W5500 / TFT) - one device at a time;
-  mic and speaker are half-duplex.
-- NRF24 on the T-Embed is an external nRF24L01+ on QWIIC Port #2 (CE=43, CSN=44, shared
-  SPI); `caps.nrf24` auto-detects it.
-- The in-app firmware updater only flashes the T-Embed CC1101; other boards must use the web
-  flasher with their matching per-board image.
+### Signal visualization and generators
 
----
+- Consolidate audio spectrogram and Sub-GHz RSSI waterfall with recordings, zoom,
+  markers and capture comparison. Label RSSI sweeps, PCM and pulse data accurately;
+  CC1101 is not a wideband IQ SDR.
+- Wi-Fi/BLE channel activity, RSSI history and advertising-rate comparisons.
+- Consolidate BLE advertising spam and synthetic Wi-Fi beacon tests with duration,
+  rate, counters and immediate cancellation.
+- Repeatable IR/Sub-GHz sequences, audio tones/sweeps/DTMF and optional NRF24 test
+  traffic. Do not assume one radio can transmit and observe simultaneously.
+- Generator-plus-observer experiments: correlate a controlled stimulus with audio,
+  Wi-Fi, BLE or RF observations, preserving uncertainty and avoiding causal claims
+  based only on timing.
 
-## Roadmap
+## Creative and community backlog
 
-### Priority (finish what exists)
-- **Remaining Bruce parity (firmware companion commands + app UI)** - still missing: Karma attack,
-  Pwnagotchi/Brucegotchi, BLE Presenter/Keyboard (HID), a dedicated NetCut, Responder (headless),
-  Scan Hosts / WebUI launcher UIs, and the add-on-module features (NFC nested/mfkey32/chameleon/
-  SRIX/125kHz, NRF24 spectrum, LoRa chat, Ethernet attacks) - all caps-gated for users who fit the
-  module. **[priority]**
-- **Exercise audio TX end to end** on hardware (SSTV transmit + speaker playback on a real
-  signal); mic capture + the Spectrum/Waterfall/Oscilloscope RX path are already verified live.
-- **Verify more boards** to L1/L2 (see above). **[priority] [help wanted]**
-- **SSTV Scottie broadcast sync**: Scottie currently uses a self-consistent sync that
-  round-trips in-app but will not decode an external broadcast-Scottie signal; implement the
-  real mid-line sync. **[help wanted]**
-- **Background lifecycle, pillar 3**: move the transport + long-running jobs out of the
-  Activity-scoped ViewModel so the link survives a full app swipe-away (not just screen-off).
+| Idea | Extension to evaluate |
+|---|---|
+| IR instrument | Map learned remote buttons to phone-side notes, drums or samples. |
+| BLE MIDI controller | Encoder/push-button control of notes, chords and parameters; verify MIDI stack compatibility and radio coexistence. Distinct from existing melody playback. |
+| Spectrogram drawing | Convert a drawing into audio, then recover its visual pattern through the existing spectrogram. Measure speaker/microphone bandwidth limits. |
+| DTMF playground | Build retro interfaces, puzzles and shareable sequences on existing tone generation and decoding. |
+| Radio orchestra | Sonify observed radio metrics with Three.js visuals; explicitly distinguish sonification from demodulated transmitter audio. |
+| Signal Detective | Offline puzzles using synthetic or redacted captures to teach timing, modulation and protocol identification. |
+| Personal remote dashboard | Learned controls, custom layouts and shareable scenes using existing compatible IR/radio operations. |
+| SSTV postcards | A simplified photo-to-audio-to-image experience built on existing SSTV RX/TX, rather than another codec implementation. |
+| Pocket groovebox | Phone-side sequencer/samples with LilyGO encoder control and synchronized LED patterns. |
+| Escape-room kit | Programmable puzzles combining NFC tags, IR sequences and DTMF; declare required modules and accessories. |
 
-### App-driven attacks (harden + validate)
-- More BLE spam variants, PMKID flows, and live validation of deauth/handshake/spam on
-  targets you own. **[help wanted]**
+Potential launch demonstrations, after verification: an IR remote as an instrument,
+an image sent as sound, and a captured signal explained through a tested decoder.
+These are launch hypotheses, not promises of virality.
 
-### Distribution & i18n
-- The app ships **only via GitHub Releases** (signed APK) + in-app OTA self-update. No F-Droid, no
-  Play Store.
-- **Internationalization** - source strings are English; add translations (Italian first).
-  **[help wanted]**
+Community foundations: documented shareable packs for puzzles, instruments,
+visuals and decoders; offline demos without hardware; small contributor challenges
+with expected results; redacted visualization/video exports; and a public board /
+module / operation compatibility matrix. Keep the Three.js visual identity and
+the infinite-battery meme, with technically accurate USB power notes.
 
-### Data & firmware
-- Offline map-tile bundling for wardriving without a connection.
-- Larger datasets: expanded IR/Sub-GHz catalogs, per-vendor NFC key sets.
-- Upstream the companion hooks to [Bruce](https://github.com/BruceDevices/firmware) as an
-  optional module, so Brucia stays a thin layer.
-- More capture streams (raw 802.11 frames, extra Sub-GHz modes); more mic decoders (CW/RTTY/
-  POCSAG) reusing the `mic.pcm` pipeline. **[help wanted]**
+## Execution order after the 0.1.1 stabilization review
 
-### IR - queued ideas
-- **Custom remote builder**: let the user build their own remote as a grid of user-placed buttons,
-  each taught by capturing one IR signal at a time (IR Read), named and positioned freely; tapping a
-  button replays its captured code. Saved layouts persist on the phone and can be shared/exported.
+The numbers in the earlier idea table rank future ideas only. They do not override
+[the production gates](skills/brucia-maintenance/references/backlog.md): **all P0 stabilization work comes first**.
 
-### Device-side companion - queued ideas
-- **Background companion + minimal status screen**: run the USB companion link as a background task
-  so the device shows a tiny status instead of a dedicated page - "Connected" when a Brucia app is
-  attached over USB, else "Download the app to connect" with a QR to the app. Must guard shared
-  hardware: the CC1101/SD/NRF24/TFT SPI bus and the single Wi-Fi/BLE radio can't be driven by the
-  phone and a device-side tool at once, so lock out the conflicting side while the other holds a
-  radio. (USB only - no BT/Wi-Fi transport, that's 2.0.)
+| Order | Deliverable | Dependency / reason |
+|---|---|---|
+| Now — P0 | Existing operation matrix, release consistency, recovery and physical acceptance | Establish what actually works before expanding |
+| Next — P1 | Smaller session/transfer coordinators, transactional firmware writes, capability evidence | Reduce failure modes and contributor coupling |
+| Feature 1 | Portable capture bundle + offline replay of one existing passive stream | Reproduce bugs and share experiments without new radio operations |
+| Feature 2 | Hardware doctor on existing capability reporting | Explain why a tool is enabled, unavailable or unverified |
+| Feature 3 | Bounded recipes with assertions, cleanup and reports | Reuse stable command lifecycles |
+| Feature 4 | Decoder workbench and before/after comparisons | Build on captured data and known-answer corpora |
+| Feature 5 | SSTV postcards / Signal Detective / IR instrument | Community demonstrations using verified existing primitives |
+| Later | Optional hardware/protocol expansion, BLE MIDI, synchronized multi-node sessions | Separate drivers, electrical constraints and physical test fixtures |
 
-### Audio - queued ideas
-- **Melody composer** (shipped): the Tone tool now has a note-by-note composer (pick length/octave,
-  tap notes/rests, set tempo) that builds an RTTTL string and plays it on the device speaker via the
-  existing background player, with save/replay of custom songs. A future step could add
-  recording-to-song (derive notes from a captured waveform) and a fuller piano-roll editor.
+Additional proposals from this review:
 
----
+- **Failure replay attachments:** export a redacted protocol trace plus versions,
+  capability snapshot and expected result; import it into the existing test harness.
+  Fold into bundles/replay rather than introducing a separate recorder.
+- **Compatibility receipts:** a local, inspectable manifest of board revision,
+  operation and test outcome attached to a release. Extend the existing verification
+  receipt idea; distinguish simulated, compiled and physically verified evidence.
+- **Recovery rehearsal:** synthetic disconnect/timeout/storage-full scenarios for
+  contributors, with expected retained data and released resources. First use it
+  internally as stabilization coverage; expose it as a community tool later.
 
-## Out of scope
-- **iOS** - no reliable USB-serial path + store friction with AGPL. Android only.
-- **Anything that only works to attack systems you do not own.** Brucia is for authorized
-  research and education; the dual-use modules keep that framing.
+No new active radio functionality is part of the current stabilization milestone.
 
-## Phone-powered research ideas (queued) - impossible on standalone Bruce/Flipper
+## Retained candidates from earlier planning
 
-The phone brings compute, storage, internet, GPS and an NPU the ESP32 does not have. The hard rule:
-every idea here must CENTER on something only the ESP's radios/sensors can do - sub-GHz (CC1101),
-Wi-Fi monitor/injection, IR TX/RX, PN532 NFC, the device mic/speaker - with the phone as the
-compute/storage/GPS back-end. A pure-phone feature (e.g. camera OCR) does not belong: if it does not
-need the device, it is not a Brucia feature. USB only (no BT/Wi-Fi transport, that is 2.0).
-Authorized research only.
+After stabilization, evaluate Italian localization, offline map packs, optional
+Wi-Fi/BLE transport, device-side background companion with explicit radio ownership,
+recording-to-note/piano-roll tools, additional CW/RTTY/POCSAG decoders, optional
+Si5351/dual-NRF24 support, calibrated RF heatmaps and ultrasonic experiments.
+Inspect existing timeline, WIDS, fingerprint, Geo Signals, macros and PCAP paths
+before proposing replacements. Do not claim cross-radio identity, precise RSSI
+localization, or novelty from an unverified feature list. Upstreaming generic
+companion hooks remains an option with Bruce maintainers.
 
-- **On-phone signal ML**: modulation recognition and protocol identification from raw sub-GHz
-  timings, and device fingerprinting from BLE/Wi-Fi behavior - inference the ESP cannot run.
-- **Temporal intelligence DB** (SHIPPED - RF Timeline): log BLE/Wi-Fi/sub-GHz sightings with timestamp + GPS over days;
-  study MAC-randomization patterns and correlate rotating identifiers across time. Needs the
-  phone's storage and compute; impossible on a Flipper.
-- **RF heatmaps on the map**: beyond Wi-Fi wardrive - sub-GHz source localization, BLE density and
-  interference/jammer maps, all GPS-tagged on the offline map.
-- **Automated recon report** (PARTLY SHIPPED - honest heuristic insights incl. BLE MAC trackability; no misleading per-vendor CVE): OUI -> vendor, optional
-  online enrichment, exported as PDF/HTML. The phone has internet; the device does not.
-- **On-phone PCAP dissection** (SHIPPED): a Wireshark-lite that decodes captured 802.11/pcap on the phone -
-  filter, follow streams, extract handshakes - not just capture.
-- **Protocol fuzzing orchestration**: the phone generates payload sets (sub-GHz / IR / BLE), the
-  device transmits, the phone logs responses - iterative fuzzing with the phone's compute.
-- **Rolling-code / counter analysis**: capture many sub-GHz samples; the phone diffs and visualizes
-  the rolling counter / keystream.
-- **MIFARE crypto offload**: when nonces can be captured (right reader), the phone runs the
-  nested/darkside key recovery - the compute part the ESP cannot do.
-- **Phone-side automation** (SHIPPED - Macros): a macro/script engine on the phone chaining device commands
-  (scan -> capture -> analyze -> report), far beyond the device's tiny on-board interpreter.
-- **3D RF-source map** (SHIPPED): plot Wi-Fi APs / BLE beacons / sub-GHz emitters as points in a 3D scene
-  around you, positioned by RSSI multilateration as you move (phone IMU + GPS), with signal-strength
-  clouds. Realistic as an approximate visualization (RSSI->distance is noisy, +/- several metres);
-  it maps RF *sources*, not room geometry. True RF imaging of walls/objects needs UWB/radar/phased
-  arrays - out of scope for a single ESP32+CC1101. A coarse motion/presence layer via ESP32 Wi-Fi
-  CSI is a separate research step (firmware CSI capture).
+## Community contributions and feature modules
 
-## Original / "never seen" ideas (queued) - our sensors, both attack and defense
-
-Most ESP tools are offensive-only. Brucia can be a serious *defensive* tool too - and the key is
-that the ESP's radios do sensing a phone physically cannot (sub-GHz on the CC1101, Wi-Fi
-promiscuous/monitor mode, IR), while the phone adds GPS, storage and correlation. Authorized use only.
-
-Defensive (blue-team) - novel:
-- **"Are you being followed?" counter-surveillance**: the ESP watches in Wi-Fi monitor mode (every
-  nearby device, not just connectable ones - a phone can't) plus BLE and sub-GHz, and flags any
-  emitter whose identifier keeps reappearing as YOU move (phone GPS); cross-vendor tracker and
-  tailing-device detection, including sub-GHz tags a phone cannot even hear.
-- **Hidden-device / bug & spy-cam RF sweep** (SHIPPED - Bug Sweep): a "hotter/colder" sweep that localizes hidden
-  transmitters (Wi-Fi/BLE/sub-GHz) by RSSI as you walk the device around a room.
-- **Portable WIDS** (SHIPPED): passively watch for deauth floods, evil-twin/Karma APs cloning your SSID, and
-  rogue DHCP, and auto-save timestamped + GPS-tagged evidence (pcap) to the phone.
-- **RF fingerprint of a place** (SHIPPED - RF Fingerprint): record a location's RF signature (which APs/beacons/emitters) and
-  later detect if the environment changed - new devices appearing can mean new surveillance.
-
-Offensive / research - novel fusion only the phone enables:
-- **Cross-radio identity fusion** (NOT building - deliberate): the honest version (grouping by OUI
-  vendor across radios) is already in the session report's vendor/platform tally; the useful version
-  (linking a device's Wi-Fi<->BLE MAC) is unreliable and misleading because of MAC randomization, so
-  presenting it as 'identity' would be dishonest.
-- **Geofenced capture/replay** (SHIPPED - Geo signals, manual replay): pin a saved sub-GHz/IR signal
-  to a GPS spot and replay on return; the device transmits, the phone supplies GPS + proximity.
-  (Auto-replay on a background geofence is a possible follow-up; current version is manual/safe.)
-- **Ultrasonic beacon detect/emit**: use the DEVICE mic/speaker (not the phone's) to detect retail/ad
-  ultrasonic tracking beacons and to emit ultrasonic signaling - the device is the always-on sensor,
-  the phone does the DSP.
-- **Unified RF presence timeline**: one timeline fusing Wi-Fi/BLE/sub-GHz/NFC sightings over time
-  with GPS - a personal "spectrum-of-things" recorder (the temporal DB, elevated).
-
-## How to help
-Pick an item (especially **[help wanted]** / **[priority]**), open an issue to claim it, and
-read [CONTRIBUTING.md](CONTRIBUTING.md) + [ARCHITECTURE.md](ARCHITECTURE.md). Keeping the
-[protocol](proto/PROTOCOL.md) the single source of truth for both firmware and app is the one
-hard rule. Verifying a board, or filing a clean bug with the `caps{}` JSON, is always welcome.
+Use the [extension design](ARCHITECTURE.md#proposed-extension-architecture): a small
+shared contract with separate phone/device adapters, per-operation requirements,
+and three contribution tiers (data packs, scripts/recipes, native source modules).
+The execution order is E01–E05 in the maintenance backlog. First migrate existing
+features and prove isolated tests; publish templates/SDK and a catalog afterwards.
+This is planned architecture, not an already available extension runtime.

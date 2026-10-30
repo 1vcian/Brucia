@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Compile the real firmware codec with an Arduino String shim and UBSan."""
 from pathlib import Path
+import base64
 import os
+import random
 import subprocess
 import tempfile
 
@@ -46,11 +48,42 @@ int main() {
     std::cout<<"Firmware codec PASS (UBSan)\n";
 }
 '''
+def reference_cases():
+    """Python's encoder is an independent oracle, not a same-codec round trip."""
+    rng = random.Random(0xB12C1A)
+    cases = []
+    for length in [*range(1, 129), 255, 256, 767, 768, 3072, 6144]:
+        raw = bytes(rng.randrange(256) for _ in range(length))
+        expected = base64.b64encode(raw).decode("ascii")
+        values = ",".join(str(b) for b in raw)
+        cases.append('''{
+            const uint8_t raw[] = {''' + values + '''};
+            const String expected = "''' + expected + '''";
+            assert(b64encode(raw, sizeof(raw)) == expected);
+            size_t size = 0;
+            auto decoded = companionB64decode(expected, &size);
+            assert(decoded && size == sizeof(raw) && !memcmp(decoded, raw, size));
+            free(decoded);
+        }''')
+    # Corrupt each position of a valid sample: no invalid byte may be ignored.
+    cases.append('''{
+        const std::string original = "AAECAwQFBgcICQoLDA0ODw==";
+        for (size_t i = 0; i < original.size(); ++i) {
+            String corrupted(original.c_str()); corrupted[i] = '?';
+            size_t size = 123;
+            auto decoded = companionB64decode(corrupted, &size);
+            assert(!decoded && size == 0);
+        }
+    }''')
+    return "\n".join(cases)
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="brucia-codec-") as tmp:
         tmp = Path(tmp)
         (tmp / "Arduino.h").write_text(SHIM)
-        (tmp / "test.cpp").write_text(TEST)
+        test = TEST.replace('    std::cout<<"Firmware codec PASS', reference_cases() + '\n    std::cout<<"Firmware codec PASS')
+        (tmp / "test.cpp").write_text(test)
         exe = tmp / "codec"
         subprocess.run([os.environ.get("CXX", "c++"), "-std=c++17", "-fsanitize=undefined",
                         "-fno-sanitize-recover=undefined", "-I", str(tmp), "-I", str(ROOT / "src/companion"),

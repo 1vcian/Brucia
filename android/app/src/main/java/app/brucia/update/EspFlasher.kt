@@ -206,9 +206,9 @@ class EspFlasher(private val io: SerialIo) {
     /** Read raw SLIP frames until one is the stub's "OHAI" greeting, or [timeoutMs] elapses. */
     private fun waitForOhai(timeoutMs: Int): Boolean {
         reader.reset()
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            val n = io.read(readBuf, (deadline - System.currentTimeMillis()).toInt().coerceIn(1, timeoutMs))
+        val deadline = (System.nanoTime() / 1_000_000L) + timeoutMs
+        while ((System.nanoTime() / 1_000_000L) < deadline) {
+            val n = io.read(readBuf, (deadline - (System.nanoTime() / 1_000_000L)).toInt().coerceIn(1, timeoutMs))
             for (i in 0 until n) {
                 val frame = reader.offer(readBuf[i].toInt() and 0xFF) ?: continue
                 if (frame.size >= 4 && frame[0].toInt() == 'O'.code && frame[1].toInt() == 'H'.code &&
@@ -281,8 +281,8 @@ class EspFlasher(private val io: SerialIo) {
     /** Read and discard any buffered bytes so SYNC starts from a clean frame. */
     private fun drainInput() {
         reader.reset()
-        val t = System.currentTimeMillis()
-        while (System.currentTimeMillis() - t < 100) {
+        val t = (System.nanoTime() / 1_000_000L)
+        while ((System.nanoTime() / 1_000_000L) - t < 100) {
             if (io.read(readBuf, 20) <= 0) break
         }
         reader.reset()
@@ -311,9 +311,9 @@ class EspFlasher(private val io: SerialIo) {
 
     /** Read SLIP frames until one echoes [command], or [timeoutMs] elapses. */
     private fun readResponse(command: Int, timeoutMs: Int): EspProtocol.Response? {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            val n = io.read(readBuf, (deadline - System.currentTimeMillis()).toInt().coerceIn(1, timeoutMs))
+        val deadline = (System.nanoTime() / 1_000_000L) + timeoutMs
+        while ((System.nanoTime() / 1_000_000L) < deadline) {
+            val n = io.read(readBuf, (deadline - (System.nanoTime() / 1_000_000L)).toInt().coerceIn(1, timeoutMs))
             for (i in 0 until n) {
                 val frame = reader.offer(readBuf[i].toInt() and 0xFF) ?: continue
                 val resp = EspProtocol.parseResponse(frame) ?: continue

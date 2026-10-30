@@ -28,6 +28,11 @@
 
 // Standard support
 #include <Arduino.h>
+#if __has_include("../../include/precompiler_flags.h")
+// Brucia defaults (notably TOUCH_CS / SMOOTH_FONT) affect the class layout.
+// Library source and application source must see the same defaults.
+#include "../../include/precompiler_flags.h"
+#endif
 #include <Print.h>
 #if !defined(TFT_PARALLEL_8_BIT) && !defined(RP2040_PIO_INTERFACE)
 #include <SPI.h>

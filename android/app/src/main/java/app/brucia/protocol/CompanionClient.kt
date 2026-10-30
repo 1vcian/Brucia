@@ -82,22 +82,25 @@ class CompanionClient(private val transport: Transport) {
     }
 
     private fun extractFrame(): JSONObject? {
-        if (buffer.size < 4) return null
-        val len = (buffer[0].toInt() and 0xFF) or
-            ((buffer[1].toInt() and 0xFF) shl 8) or
-            ((buffer[2].toInt() and 0xFF) shl 16) or
-            ((buffer[3].toInt() and 0xFF) shl 24)
-        if (len <= 0 || len > (1 shl 20)) {
-            buffer = ByteArray(0) // desync guard
-            return null
+        while (buffer.size >= 4) {
+            val len = (buffer[0].toInt() and 0xFF) or
+                ((buffer[1].toInt() and 0xFF) shl 8) or
+                ((buffer[2].toInt() and 0xFF) shl 16) or
+                ((buffer[3].toInt() and 0xFF) shl 24)
+            if (len <= 0 || len > 8192) {
+                buffer = ByteArray(0) // Invalid length: frame boundary is unknown.
+                throw java.io.IOException("Invalid companion frame length: $len")
+            }
+            if (buffer.size < 4 + len) return null
+            val payload = buffer.copyOfRange(4, 4 + len)
+            buffer = buffer.copyOfRange(4 + len, buffer.size)
+            try {
+                return JSONObject(String(payload, Charsets.UTF_8))
+            } catch (_: Exception) {
+                // The length was valid, so the next boundary is known. Drain any
+                // complete buffered frames before waiting for more transport data.
+            }
         }
-        if (buffer.size < 4 + len) return null
-        val payload = buffer.copyOfRange(4, 4 + len)
-        buffer = buffer.copyOfRange(4 + len, buffer.size)
-        return try {
-            JSONObject(String(payload, Charsets.UTF_8))
-        } catch (_: Exception) {
-            null
-        }
+        return null
     }
 }

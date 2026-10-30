@@ -20,14 +20,14 @@ radio/sensor front-end, a native Android app as the compute, storage and GUI.
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-E23E00.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/device-ESP32--S3-FF6D1A.svg)](#hardware)
 [![App](https://img.shields.io/badge/app-Android-FFB300.svg)](#the-app)
-[![Status: early development](https://img.shields.io/badge/status-early%20development-FFB300.svg)](docs/STATUS.md)
+[![Status: early development](https://img.shields.io/badge/status-early%20development-FFB300.svg)](TESTS.md)
 [![No ads · No telemetry](https://img.shields.io/badge/no%20ads-no%20telemetry-444.svg)](#principles)
 
 [Usage](docs/USAGE.md) ·
 [Comparison](docs/COMPARISON.md) ·
 [Hardware proof](docs/HARDWARE_VERIFICATION.md) ·
 [Protocol](proto/PROTOCOL.md) ·
-[Code map](MAPPING.md)
+[Code map](src/companion/README.md)
 
 <br>
 
@@ -44,54 +44,35 @@ radio/sensor front-end, a native Android app as the compute, storage and GUI.
 > explicitly permitted to test.
 
 > **Project status - early development, honest disclaimer.** Brucia is young and moving fast.
-> Build and test evidence is recorded in the [current audit](docs/AUDIT_2026-10-29.md);
+> Build and test evidence is recorded in the [test evidence](TESTS.md);
 > it does not establish hardware coverage for every supported board. Phone-side pure logic (WPA/PMKID cracking, OOK/rolling-code
 > decode, MIFARE key checks, OUI lookup, protocol, ...) has **unit-test coverage**. But most of the
 > **radio/hardware features have not yet been verified end-to-end on real hardware** - they are
 > implemented, not proven. Treat any capability as "builds, pending on-device verification" until
-> it is checked off in [TESTS.md](TESTS.md) / [docs/STATUS.md](docs/STATUS.md). Use it on hardware
+> it is checked off in [TESTS.md](TESTS.md) / [test evidence](TESTS.md). Use it on hardware
 > you can afford to re-flash, and don't rely on a feature until you've tested it yourself.
 
 ---
 
 ## Brucia vs Flipper Zero vs Bruce
 
-Same cheap radios - but the phone adds compute, storage, GPS and a full-size screen.
-Several of these have **never existed on a Flipper Zero or on Bruce** (marked **NEW**).
+Brucia pairs Bruce-derived firmware with an Android workspace for analysis,
+storage, maps and device control. The reference board is the **LilyGO T-Embed
+CC1101**; supported operations depend on both its hardware and the current driver.
 
-Brucia's reference hardware is the **LilyGo T-Embed CC1101 (ESP32-S3)** (the board it is
-verified on; the firmware also builds for ~70 Bruce-supported boards).
+| Area | Current distinction |
+|---|---|
+| Wi-Fi / BLE | Native on the ESP32; the phone adds analysis, GPS and a larger UI. |
+| Sub-GHz / IR | Stock radios are present. Decoder and replay support must be checked per protocol; the CC1101 is not an IQ SDR. |
+| NFC | Stock PN532, with controller-specific limits. It is not full Flipper NFC emulation parity. |
+| LF RFID / iButton | Flipper includes dedicated hardware; stock T-Embed does not. These actions remain unavailable without compatible interfaces. |
+| Audio | DSP, waterfall, SSTV RX/TX, DTMF, scope and melody composition already exist; final physical verification is pending. |
+| Research workflow | Native Android companion; Flipper also has an official mobile app. No universal novelty claim. |
+| Infinite battery · SERIAL-KILLER | The meme stays. USB can draw power from your phone; both batteries remain finite. |
 
-| Capability | Flipper Zero | Bruce | Brucia (LilyGo T-Embed CC1101) |
-|---|---|---|---|
-| Wi-Fi recon / wardrive | Add-on board | Yes, tiny screen | **Yes + GPS, live map, WiGLE** |
-| WPA / PMKID crack (dictionary) **· NEW** | No | No | **Yes - rockyou/SecLists, on the phone** |
-| GPS + live map + WiGLE export **· NEW** | Add-on, no map | Add-on, no map | **Yes - uses the phone** |
-| MITM HTTPS intercept proxy **· NEW** | No | No | **Yes - on-phone CA, TLS decrypt** |
-| Wi-Fi monitor + pcap to Wireshark **· NEW** | No | Sniff only | **Yes - pcap export + PSK decrypt** |
-| Sub-GHz capture / replay / decode | Yes | Yes | **Yes + waterfall, rolling-code, big screen** |
-| NFC / RFID read, emulate, attack | Yes | Yes | **Yes** |
-| Infrared + universal remote catalog | Yes | Yes | **Yes - 1648 codes, phone-hosted** |
-| BLE scan + GATT explorer + spam | Partial | Spam | **Scan + GATT + spam hub** |
-| 2.4 GHz NRF24 / MouseJack | Add-on | Add-on | **Add-on, phone-driven** |
-| Microphone tools (needs audio in) **· NEW** | No microphone | Mic, no tools | **Full audio suite** |
-| SSTV decode to image + transmit **· NEW** | No | No | **Yes - Robot36 and more** |
-| Oscilloscope + waterfall from mic **· NEW** | No | No | **Yes** |
-| Session report + OSINT insights **· NEW** | No | No | **Yes** |
-| Flash firmware from the companion app **· NEW** | n/a | Web / serial only | **Yes - over USB, in-app** |
-| Flash from the browser (no install) | No (qFlipper desktop) | Yes (web flasher) | **Yes - Web Serial page** |
-| OTA update (app + firmware, in-app notes) **· NEW** | Desktop only | No | **Yes - app self-update + device firmware, shows release notes** |
-| Full-size touch GUI + big datasets | Tiny screen | Tiny screen | **Yes - the phone** |
-| Open source | Yes | AGPL-3.0 | **AGPL-3.0** |
-| Hardware cost | ~$169 | ~$30-50 | **~$30-50 + a phone you own** |
-| Never runs out of battery **· [SERIAL-KILLER]** | Own battery, dies | Own battery, dies | **Never - charges from your phone (it's the phone that dies)** |
-
-*Fair notes: Flipper Zero firmware is open source with a large community-app ecosystem; some
-rows (NRF24, rolling-code, GATT) also exist on Flipper add-ons or on Bruce - there the gain is
-the phone's compute, storage and screen, not novelty. The rows marked **NEW** are genuinely
-absent on Bruce and, for the microphone tools, physically impossible on a Flipper (no audio input).*
-
-See the [full feature comparison](docs/COMPARISON.md).
+Three representative firmware environments build; this does not verify all configured
+boards or all physical functions. See [tests](TESTS.md) and the
+[full comparison and primary sources](docs/COMPARISON.md).
 
 ---
 
@@ -166,7 +147,7 @@ BLE); spam hub (Apple / Android Fast Pair / Windows Swift Pair / Samsung).
 **NRF24 (2.4 GHz add-on)** - scanner, ESB sniffer, jammer, MouseJack; gated on the
 add-on module being attached.
 
-**Tools** - live mic spectrum, speaker tone/play, mic record, iButton read/write,
+**Tools** - live mic spectrum, speaker tone/play, mic record, optional iButton interfaces,
 clock/RTC sync, ESP-NOW send, on-device JavaScript (BruceJS) run from the phone, Console
 CLI passthrough, file manager, and a live remote screen mirror with D-pad navigation. A
 platform-organized **spam hub** (Apple/iOS/Mac, Android, Windows, Samsung, Wi-Fi, All)
@@ -198,9 +179,10 @@ every page is gated per detected hardware.
 
 Full walkthrough in [docs/USAGE.md](docs/USAGE.md).
 
-### Parity with Bruce
+### Compatibility with Bruce
 
-Everything Bruce does is reachable from the app:
+The app exposes dedicated tools and a remote navigation path for Bruce-derived functions.
+Remote reachability is not evidence that every menu action has passed acceptance:
 
 - **Native offload screens** for every module the device reports - Wi-Fi (wardrive,
   deauth, handshake/PMKID capture, sniffer, monitor mode), BLE (scan, GATT, spam hub),
@@ -286,19 +268,19 @@ For how Brucia compares to Flipper Zero and Bruce, see the [feature comparison](
 | `proto/` | The [companion wire protocol](proto/PROTOCOL.md) - single source of truth for both sides. |
 | `docs/` | [Usage](docs/USAGE.md), [comparison](docs/COMPARISON.md), [hardware proof](docs/HARDWARE_VERIFICATION.md), and the browser flasher (GitHub Pages). |
 | `tools/` | Host-side protocol test clients (`companion_test.py`, mock device, e2e). |
-| [`MAPPING.md`](MAPPING.md) | Where Brucia hooks into the existing Bruce code. |
+| [Firmware module map](src/companion/README.md) | Where Brucia hooks into the existing Bruce code. |
 
 ## Documentation
 
 - [Project wiki](https://github.com/1vcian/BruciaDev/wiki) - getting started, features, architecture, protocol, building, FAQ
-- [docs/STATUS.md](docs/STATUS.md) - where each capability stands today, and what is missing
+- [test evidence](TESTS.md) - current verification evidence and pending acceptance
 - [SECURITY.md](SECURITY.md) - authorized-use policy and responsible disclosure
 - [docs/USAGE.md](docs/USAGE.md) - flash, connect, and use every tab
 - [docs/COMPARISON.md](docs/COMPARISON.md) - Flipper Zero vs Bruce vs Brucia
 - [docs/HARDWARE_VERIFICATION.md](docs/HARDWARE_VERIFICATION.md) - proof it runs on real hardware
 - [ARCHITECTURE.md](ARCHITECTURE.md) - the split design and how the layers fit
 - [proto/PROTOCOL.md](proto/PROTOCOL.md) - the companion wire protocol
-- [MAPPING.md](MAPPING.md) - integration points into Bruce
+- [Firmware module map](src/companion/README.md) - integration points into Bruce
 - [ROADMAP.md](ROADMAP.md) - what works, what is next, where help is wanted
 - [CONTRIBUTING.md](CONTRIBUTING.md) - build, rules, and how to add a module
 - [CHANGELOG.md](CHANGELOG.md) - release history

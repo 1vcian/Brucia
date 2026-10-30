@@ -98,9 +98,10 @@ else
   commit_msg="release $new"
 fi
 
-python3 -m unittest discover -s tools -p test_web_resources.py
-python3 -m unittest discover -s tools -p test_ble_dependency_patches.py
+python3 -m unittest discover -s tools -p 'test_*.py'
+node --test tools/test_site_release.cjs
 python3 tools/test_firmware_codec.py
+python3 tools/test_firmware_storage.py
 python3 tools/test_firmware_framing.py
 python3 tools/test_protocol_e2e.py
 ./android/gradlew -p android :app:testDebugUnitTest :app:lintDebug
@@ -109,6 +110,7 @@ if ! command -v "$pio_bin" >/dev/null 2>&1 && [ -x "$HOME/.pio-venv/bin/pio" ]; 
   pio_bin="$HOME/.pio-venv/bin/pio"
 fi
 PIO_BIN="$pio_bin" python3 tools/build_firmware.py -e lilygo-t-embed-cc1101
+python3 tools/test_audio_noise_bounds.py -e lilygo-t-embed-cc1101
 cp .pio/build/lilygo-t-embed-cc1101/firmware.factory.bin docs/firmware/brucia-t-embed-cc1101.bin
 ./android/gradlew -p android :app:clean :app:assembleRelease
 cp android/app/build/outputs/apk/release/app-release.apk "$release_backup/Brucia-$new.apk"
@@ -119,4 +121,4 @@ git tag "v$new"
 git push --atomic "$REMOTE" main "v$new"
 gh release create "v$new" -R "$REPO" "$release_backup/Brucia-$new.apk" docs/firmware/brucia-t-embed-cc1101.bin \
   --title "Brucia $new" --notes "$body"
-echo ">> Done: v$new (private repo $REPO)"
+echo ">> Done: v$new (repository $REPO)"

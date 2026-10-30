@@ -30,6 +30,8 @@ jobs:
         run: pip install platformio==6.2.0
       - name: Build firmware
         run: python3 tools/build_firmware.py -e ${{ matrix.board }}
+      - name: AAC SBR noise bounds regression
+        run: python3 tools/test_audio_noise_bounds.py -e ${{ matrix.board }}
       - uses: actions/upload-artifact@v4
         with:
           name: brucia-firmware-${{ matrix.board }}
@@ -65,17 +67,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
       - run: pip install pyserial
-      - name: Firmware bootstrap regression
-        run: python3 -m unittest discover -s tools -p test_build_firmware.py
-      - name: Release workflow regression (no publishing)
-        run: python3 -m unittest discover -s tools -p test_release.py
-      - name: BLE dependency callback regression
-        run: python3 -m unittest discover -s tools -p test_ble_dependency_patches.py
-      - name: Offline WebUI asset regression
-        run: python3 -m unittest discover -s tools -p test_web_resources.py
+      - name: Build, release, dependency and database regressions
+        run: python3 -m unittest discover -s tools -p 'test_*.py'
+      - name: Website release and installer logic
+        run: node --test tools/test_site_release.cjs
       - name: Firmware base64 codec regression
         run: python3 tools/test_firmware_codec.py
+      - name: Firmware file transfer regression
+        run: python3 tools/test_firmware_storage.py
       - name: Firmware frame reader regression
         run: python3 tools/test_firmware_framing.py
       - name: End-to-end protocol test (mock device + client)

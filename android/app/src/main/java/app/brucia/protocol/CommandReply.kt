@@ -13,10 +13,14 @@ internal fun routeCommandReply(
     val id = message.optInt("id", -1)
     val data = message.optJSONObject("d")
     val isError = kind == Kind.ERR
-    val ok = !isError && (data?.optBoolean("ok") ?: false)
+    val ok = !isError && data?.opt("ok") == true
     val out = if (isError) data?.optString("msg", "Device error") ?: "Device error"
               else data?.optString("out") ?: ""
-    pending.remove(id)?.invoke(ok, out)
-    pendingJson.remove(id)?.invoke(ok, data)
+    // Detach both before invoking user code: a callback can enqueue another
+    // request, which must not be consumed by this reply.
+    val callback = pending.remove(id)
+    val jsonCallback = pendingJson.remove(id)
+    try { callback?.invoke(ok, out) }
+    finally { jsonCallback?.invoke(ok, data) }
     return out
 }

@@ -686,12 +686,13 @@ int PN532::emulate() {
         for (uint8_t retry = 0; !gotData && retry < 3; retry++) {
             delay(50);
             gotData = tgGetDataIrq(nfc, request, sizeof(request), &request_len, &tgStatus);
-            if (gotData)
+            if (gotData) {
                 PN532_DBG(
                     "[PN532] emulate: tgGetData recovered after %d retr%s\n",
                     retry + 1,
                     retry == 0 ? "y" : "ies"
                 );
+            }
         }
         if (!gotData) {
             PN532_DBG("[PN532] emulate: tgGetData transport failure -> re-arming\n");

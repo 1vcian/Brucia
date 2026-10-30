@@ -40,10 +40,10 @@ object BruciaLog {
         i("Log", "---- log start ${Date()} (app ${BuildConfig.VERSION_NAME}) ----")
     }
 
-    fun d(tag: String, msg: String) { Log.d(prefix(tag), msg); append("D", tag, msg, null) }
-    fun i(tag: String, msg: String) { Log.i(prefix(tag), msg); append("I", tag, msg, null) }
-    fun w(tag: String, msg: String, e: Throwable? = null) { Log.w(prefix(tag), msg, e); append("W", tag, msg, e) }
-    fun e(tag: String, msg: String, e: Throwable? = null) { Log.e(prefix(tag), msg, e); append("E", tag, msg, e) }
+    fun d(tag: String, msg: String) { try { Log.d(prefix(tag), msg) } catch (_: Exception) { }; append("D", tag, msg, null) }
+    fun i(tag: String, msg: String) { try { Log.i(prefix(tag), msg) } catch (_: Exception) { }; append("I", tag, msg, null) }
+    fun w(tag: String, msg: String, e: Throwable? = null) { try { Log.w(prefix(tag), msg, e) } catch (_: Exception) { }; append("W", tag, msg, e) }
+    fun e(tag: String, msg: String, e: Throwable? = null) { try { Log.e(prefix(tag), msg, e) } catch (_: Exception) { }; append("E", tag, msg, e) }
 
     private fun prefix(tag: String) = if (tag.startsWith(TAG)) tag else "$TAG/$tag"
 
@@ -51,7 +51,8 @@ object BruciaLog {
         val f = file ?: return
         try {
             val sb = StringBuilder()
-            sb.append(fmt.format(Date())).append(' ').append(level).append(' ')
+            val timestamp = synchronized(lock) { fmt.format(Date()) }
+            sb.append(timestamp).append(' ').append(level).append(' ')
                 .append(tag).append(": ").append(msg).append('\n')
             if (err != null) {
                 val sw = StringWriter(); err.printStackTrace(PrintWriter(sw)); sb.append(sw)

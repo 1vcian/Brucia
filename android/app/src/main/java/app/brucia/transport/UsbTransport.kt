@@ -15,8 +15,13 @@ class UsbTransport(
     @Volatile private var broken = false
 
     init {
-        port.open(connection)
-        port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+        try {
+            port.open(connection)
+            port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+        } catch (error: Exception) {
+            try { port.close() } catch (_: Exception) { }
+            throw error
+        }
     }
 
     override val kind: String get() = "usb"
@@ -42,6 +47,7 @@ class UsbTransport(
         }
 
     override fun close() {
+        broken = true
         try { port.close() } catch (e: Exception) { app.brucia.BruciaLog.d("UsbTransport", "close failed: ${e.message}") }
     }
 

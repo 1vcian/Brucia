@@ -4,7 +4,7 @@ import android.content.Context
 import java.io.File
 import java.security.KeyStore
 import java.security.cert.X509Certificate
-import java.util.concurrent.ConcurrentHashMap
+import java.util.LinkedHashMap
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 
@@ -25,7 +25,10 @@ object MitmCa {
     private var ca: MitmCertFactory.CertAndKey? = null
 
     // Per-host server SSLContexts (leaf cert signed by the CA), cached for reuse.
-    private val serverContexts = ConcurrentHashMap<String, SSLContext>()
+    private val serverContexts = object : LinkedHashMap<String, SSLContext>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SSLContext>?): Boolean = size > 128
+    }
+    private var cacheGeneration = 0L
 
     private fun storeFile(ctx: Context): File =
         File(ctx.filesDir, "$DIR/$CA_STORE").also { it.parentFile?.mkdirs() }
@@ -73,10 +76,19 @@ object MitmCa {
 
     /**
      * Server-side [SSLContext] presenting a leaf for [host] (signed by the CA),
-     * cached per host so the leaf is generated at most once.
+     * cached per host until eviction or proxy stop. Generation never holds the cache lock.
      */
-    fun serverContextFor(ctx: Context, host: String): SSLContext =
-        serverContexts.getOrPut(host) { buildServerContext(ctx, host) }
+    fun serverContextFor(ctx: Context, host: String): SSLContext {
+        val generation = synchronized(serverContexts) {
+            serverContexts[host]?.let { return it }
+            cacheGeneration
+        }
+        val created = buildServerContext(ctx, host)
+        return synchronized(serverContexts) {
+            if (generation != cacheGeneration) created
+            else serverContexts.getOrPut(host) { created }
+        }
+    }
 
     private fun buildServerContext(ctx: Context, host: String): SSLContext {
         val root = ensureCa(ctx)
@@ -92,5 +104,5 @@ object MitmCa {
     }
 
     /** Clear the in-memory leaf cache (e.g. on proxy restart). */
-    fun clearLeafCache() = serverContexts.clear()
+    fun clearLeafCache() = synchronized(serverContexts) { cacheGeneration++; serverContexts.clear() }
 }

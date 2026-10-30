@@ -4,13 +4,55 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
-## Current audit
+## Current evidence — 2026-10-30, candidate 0.1.1
 
-See [2026-10-29 audit](docs/AUDIT_2026-10-29.md) for the current evidence and
-remaining release gates. Checkmarks below are historical records, not proof that
-the current working tree passes every hardware test. The detailed
-[interactive-control checklist](docs/APP_CONTROLS_CHECKLIST.md) still needs to be
-completed against the rebuilt firmware before recording a new demo.
+- 113 production Kotlin files compiled with cached dependencies/generated resources;
+  253 unit tests passed. The standalone subset passed 120 tests (overlapping).
+- 21 Python and seven website tests passed. Native storage/codec/framing, mock
+  protocol E2E and AAC bounds with UBSan passed in the stabilization session.
+- T-Embed 0.1.1 firmware compiled and passed production Kotlin image preflight.
+  Local package `.codex_tmp/releases/0.1.1/`, 4,360,800 bytes; SHA-256
+  `20fbda74c7a67b700108e8b1c1928af7f123911a60d99dabe349f6272dd8334e`.
+- Earlier stabilization builds passed on Core 4 MB and Cardputer; this is not
+  evidence for every configured board or for physical operation.
+- Fresh Gradle/KSP/lint/signed APK and installation checks remain pending. Previous
+  environment denied Git metadata/global Gradle writes and daemon sockets; GitHub
+  was unreachable. Recheck those limitations in the current environment.
+- Physical acceptance for the final pair, UI lifecycle, flash/recovery and sustained
+  operation remain pending. Historical checks below do not certify current source.
+
+See [the task ledger](skills/brucia-maintenance/references/backlog.md) for outstanding
+work and [the interactive controls](docs/APP_CONTROLS_CHECKLIST.md) for the per-control
+acceptance inventory. Latest known fixes are in CHANGELOG.md.
+
+### Hardware-free logic checks
+
+The normal Android check remains `cd android && ./gradlew --offline testDebugUnitTest lintDebug`.
+For a restricted environment with cached dependencies:
+
+```sh
+python3 tools/test_android_logic.py
+python3 tools/check_android_changes.py --all-main --unit-tests
+node --test tools/test_site_release.cjs
+python3 -m unittest discover -s tools -p 'test_*.py'
+python3 tools/test_firmware_storage.py
+python3 tools/test_firmware_codec.py
+python3 tools/test_firmware_framing.py
+python3 tools/test_audio_noise_bounds.py -e lilygo-t-embed-cc1101
+```
+
+The small runner currently exercises 120 real Kotlin/JUnit tests with only the
+version constant generated for the host. Add `--firmware <merged-image.bin>` to
+validate a real T-Embed image with the production preflight. The cached-app checker
+compiles all 113 current production Kotlin files (Compose included) and runs 253
+non-Paparazzi tests; it requires a previous debug build and cached SDK/dependencies.
+It does not regenerate Room/KSP output, run lint or create an APK. Counts overlap.
+
+Native storage/framing checks exercise actual firmware code with host IO shims.
+The Base64 test checks 134 vectors against Python and uses UBSan. The AAC test
+requires installed firmware dependencies and checks real routines with synthetic
+state, not a complete malformed-media corpus. The five checks in
+`tools/test_protocol_e2e.py` use a mock device; they are not a physical integration test.
 
 ## Historical verification (retest on the current build)
 - [x] Cross-board firmware builds: lilygo-t-embed-cc1101 (primary) AND m5stack-core4mb (LITE,

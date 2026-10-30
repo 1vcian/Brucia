@@ -41,6 +41,7 @@ class DeviceFilesTest {
         assertEquals(5, DeviceFilePush.chunk(ByteArray(10), 2).size)
         // A zero/negative size must not loop forever; it is coerced to 1.
         assertEquals(4, DeviceFilePush.chunk(ByteArray(4), 0).size)
+        assertEquals(1, DeviceFilePush.chunk(ByteArray(10), Int.MAX_VALUE).size)
     }
 
     // --- DeviceFilePush.command ---
@@ -49,6 +50,14 @@ class DeviceFilesTest {
         assertEquals("fs_write /a.txt QUJD", DeviceFilePush.command("/a.txt", 0, "QUJD"))
         assertEquals("fs_write_append /a.txt QUJD", DeviceFilePush.command("/a.txt", 1, "QUJD"))
         assertEquals("fs_write_append /a.txt QUJD", DeviceFilePush.command("/a.txt", 7, "QUJD"))
+        assertEquals("fs_write /path with spaces/a.txt ", DeviceFilePush.command("/path with spaces/a.txt", 0, ""))
+    }
+
+    @Test fun rejectsPathsThatWouldBeChangedByTheWireGrammar() {
+        for (path in listOf("", " /a", "/a ", "/a\n", "/a\u0000b")) {
+            try { DeviceFilePush.command(path, 0, ""); org.junit.Assert.fail("Accepted invalid path") }
+            catch (_: IllegalArgumentException) { }
+        }
     }
 
     @Test fun base64RoundTripOverChunks() {

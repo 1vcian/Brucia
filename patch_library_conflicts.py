@@ -9,8 +9,83 @@ except NameError:
 
 print("Patching library conflicts with ESP32 core...")
 
+def cache_sbr_noise_bounds(content):
+    """Keep validated loop bounds stable across calls through other input pointers."""
+    start = content.find('void DecodeSBRNoise(')
+    if start < 0:
+        return content
+    end = content.find('\n}', start) + 2
+    function = content[start:end]
+    if end < 2 or 'Brucia: cached validated noise bounds' in function:
+        return content
+    replacements = {
+        'sbrGrid->numNoiseFloors <': 'noiseFloors <',
+        'sbrGrid->numNoiseFloors >': 'noiseFloors >',
+        'sbrGrid->numNoiseFloorsPrev >': 'previousFloors >',
+        'sbrFreq->numNoiseFloorBands <': 'noiseBands <',
+        'sbrFreq->numNoiseFloorBands >': 'noiseBands >',
+        'noiseFloor < sbrGrid->numNoiseFloors': 'noiseFloor < noiseFloors',
+        'sbrGrid->numNoiseFloorsPrev - 1': 'previousFloors - 1',
+        'band < sbrFreq->numNoiseFloorBands': 'band < noiseBands',
+        'DequantizeNoise(sbrFreq->numNoiseFloorBands,': 'DequantizeNoise(noiseBands,',
+        'sbrGrid->numNoiseFloorsPrev = sbrGrid->numNoiseFloors;': 'sbrGrid->numNoiseFloorsPrev = noiseFloors;',
+    }
+    for before, after in replacements.items():
+        function = function.replace(before, after)
+    opening = function.index('{') + 1
+    function = function[:opening] + '\n    /* Brucia: cached validated noise bounds */\n    const int noiseFloors = sbrGrid->numNoiseFloors;\n    const int previousFloors = sbrGrid->numNoiseFloorsPrev;\n    const int noiseBands = sbrFreq->numNoiseFloorBands;' + function[opening:]
+    return content[:start] + function + content[end:]
+
 # List of conflicts: (file_pattern, search_pattern, replace_pattern)
 conflicts = [
+    # Reject malformed SBR state before indexing the 2x5 noise arrays. The
+    # public routine is void, so invalid direct calls return without mutation.
+    (
+        ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbrhuff.c",
+        r'(void DecodeSBRNoise\([^\n]+\) \{)(?!\n    /\* Brucia:)',
+        r'\1\n    /* Brucia: bound SBR noise state before array access. */\n    if (ch < 0 || ch > 1 || sbrGrid->numNoiseFloors < 1 ||\n        sbrGrid->numNoiseFloors > MAX_NUM_NOISE_FLOORS ||\n        sbrGrid->numNoiseFloorsPrev > MAX_NUM_NOISE_FLOORS ||\n        sbrFreq->numNoiseFloorBands < 1 || sbrFreq->numNoiseFloorBands > MAX_NUM_NOISE_FLOOR_BANDS) return;'
+    ),
+    (
+        ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbrfreq.c",
+        r'(static int CalcFreqNoise\([^\n]+\) \{)(?!\n    /\* Brucia:)',
+        r'\1\n    /* Brucia: invalid frequency state must not index log/table arrays. */\n    if (nLow < 1 || nLow > MAX_QMF_BANDS / 2 || kStart < 1 || kStart > 64 ||\n        k2 < 1 || k2 > 64 || noiseBands < 0 || noiseBands > 3) return 0;'
+    ),
+    (
+        ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbrfreq.c",
+        r'ASSERT\(nQ <= MAX_NUM_NOISE_FLOOR_BANDS\);',
+        'if (nQ > MAX_NUM_NOISE_FLOOR_BANDS) return 0; /* Brucia: reject before writing freqNoise */'
+    ),
+    (
+        ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbrfreq.c",
+        r'(sbrFreq->numNoiseFloorBands = CalcFreqNoise\([^\n]+;)(?!\n    if \(sbrFreq->numNoiseFloorBands < 1\))',
+        r'\1\n    if (sbrFreq->numNoiseFloorBands < 1) return -1; /* Brucia: propagate invalid noise table */'
+    ),
+    (
+        ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbr.c",
+        r'CalcFreqTables\(&\(psi->sbrHdr\[chBase \+ 0\]\), &\(psi->sbrFreq\[chBase\]\), psi->sampRateIdx\);',
+        'if (CalcFreqTables(&(psi->sbrHdr[chBase + 0]), &(psi->sbrFreq[chBase]), psi->sampRateIdx) != 0) {\n                psi->sbrHdr[chBase].count = 0; /* Brucia: require a fresh valid header */\n                return ERR_AAC_SBR_BITSTREAM;\n            }'
+    ),
+    # NimBLE 2.5.2 defines this as uint8_t. Match the caller's declaration to
+    # avoid an ABI mismatch at LTO; no return values or privacy behavior change.
+    (
+        ".pio/libdeps/*/NimBLE-Arduino/src/nimble/nimble/host/src/ble_gap.c",
+        r'extern int is_ble_hs_resolv_enabled\(void\);',
+        'extern uint8_t is_ble_hs_resolv_enabled(void);'
+    ),
+    # M5GFX's optional filesystem wrapper changes LovyanGFX's base class with
+    # include order. Give every TU the same base, including library source TUs.
+    (
+        ".pio/libdeps/*/M5GFX/src/lgfx/v1/LGFXBase.hpp",
+        r'#include "../boards.hpp"',
+        '#include "../boards.hpp"\n#include "lgfx_filesystem_support.hpp" // Brucia: consistent base class across translation units'
+    ),
+    # fastsdct writes alternate slots 0..16. Its second invocation starts at
+    # X[1], where exactly 17 slots remain. Correct the declared minimum size.
+    (
+        ".pio/libdeps/*/ESP8266Audio/src/libmad/layer3.c",
+        r'void fastsdct\(mad_fixed_t const x\[9\], mad_fixed_t y\[18\]\)',
+        'void fastsdct(mad_fixed_t const x[9], mad_fixed_t y[17])'
+    ),
     (
         ".pio/libdeps/*/ESP8266SAM/src/render.c",
         r'static void yield\(\)',
@@ -260,6 +335,8 @@ for file_pattern, search, replace in conflicts:
                 continue
 
             new_content = re.sub(search, replace, content)
+            if file_path.endswith('libhelix-aac/sbrhuff.c'):
+                new_content = cache_sbr_noise_bounds(new_content)
             if new_content != content:
                 with open(file_path, 'w') as f:
                     f.write(new_content)

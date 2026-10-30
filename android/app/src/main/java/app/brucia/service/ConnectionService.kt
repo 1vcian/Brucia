@@ -85,7 +85,6 @@ class ConnectionService : Service() {
     }
 
     private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(CHANNEL_ID) == null) {
             val ch = NotificationChannel(CHANNEL_ID, "Device connection", NotificationManager.IMPORTANCE_LOW).apply {
@@ -102,9 +101,7 @@ class ConnectionService : Service() {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        else android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        val flags = android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
         val pi = android.app.PendingIntent.getActivity(this, 0, openIntent, flags)
         val text = if (streams.isBlank()) "No active streams" else "Streams: $streams"
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -137,11 +134,7 @@ class ConnectionService : Service() {
     }
 
     private fun stopForegroundCompat() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION") stopForeground(true)
-        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     companion object {

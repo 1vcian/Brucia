@@ -17,10 +17,15 @@ user does not own or is not permitted to test.
 | `docs/` | Usage, comparison, hardware proof, and the browser flasher (GitHub Pages). |
 | `tools/` | Host-side protocol clients (`companion_test.py`, mock device, e2e). |
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and [MAPPING.md](MAPPING.md)
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and [firmware module map](src/companion/README.md)
 for where Brucia hooks into Bruce.
 
 ## Build & test
+
+Release/website checks additionally use Node.js (CI pins 22.20.0). Run
+`node --test tools/test_site_release.cjs` for the release catalog and installer logic.
+Restricted-environment Kotlin checks and their limits are documented in [TESTS.md](TESTS.md).
+Do not substitute cached compilation for a fresh Gradle/lint/APK build before release.
 
 ### Firmware (ESP32-S3, LilyGo T-Embed CC1101)
 PlatformIO with the pioarduino core (Python 3.11 venv recommended):

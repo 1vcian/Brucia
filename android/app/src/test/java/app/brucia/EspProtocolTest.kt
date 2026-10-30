@@ -138,4 +138,14 @@ class EspProtocolTest {
         assertFalse(AppUpdater.isNewer("0.3.0", ""))
         assertTrue(AppUpdater.isNewer("0.3", "0.3.1"))
     }
+
+    @Test fun firmwareMigrationHandlesLegacyVersionLineAndMissingAssets() {
+        assertTrue(AppUpdater.firmwareUpdateNeeded("0.8.23", "v0.1", false, true))
+        assertFalse(AppUpdater.firmwareUpdateNeeded("0.1", "v0.1", true, true))
+        assertTrue(AppUpdater.firmwareUpdateNeeded("0.1", "v0.2", true, true))
+        assertFalse(AppUpdater.firmwareUpdateNeeded("0.8.23", "v0.1", false, false))
+        assertFalse(AppUpdater.firmwareUpdateNeeded("", "v0.1", false, true))
+        assertTrue(AppUpdater.supportsInAppFirmware("LilyGo T-Embed CC1101"))
+        assertFalse(AppUpdater.supportsInAppFirmware("M5Stack Cardputer"))
+    }
 }

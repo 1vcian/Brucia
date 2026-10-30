@@ -54,7 +54,8 @@ class ReleaseTest(unittest.TestCase):
             self.executable(self.repo / 'bin' / tool)
         self.executable(self.repo / 'android/gradlew')
         shutil.copy2(ROOT / 'tools/build_firmware.py', self.repo / 'tools/build_firmware.py')
-        for script in ('test_firmware_codec.py', 'test_firmware_framing.py', 'test_protocol_e2e.py'):
+        (self.repo / 'tools/test_site_release.cjs').write_text('// standalone website tests run separately\n')
+        for script in ('test_firmware_codec.py', 'test_firmware_storage.py', 'test_firmware_framing.py', 'test_protocol_e2e.py', 'test_audio_noise_bounds.py'):
             (self.repo / 'tools' / script).write_text('# stand-in for independently tested gates\n')
         self.env = dict(os.environ, PATH=str(self.repo / 'bin') + os.pathsep + os.environ['PATH'], PIO_BIN='pio')
 

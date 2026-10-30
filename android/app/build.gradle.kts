@@ -29,7 +29,9 @@ android {
         // pre_build_version.py). Bump VERSION once and both the app and the firmware pick it up.
         val bruciaVersion = rootProject.file("../VERSION").readText().trim()
         val vparts = bruciaVersion.split(".").map { it.toIntOrNull() ?: 0 }
-        versionCode = (vparts.getOrElse(0) { 0 }) * 10000 + (vparts.getOrElse(1) { 0 }) * 100 + (vparts.getOrElse(2) { 0 })
+        // Keep the version-code epoch introduced during stabilization; never reuse
+        // lower codes even when development version names change.
+        versionCode = 1000000 + (vparts.getOrElse(0) { 0 }) * 10000 + (vparts.getOrElse(1) { 0 }) * 100 + (vparts.getOrElse(2) { 0 })
         versionName = bruciaVersion
     }
 
@@ -73,6 +75,10 @@ android {
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
     }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {

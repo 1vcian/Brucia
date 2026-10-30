@@ -7,6 +7,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CapsTest {
+    @Test fun verifiedFileTransfersRequireExplicitFirmwareSupport() {
+        assertFalse(app.brucia.wardrive.DeviceFeatures.fromJson(null).verifiedFiles)
+        assertFalse(app.brucia.wardrive.DeviceFeatures.fromJson(JSONObject().put("verified_files", "true")).verifiedFiles)
+        assertTrue(app.brucia.wardrive.DeviceFeatures.fromJson(JSONObject().put("verified_files", true)).verifiedFiles)
+    }
 
     @Test fun absentCapsDoNotInventHardware() {
         val c = DeviceCaps.fromJson(null)

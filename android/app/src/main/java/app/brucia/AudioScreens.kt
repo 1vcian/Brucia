@@ -157,32 +157,34 @@ private fun RecordBar(vm: WardriveViewModel, connected: Boolean) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val recording by vm.recording.collectAsState()
+    val ready by vm.recordingReady.collectAsState()
+    val exporting by vm.recordingExporting.collectAsState()
     var elapsed by remember { mutableStateOf(0) }
     var msg by remember { mutableStateOf("") }
 
     LaunchedEffect(recording) {
         if (recording) { elapsed = 0; while (true) { kotlinx.coroutines.delay(1000); elapsed++ } }
     }
-    DisposableEffect(Unit) { onDispose { if (vm.recording.value) vm.cancelRecording() } }
+    DisposableEffect(Unit) { onDispose { vm.pauseRecording() } }
 
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = {
-                        if (recording) {
+                        if (recording || ready) {
                             msg = "Saving..."
                             vm.stopRecordingAndExport(context) { files ->
-                                if (files.isEmpty()) msg = "Nothing recorded"
+                                if (files.isEmpty()) msg = "Export failed or no audio; captured data is kept for retry"
                                 else { msg = "Saved ${files.size} files"; shareAudioFiles(context, files) }
                             }
                         } else { msg = ""; vm.startRecording() }
                     },
-                    enabled = connected,
+                    enabled = (connected || ready) && !exporting,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (recording) Color(0xFFD32F2F) else cs.primary
                     ),
-                ) { Text(if (recording) "Stop & save" else "Record") }
+                ) { Text(if (recording) "Stop & save" else if (ready) "Save recording" else "Record") }
                 Spacer(Modifier.size(12.dp))
                 if (recording) {
                     Box(Modifier.size(10.dp).clip(CircleShape).background(Color(0xFFD32F2F)))

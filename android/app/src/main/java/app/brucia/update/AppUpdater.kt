@@ -3,7 +3,6 @@ package app.brucia.update
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import org.json.JSONObject
@@ -23,9 +22,6 @@ import java.net.URL
 object AppUpdater {
 
     const val RELEASES_API = "https://api.github.com/repos/1vcian/BruciaDev/releases/latest"
-
-    /** Fallback merged firmware if no matching asset is attached to the release. */
-    const val FIRMWARE_FALLBACK_URL = "https://1vcian.me/BruciaDev/firmware/brucia-t-embed-cc1101.bin"
 
     private const val FILEPROVIDER_AUTHORITY = "app.brucia.fileprovider"
     private const val APK_MIME = "application/vnd.android.package-archive"
@@ -51,55 +47,25 @@ object AppUpdater {
      * main thread. Throws [IOException] on network / parse failure.
      */
     fun fetchLatest(): Release {
-        val body = httpGet(RELEASES_API)
-        val json = JSONObject(body)
-        val tag = json.optString("tag_name").ifEmpty { json.optString("name") }
-        val notes = json.optString("body")
-        val assets = json.optJSONArray("assets")
-        var apkUrl: String? = null
-        var firmwareUrl: String? = null
-        if (assets != null) {
-            for (i in 0 until assets.length()) {
-                val a = assets.optJSONObject(i) ?: continue
-                val name = a.optString("name").lowercase()
-                val url = a.optString("browser_download_url")
-                if (url.isEmpty()) continue
-                if (apkUrl == null && name.endsWith(".apk")) apkUrl = url
-                if (firmwareUrl == null && name.endsWith(".bin") && name.contains("t-embed-cc1101")) {
-                    firmwareUrl = url
-                }
-            }
-        }
-        return Release(tag = tag, apkUrl = apkUrl, firmwareUrl = firmwareUrl, notes = notes)
+        val release = ReleaseCatalog.parse(httpGet(RELEASES_API))
+        return Release(release.tag, release.apk,
+            release.boards.firstOrNull { it.env == "lilygo-t-embed-cc1101" }?.url, release.notes)
     }
 
     /** One selectable per-board firmware image from the releases. */
     data class BoardFw(val label: String, val env: String, val url: String)
 
-    /** GitHub release that holds the per-board merged firmware bins (Bruce-<env>.bin). */
-    const val BOARDS_RELEASE_API = "https://api.github.com/repos/1vcian/BruciaDev/releases/tags/wordlists"
+    /** Latest GitHub release holding per-board merged firmware bins (Bruce-<env>.bin). */
+    const val BOARDS_RELEASE_API = RELEASES_API
 
     /**
-     * List every per-board firmware image (Bruce-<env>.bin) published in the boards release, so the
+     * List every per-board firmware image (Bruce-<env>.bin) published in the latest firmware release, so the
      * in-app flasher can offer a board picker. Blocking; call off the main thread.
      */
     fun fetchBoards(): List<BoardFw> {
-        val out = ArrayList<BoardFw>()
-        try {
-            val json = JSONObject(httpGet(BOARDS_RELEASE_API))
-            val assets = json.optJSONArray("assets") ?: return out
-            for (i in 0 until assets.length()) {
-                val a = assets.optJSONObject(i) ?: continue
-                val name = a.optString("name")
-                val url = a.optString("browser_download_url")
-                if (url.isEmpty() || !name.endsWith(".bin")) continue
-                // Bruce-<env>.bin -> env
-                val env = name.removePrefix("Bruce-").removePrefix("brucia-").removeSuffix(".bin")
-                if (env.isBlank()) continue
-                out.add(BoardFw(label = env.replace('-', ' '), env = env, url = url))
-            }
-        } catch (e: Exception) { app.brucia.BruciaLog.w("Updater", "parse firmware manifest failed", e) }
-        return out.sortedBy { it.label }
+        return ReleaseCatalog.parse(httpGet(BOARDS_RELEASE_API)).boards.map {
+            BoardFw(label = it.env.replace('-', ' '), env = it.env, url = it.url)
+        }
     }
 
     /** Compare [current] against the latest release. */
@@ -136,6 +102,12 @@ object AppUpdater {
     private fun normalize(v: String): String =
         v.trim().removePrefix("v").removePrefix("V").trim()
 
+    /** Legacy 0.8.x firmware predates the fork's 0.1 line: capability migration beats numeric ordering. */
+    fun firmwareUpdateNeeded(current: String, latest: String, verifiedFiles: Boolean, imageAvailable: Boolean): Boolean =
+        imageAvailable && current.isNotBlank() && latest.isNotBlank() && (!verifiedFiles || isNewer(current, latest))
+
+    fun supportsInAppFirmware(board: String): Boolean = board.lowercase().let { "t-embed" in it && "cc1101" in it }
+
     /**
      * Stream the APK to the external files cache (covered by the FileProvider paths),
      * following redirects. Returns the downloaded file.
@@ -146,41 +118,24 @@ object AppUpdater {
         onProgress: (downloaded: Long, total: Long) -> Unit,
         isCancelled: () -> Boolean = { false },
     ): File {
-        val dir = File(ctx.getExternalFilesDir(null), "cache").apply { mkdirs() }
+        val dir = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "cache")
+        if (!dir.isDirectory && !dir.mkdirs()) throw IOException("Cannot create update cache")
         val dest = File(dir, "brucia-update.apk")
-        val part = File(dir, "brucia-update.apk.part")
         val conn = openWithRedirects(URL(url))
-        if (conn.responseCode / 100 != 2) {
-            conn.disconnect()
-            throw IOException("HTTP ${conn.responseCode}")
-        }
-        val total = conn.contentLengthLong
         try {
-            conn.inputStream.use { input ->
-                part.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    var done = 0L
-                    var lastReport = 0L
-                    while (true) {
-                        if (isCancelled()) throw InterruptedException("cancelled")
-                        val r = input.read(buf)
-                        if (r < 0) break
-                        out.write(buf, 0, r)
-                        done += r
-                        if (done - lastReport > 256 * 1024) { onProgress(done, total); lastReport = done }
+            if (conn.responseCode / 100 != 2) throw IOException("HTTP ${conn.responseCode}")
+            val total = conn.contentLengthLong
+            val part = File.createTempFile("brucia-update-", ".part", dir)
+            try {
+                conn.inputStream.use { input ->
+                    part.outputStream().use { out ->
+                        DownloadIO.copy(input, out, total, 128L * 1024 * 1024, isCancelled, onProgress)
                     }
-                    onProgress(done, total)
                 }
-            }
-        } catch (e: Exception) {
-            part.delete()
-            throw e
-        } finally {
-            conn.disconnect()
-        }
-        if (dest.exists()) dest.delete()
-        part.renameTo(dest)
-        return dest
+                DownloadIO.promote(part, dest)
+                return dest
+            } finally { part.delete() }
+        } finally { conn.disconnect() }
     }
 
     /**
@@ -194,22 +149,11 @@ object AppUpdater {
     ): ByteArray {
         val conn = openWithRedirects(URL(url))
         try {
-            if (conn.responseCode / 100 != 2) throw IOException("HTTP ${conn.responseCode}")
+            if (conn.responseCode / 100 != 2) throw IOException(if (conn.responseCode == 404) "Release unavailable: repository is private or no release is published" else "HTTP ${conn.responseCode}")
             val total = conn.contentLengthLong
             val out = java.io.ByteArrayOutputStream()
             conn.inputStream.use { input ->
-                val buf = ByteArray(64 * 1024)
-                var done = 0L
-                var lastReport = 0L
-                while (true) {
-                    if (isCancelled()) throw InterruptedException("cancelled")
-                    val r = input.read(buf)
-                    if (r < 0) break
-                    out.write(buf, 0, r)
-                    done += r
-                    if (done - lastReport > 256 * 1024) { onProgress(done, total); lastReport = done }
-                }
-                onProgress(done, total)
+                DownloadIO.copy(input, out, total, 16L * 1024 * 1024, isCancelled, onProgress)
             }
             return out.toByteArray()
         } finally {
@@ -219,11 +163,10 @@ object AppUpdater {
 
     /** Whether the user has granted this app permission to install packages. */
     fun canInstall(ctx: Context): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.packageManager.canRequestPackageInstalls() else true
+        ctx.packageManager.canRequestPackageInstalls()
 
     /** Send the user to the one-time "install unknown apps" grant for this app. */
     fun openInstallSettings(ctx: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val intent = Intent(
             Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
             Uri.parse("package:${ctx.packageName}"),
@@ -233,6 +176,9 @@ object AppUpdater {
 
     /** Launch the system installer for the downloaded [apk]. */
     fun install(ctx: Context, apk: File) {
+        val archive = ctx.packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
+            ?: throw IOException("Downloaded file is not a valid APK")
+        if (archive.packageName != ctx.packageName) throw IOException("APK belongs to another application")
         val uri = FileProvider.getUriForFile(ctx, FILEPROVIDER_AUTHORITY, apk)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, APK_MIME)
@@ -247,26 +193,18 @@ object AppUpdater {
     private fun httpGet(url: String): String {
         val conn = openWithRedirects(URL(url))
         try {
-            if (conn.responseCode / 100 != 2) throw IOException("HTTP ${conn.responseCode}")
-            return conn.inputStream.bufferedReader().use { it.readText() }
+            if (conn.responseCode / 100 != 2) throw IOException(if (conn.responseCode == 404) "Release unavailable: repository is private or no release is published" else "HTTP ${conn.responseCode}")
+            return conn.inputStream.use { input ->
+                val out = java.io.ByteArrayOutputStream()
+                DownloadIO.copy(input, out, conn.contentLengthLong, 2L * 1024 * 1024, { false }, { _, _ -> })
+                out.toString("UTF-8")
+            }
         } finally {
             conn.disconnect()
         }
     }
 
-    private fun openWithRedirects(start: URL): HttpURLConnection {
-        var current = start
-        var conn = open(current)
-        var redirects = 0
-        while (conn.responseCode in 301..308 && redirects < 5) {
-            val loc = conn.getHeaderField("Location") ?: break
-            conn.disconnect()
-            current = URL(current, loc)
-            conn = open(current)
-            redirects++
-        }
-        return conn
-    }
+    private fun openWithRedirects(start: URL): HttpURLConnection = UpdateHttp.follow(start, ::open)
 
     private fun open(url: URL): HttpURLConnection = (url.openConnection() as HttpURLConnection).apply {
         instanceFollowRedirects = false

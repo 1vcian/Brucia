@@ -1419,8 +1419,9 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
     // without the user opening the Updates page first. The firmware comparison also reacts to the
     // device connecting later (device.fw becomes known then).
     LaunchedEffect(Unit) { vm.checkUpdates(BuildConfig.VERSION_NAME) }
-    val fwUpdateAvailable = (device?.fw?.isNotBlank() == true) && firmware.latestTag.isNotBlank() &&
-        AppUpdater.isNewer(device?.fw ?: "", firmware.latestTag)
+    val fwUpdateAvailable = AppUpdater.firmwareUpdateNeeded(device?.fw.orEmpty(), firmware.latestTag,
+        device?.features?.verifiedFiles == true,
+        firmware.firmwareUrl != null && AppUpdater.supportsInAppFirmware(device?.board.orEmpty()))
     val updateAvailable = appUpdate.newer || fwUpdateAvailable
     val updateLabel = when {
         appUpdate.newer && fwUpdateAvailable -> "App + firmware update"
@@ -1712,7 +1713,7 @@ private fun CommandLogRow(e: CommandLogEntry) {
         }
         else -> {
             val ms = ((e.doneAtMs ?: e.sentAtMs) - e.sentAtMs).coerceAtLeast(0)
-            if (ms < 1000) "${ms}ms" else String.format("%.1fs", ms / 1000f)
+            if (ms < 1000) "${ms}ms" else String.format(java.util.Locale.ROOT, "%.1fs", ms / 1000f)
         }
     }
     Column(
@@ -1850,7 +1851,7 @@ private fun HomeDashboard(
                         // Flag the category that holds the Updates tool (tab 12) when a newer app or
                         // firmware release is available, so the user sees it from the home grid.
                         val catBadge = updateAvailable && cat.tools.any { it.tab == 12 }
-                        add { m -> CategoryButton(cat, anyAvail, catBadge, m) { onSelectCategory(idx) } }
+                        add { m -> CategoryButton(cat, anyAvail, modifier = m, badge = catBadge) { onSelectCategory(idx) } }
                     }
                     add { m -> GridCell(Icons.Filled.Palette, "Theme", "App + device colors & LED", connected, m) { onOpen(36) } }
                     add { m -> GridCell(Icons.Filled.MenuBook, "Wiki", "Guides & docs", true, m) { openUrl(context, WIKI_URL) } }
@@ -2021,7 +2022,7 @@ private fun openUrl(context: Context, url: String) {
 }
 
 @Composable
-private fun CategoryButton(cat: ToolCategory, available: Boolean, badge: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) =
+private fun CategoryButton(cat: ToolCategory, available: Boolean, modifier: Modifier = Modifier, badge: Boolean = false, onClick: () -> Unit) =
     GridCell(categoryIcon(cat.name), cat.name,
         "${cat.tools.size} tool${if (cat.tools.size == 1) "" else "s"}", available, modifier, badge = badge, onClick = onClick)
 
@@ -3605,8 +3606,8 @@ private fun RkButton(
     mapping: Map<RemoteKey, IrButton>,
     enabled: Boolean,
     flashKey: RemoteKey?,
-    strong: Boolean = false,
     modifier: Modifier = Modifier,
+    strong: Boolean = false,
     onTap: (RemoteKey, IrButton) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -4192,9 +4193,9 @@ private fun SpectrumSection(vm: WardriveViewModel, connected: Boolean) {
                     val lo = cur.freqs.first() / 1_000_000.0
                     val hi = cur.freqs.last() / 1_000_000.0
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(String.format("%.2f MHz", lo), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                        Text(String.format(java.util.Locale.ROOT, "%.2f MHz", lo), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                         Text("${cur.rssi.size} pts - ${history.size} sweeps", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                        Text(String.format("%.2f MHz", hi), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                        Text(String.format(java.util.Locale.ROOT, "%.2f MHz", hi), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -8174,8 +8175,9 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
         // --- Device firmware card -------------------------------------------
         val flashing = flash.phase == "download" || flash.phase == "flash"
         // A firmware update is available when we know the installed fw and the latest tag is newer.
-        val fwNewer = (device?.fw?.isNotBlank() == true) && firmware.latestTag.isNotBlank() &&
-            AppUpdater.isNewer(device?.fw ?: "", firmware.latestTag)
+        val fwNewer = AppUpdater.firmwareUpdateNeeded(device?.fw.orEmpty(), firmware.latestTag,
+            device?.features?.verifiedFiles == true,
+            firmware.firmwareUrl != null && AppUpdater.supportsInAppFirmware(device?.board.orEmpty()))
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = cs.surface),

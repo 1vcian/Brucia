@@ -143,4 +143,108 @@ class ProtocolTest {
     @Test fun timesOutWhenNoData() {
         assertNull(CompanionClient(FakeTransport()).readMessage(50))
     }
+
+    @Test fun malformedJsonDoesNotHideFollowingBufferedFrame() {
+        val t = FakeTransport()
+        // Both frames arrive in one read, with no later transport data available.
+        val malformed = byteArrayOf(1, 0, 0, 0, '{'.code.toByte())
+        t.inbound.add(malformed + malformed + frame(envelope(Kind.PONG, 701, JSONObject())))
+        assertEquals(701, CompanionClient(t).readMessage(20)?.getInt("id"))
+        assertEquals("Buffered frames must not wait for another transport read", 1, t.readCalls)
+    }
+
+    @Test fun ackSuccessRequiresLiteralBoolean() {
+        for (invalid in listOf<Any>("true", 1, JSONObject.NULL)) {
+            var result: Boolean? = null
+            val pending = mutableMapOf<Int, (Boolean, String) -> Unit>(701 to { ok, _ -> result = ok })
+            app.brucia.protocol.routeCommandReply(
+                envelope(Kind.ACK, 701, JSONObject().put("ok", invalid)), pending, mutableMapOf())
+            assertEquals("Malformed success flag: $invalid", false, result)
+        }
+    }
+
+    @Test fun concurrentCommandsRemainWholeAndHaveUniqueIds() {
+        val pipe = FakeTransport()
+        val client = CompanionClient(pipe)
+        val workers = java.util.concurrent.Executors.newFixedThreadPool(8)
+        try {
+            val tasks = (0 until 160).map { index ->
+                workers.submit<Int> { client.cmd("info $index") }
+            }
+            val ids = tasks.map { it.get(5, java.util.concurrent.TimeUnit.SECONDS) }
+            assertEquals(160, ids.toSet().size)
+            val receiverPipe = FakeTransport()
+            receiverPipe.inbound.add(pipe.written.toByteArray())
+            val receiver = CompanionClient(receiverPipe)
+            val messages = (0 until 160).map { receiver.readMessage(100)!! }
+            assertEquals(ids.toSet(), messages.map { it.getInt("id") }.toSet())
+            assertEquals((0 until 160).map { "info $it" }.toSet(),
+                messages.map { it.getJSONObject("d").getString("cmd") }.toSet())
+            assertNull(receiver.readMessage(1))
+        } finally {
+            workers.shutdownNow()
+        }
+    }
+
+    @Test fun completeFrameSurvivesEveryPossibleSplit() {
+        val expected = envelope(Kind.EVENT, 701, JSONObject().put("label", "caffè 🔥"))
+        val bytes = frame(expected)
+        for (split in 1 until bytes.size) {
+            val t = FakeTransport()
+            t.inbound.add(bytes.copyOfRange(0, split))
+            t.inbound.add(bytes.copyOfRange(split, bytes.size))
+            assertEquals("Split at $split", expected.toString(), CompanionClient(t).readMessage(100)?.toString())
+        }
+    }
+
+    @Test fun partialFrameSurvivesReadTimeout() {
+        val bytes = frame(envelope(Kind.ACK, 701, JSONObject().put("ok", true)))
+        val t = FakeTransport()
+        val client = CompanionClient(t)
+        t.inbound.add(bytes.copyOfRange(0, 7))
+        assertNull(client.readMessage(1))
+        t.inbound.add(bytes.copyOfRange(7, bytes.size))
+        assertEquals(701, client.readMessage(100)?.getInt("id"))
+    }
+
+    @Test fun coalescedFramesStayInOrder() {
+        val t = FakeTransport()
+        t.inbound.add((701..720).fold(ByteArray(0)) { bytes, id ->
+            bytes + frame(envelope(Kind.PONG, id, JSONObject()))
+        })
+        val client = CompanionClient(t)
+        for (id in 701..720) assertEquals(id, client.readMessage(100)?.getInt("id"))
+    }
+
+    @Test fun receiveLimitMatchesFirmwareMtu() {
+        val t = FakeTransport()
+        val client = CompanionClient(t)
+        val prefix = "{\"padding\":\""
+        val suffix = "\"}"
+        val json = prefix + "x".repeat(8192 - prefix.length - suffix.length) + suffix
+        val valid = json.toByteArray(Charsets.UTF_8)
+        t.inbound.add(byteArrayOf(0, 32, 0, 0) + valid) // Exactly 8192 bytes.
+        assertEquals(8192 - prefix.length - suffix.length, client.readMessage(100)?.getString("padding")?.length)
+        // An oversized prefix must be rejected without retaining its expected payload.
+        t.inbound.add(byteArrayOf(1, 32, 0, 0))
+        try { client.readMessage(1); org.junit.Assert.fail("Accepted oversized prefix") }
+        catch (_: java.io.IOException) { }
+        t.inbound.add(frame(envelope(Kind.PONG, 702, JSONObject())))
+        assertEquals(702, client.readMessage(100)?.getInt("id"))
+    }
+
+    @Test fun callbackMayRegisterNextJsonCallbackWithoutLosingIt() {
+        val jsonCallbacks = mutableMapOf<Int, (Boolean, JSONObject?) -> Unit>()
+        var oldCalls = 0
+        var newCalls = 0
+        jsonCallbacks[701] = { _, _ -> oldCalls++ }
+        val pending = mutableMapOf<Int, (Boolean, String) -> Unit>(701 to { _, _ ->
+            jsonCallbacks[701] = { _, _ -> newCalls++ }
+        })
+        app.brucia.protocol.routeCommandReply(
+            envelope(Kind.ACK, 701, JSONObject().put("ok", true)), pending, jsonCallbacks)
+        assertEquals(1, oldCalls)
+        assertEquals(0, newCalls)
+        assertTrue(jsonCallbacks.containsKey(701))
+    }
 }

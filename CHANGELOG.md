@@ -5,6 +5,36 @@ All notable changes to Brucia are documented here. Brucia is a fork of
 that offloads computation to the phone. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the app/firmware release.
 
+## [0.1.1] - 2026-10-30
+
+Continues 0.1; the local 0.0.2 candidate was superseded without relabelling its
+artifact. Android versionCode retains the 1,000,000 epoch. Published to the private
+BruciaDev repo (APK + T-Embed CC1101 firmware). Current build evidence and
+limitations are in TESTS.md; radio features remain pending on-hardware verification.
+
+Additional fixes: exact URL/asset identity and ambiguous-board/APK rejection;
+strict HTTP length/chunk syntax; accurate website TLS/NFC/network-use copy.
+Documentation consolidated into the project maintenance skill, its task ledger,
+TESTS.md and ROADMAP.md. Historical upstream version entries below remain historical.
+
+### Stabilization changes
+
+| Area | Result |
+|---|---|
+| File downloads | One serialized, bounded reader; exact request IDs, ordered chunks, terminal size/CRC32, 16 MiB cap and 120-second deadline. Missing/duplicate/invalid chunks, premature EOF, timeout and disconnection fail explicitly. A growing device file is limited to its initial size. |
+| File uploads | Managed reads/writes share a mutex. Uploads retain their original connection and validate each acknowledged byte count. Empty files and internal path spaces work; malformed Base64 is rejected before truncation. Directory writes fail. Writes remain non-atomic: failure may leave a partial destination, never a successful save. |
+| Protocol support | `features.verified_files` explicitly advertises the transfer contract. Missing/malformed support blocks managed transfers with an update message, instead of guessing which request owns legacy ID-zero data. Protocol version remains v0 with an optional feature field. |
+| Command lifecycle | Replies require literal boolean success and exact IDs. Callback ownership is released on cancellation, timeout, send failure and disconnect. General command waits allow the existing 600-second operations; stream and file waits have shorter bounds. Invalid frame lengths close the session instead of silently retaining an unknown boundary. |
+| Streams and disconnect | Serialized SUB writes ignore superseded requests; shared-radio peers lose stale running indicators. Firmware audio modes are exclusive. Disconnect stops macros, DTMF/FM/playback jobs, resets stream/recording indicators and completes outstanding operations. Watchdogs use monotonic time. |
+| Recording | A bounded PCM buffer preserves audio at the recording limit and on screen exit/disconnect. Pending audio can be saved offline. Failed export retains samples for retry; completion of an older export cannot delete a newer recording. Odd PCM is rejected and large backing buffers are released after explicit discard/save. |
+| Updates | One stable release supplies APK/board assets; immutable asset URLs replace historical fallbacks. Redirects require HTTPS and have bounded hops/cleanup. Downloads reject empty/truncated/oversized bodies, honor cancellation and promote temporary files only after completion. APK installation checks the package identity. |
+| Firmware preflight | Before USB writes: target ESP32-S3 headers, partition bounds/overlap and MD5, segment lengths/XOR checksums and appended SHA-256 are validated. Wrong-board selection fails. Capability migration handles old firmware 0.8.x versus the fork's 0.1 version line. |
+| HTTP inspection | The extracted parser bounds lines, headers, body allocation and total message time; rejects ambiguous lengths and partial bodies; handles interim responses and HEAD framing. Worker/connection queues and leaf-certificate cache are bounded. Stop closes tracked sockets; failed connection/handshake paths release resources. Application context replaces a retained generic Context. |
+| Persistence | Destructive migration fallback removed without changing database version 3. The current schema was recovered from Room-generated SQL/column validation/identity metadata and checked with SQLite. Future KSP builds export schema history. Unknown old schemas are not guessed or deleted. |
+| Native dependencies | Full/light root Git libraries use observed immutable commits; main registry dependencies use exact installed versions. Fixed NimBLE return-type ABI mismatch, M5GFX/TFT_eSPI class-layout inconsistencies, libmad's output-size declaration and observed AAC SBR noise bounds. Licenses/attribution are retained. |
+| Diagnostics/UI | Logging tolerates an unavailable logcat sink and synchronizes date formatting. Fixed locale-dependent technical labels, modifier parameter order and redundant API branches below minSdk 26. |
+| Website/docs | The flasher discovers exact assets from the same stable release, disables unavailable choices and handles private/404 releases explicitly. No `lastRelease` placeholder or silent historical image fallback. Three.js and the battery meme remain. Comparisons distinguish hardware, implementation and verification. |
+
 ## [0.6.15] - 2026-10-28
 
 ### Fixed

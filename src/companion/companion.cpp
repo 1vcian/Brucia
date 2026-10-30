@@ -139,7 +139,12 @@ static void runCompanionUSB(bool headless) {
             // Locked to the app: swallow local wheel/OK so they never act, and clear any encoder
             // backlog, so the device feels fully controlled by the phone (fixes the "flaky input
             // while connected" report).
-            NextPress = PrevPress = SelPress = UpPress = DownPress = AnyKeyPress = false;
+            NextPress = false;
+            PrevPress = false;
+            SelPress = false;
+            UpPress = false;
+            DownPress = false;
+            AnyKeyPress = false;
             RotaryNetSteps = 0;
             uint32_t now = millis();
             // Three independent ways out, so the device can NEVER get stuck locked on any board:

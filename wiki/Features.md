@@ -1,9 +1,10 @@
 # Features
 
 The full Brucia feature set. The device captures and transmits; the phone
-does the heavy computation, storage, GUI, GPS, crypto and large datasets. Every page
-in the app is gated by the device's real, per-peripheral capabilities (see
-[[Architecture]]), so you only see what the attached board can actually do.
+does the heavy computation, storage, GUI, GPS, crypto and large datasets. Module
+controls use reported capabilities; the current app also requires explicit firmware
+support for verified file transfers. Detection is distinct from an end-to-end
+hardware test. See [[Architecture]] and the current repository audit.
 
 > For authorized security research and education only. You are responsible for
 > complying with all applicable laws and for only testing systems you own or are
@@ -12,13 +13,12 @@ in the app is gated by the device's real, per-peripheral capabilities (see
 
 ## Killer features
 
-The standouts the phone makes possible on cheap ESP32 hardware - no Flipper or standalone-Bruce
-equivalent (or only with external modules and far less capability):
+Existing phone-assisted tools to verify and demonstrate; this is not an exclusive-novelty claim:
 
 - **WPA/WPA2 cracking on the phone** (capture on the device, crack with hashcat-style rules and real
   wordlists on the phone's CPU).
 - **Audio DSP suite** - spectrum, waterfall, SSTV, oscilloscope, DTMF. A Flipper has no audio input
-  at all, so this is physically impossible there.
+  built in; external accessories are a separate comparison.
 - **Wardrive with built-in GPS, offline maps and WiGLE/KML export** - no external GPS module.
 - **On-phone MITM HTTPS proxy** and network scan with version/CVE hints.
 - **Universal IR catalog** (~1600 models) on the phone, not a tiny SD subset.
@@ -27,7 +27,7 @@ equivalent (or only with external modules and far less capability):
 
 See [[Features-Tools]], [[Features-Audio]], [[Features-Wi-Fi]] and [[Features-Device]] for details,
 and the [feature comparison](https://github.com/1vcian/BruciaDev/blob/main/docs/COMPARISON.md) for the
-full table (killer rows are marked there).
+current scope, hardware limits and verification status.
 
 Features are organized into the pages below. Each page has one section per feature, with
 what it does, the hardware it needs, and a safety note for dual-use tools.
@@ -67,7 +67,7 @@ authorized testing only.
 - **Network Scan** (on the phone): an nmap-lite that discovers hosts, open ports and service
   versions on the LAN and flags likely CVEs by version - all computed on the phone.
 - **Channel Analyzer**: live 2.4GHz congestion per channel with best-channel advice.
-- **Brucegotchi** (Pwnagotchi parity): a time-bounded background roam that hops channels and
+- **Brucegotchi** (bounded Wi-Fi capture): a time-bounded background roam that hops channels and
   collects WPA handshakes to `/BrucePCAP/handshakes` for later cracking.
 - **NetCut / ARP-MITM**: transparent ARP redirect of a target through the device (authorized),
   pairing with the on-phone HTTPS intercept proxy.

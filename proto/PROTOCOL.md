@@ -86,6 +86,7 @@ Sent in reply to `HELLO`:
   "transports": ["usb"],
   "mtu":        8192,
   "battery":    87,
+  "features":   {"verified_files": true},
   "caps": {
     "wifi": true, "ble": true, "cc1101": true, "nfc": true,
     "ir": true, "mic": true, "speaker": true,
@@ -101,6 +102,13 @@ Fixed onboard interfaces use board definitions; addressable radios/readers are
 probed at companion startup and cached to avoid disturbing active shared buses.
 Changing attached hardware requires restarting the device. Availability does not
 prove end-to-end operation: see [hardware capabilities](../docs/HARDWARE_CAPABILITIES.md).
+
+`features` describes software protocol support, separately from physical modules.
+Literal `features.verified_files: true` advertises correlated file DATA IDs, a
+terminal size/CRC32 ACK and the write grammar below. The current app blocks its
+managed transfers when this flag is missing or malformed, with a firmware-update
+message. This is an optional capability extension to protocol v0; it does not
+assert hardware health or that all firmware commands are implemented.
 
 `modules` is a coarse compatibility list; it must not replace `caps` when gating
 tools. `transports` currently contains only `usb`. `mtu` is
@@ -127,7 +135,9 @@ text:
 
 | `cmd` prefix | args | behavior |
 |---|---|---|
-| `fs_read <path>` | SD/LittleFS path | Streams the file as `DATA {stream:"file", seq, chunk}` frames (base64-encoded, up to ~768 raw bytes per chunk), then replies `ACK {ok:true, size: <total bytes>}`. `ERR 404` if storage or the file is unavailable. |
+| `fs_read <path>` | SD/LittleFS path; spaces allowed | DATA frames echo the CMD request ID and carry `{stream:"file", seq, chunk}` (Base64, up to 768 raw bytes per chunk). Sequence starts at zero. Completion is `ACK {ok:true, size, crc32}`; CRC32 is the unsigned IEEE CRC-32 of all raw bytes. Empty files return size/CRC zero. Maximum size is 16 MiB; transfer time budget is 120 seconds. Premature EOF/read errors fail, not succeed with partial content. |
+| `fs_write <path> <base64>` | Last space separates path from Base64 | Creates/truncates a file. Internal path spaces are supported; a trailing separator with empty Base64 creates/truncates an empty file. Nonempty invalid Base64 is rejected before opening the destination. ACK includes `{ok:true,size}` for bytes written by this command. |
+| `fs_write_append <path> <base64>` | Same grammar | Appends one chunk and ACKs its byte count. Partial writes and directory destinations fail. Chunked writes are not an atomic file replacement; a failed upload can leave a partial destination and must not be reported as saved. |
 | `scr <0\|1>` | `0`=off, `1`=on | Sets display brightness to 0 (off) or the configured brightness (on). Replies `ACK {ok:true}`. |
 | `led <0\|1>` | `0`=off, `1`=on | Sets the status LED off (black) or to the configured LED color. Replies `ACK {ok:true}`. |
 | `wifi_deauth <bssid> <channel> <seconds>` | BSSID as `AA:BB:CC:DD:EE:FF` or 12 hex chars; channel 1-14; seconds 1-60 (clamped) | Runs a time-bounded deauth flood against the target AP (`runDeauthBounded`), then replies `ACK {ok:true, out:"deauth ... done"}`. `ERR 400` on a malformed BSSID or missing args. |
@@ -173,6 +183,12 @@ Current streams:
 
 `fs_read` (above) is not a `SUB`-gated stream: it is a one-shot `CMD` that
 produces a `DATA {stream:"file", ...}` burst followed by a terminal `ACK`.
+The app serializes managed uploads/downloads, binds them to the connection that
+started them and checks read sequence, size/CRC and write byte counts. Wrong IDs,
+missing/duplicate chunks and malformed payloads cannot complete another transfer.
+Its read buffer is capped at 16 MiB and a read has a 120-second total timeout.
+Cancellation/disconnection releases the pending operation. CRC32 checks accidental
+corruption; it does not authenticate the device or the file's origin.
 
 ## Remote control (unframed)
 

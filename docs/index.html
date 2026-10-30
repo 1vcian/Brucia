@@ -339,15 +339,15 @@
       <p class="tag">The phone is the <b>brain</b> &nbsp;&middot;&nbsp; the ESP32 is the <b>antenna</b></p>
       <p class="tag">ESP32 firmware and an Android app for radio and security research.</p>
       <div class="cta">
-        <esp-web-install-button manifest="manifest.json">
-          <button class="btn btn-primary" slot="activate">Connect &amp; Flash</button>
+        <esp-web-install-button id="quickInstall">
+          <button class="btn btn-primary" slot="activate" disabled>Connect &amp; Flash</button>
           <span slot="unsupported" class="unsupported">Use desktop Chrome or Edge - this browser has no Web Serial.</span>
           <span slot="not-allowed" class="unsupported">Serial access was not allowed.</span>
         </esp-web-install-button>
         <a class="btn btn-ghost" href="https://github.com/1vcian/BruciaDev/releases/latest">Download the app</a>
         <a class="btn btn-ghost" href="https://s.click.aliexpress.com/e/_c33qeCLh" target="_blank" rel="noopener sponsored">Buy the board</a>
       </div>
-      <p class="note">Flash from desktop Chrome or Edge with a <b>data</b> USB cable. On Android, use the app’s USB flasher.</p>
+      <p class="note">Flash from desktop Chrome or Edge with a <b>data</b> USB cable. On Android, use the app’s USB flasher. Install activates when a matching release image is available.</p>
       <div class="badges">
         <span class="badge">USB companion</span>
         <span class="badge">ESP32-S3</span>
@@ -364,9 +364,9 @@
   <main class="wrap">
     <section id="demo">
       <span class="eyebrow-sm reveal">In action</span>
-      <h2 class="reveal">See it <span class="fire">running</span></h2>
+      <h2 class="reveal">Capture on the board. <span class="fire">Inspect on the phone.</span></h2>
       <p class="lead reveal">Brucia is a fork of Bruce. The ESP32 handles radio timing and capture; the Android app handles storage, analysis and the interface. The device also works on its own.</p>
-      <p class="lead reveal">Live Wi-Fi wardrive streamed from the device to the phone over USB.</p>
+      <p class="lead reveal">Earlier development demo: Wi-Fi observations streamed over USB. New release recordings follow hardware acceptance.</p>
       <div class="card shot-frame reveal"><img class="shot" src="img/demo.gif" alt="Brucia live Wi-Fi wardrive demo streaming from the device to the Android app" loading="lazy" /></div>
     </section>
 
@@ -380,37 +380,30 @@
             <tr><th>Capability</th><th>Flipper Zero</th><th>Bruce</th><th class="col-brucia">Brucia<br><span style="font-weight:400; font-size:.72rem; text-transform:none; letter-spacing:0; opacity:.85">LilyGo T-Embed CC1101</span></th></tr>
           </thead>
           <tbody>
-            <tr><td>Wi-Fi recon / wardrive</td><td class="n">Add-on board</td><td class="p">Yes, tiny screen</td><td class="col-brucia y">Yes + GPS, live map, WiGLE</td></tr>
-            <tr class="hl"><td>WPA / PMKID crack (dictionary)</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes - rockyou/SecLists, on the phone</td></tr>
-            <tr class="hl"><td>GPS + live map + WiGLE export</td><td class="n">Add-on, no map</td><td class="n">Add-on, no map</td><td class="col-brucia y-strong">Yes - uses the phone</td></tr>
-            <tr class="hl"><td>MITM HTTPS intercept proxy</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes - on-phone CA, TLS decrypt</td></tr>
-            <tr class="hl"><td>Wi-Fi monitor + pcap to Wireshark</td><td class="n">No</td><td class="p">Sniff only</td><td class="col-brucia y-strong">Yes - pcap export + PSK decrypt</td></tr>
-            <tr><td>Sub-GHz capture / replay / decode</td><td class="y">Yes</td><td class="y">Yes</td><td class="col-brucia y">Yes + waterfall, rolling-code, big screen</td></tr>
-            <tr><td>NFC / RFID read, emulate, attack</td><td class="y">Yes</td><td class="y">Yes</td><td class="col-brucia y">Yes</td></tr>
-            <tr><td>Infrared + universal remote catalog</td><td class="y">Yes</td><td class="y">Yes</td><td class="col-brucia y">Yes - 1648 codes, phone-hosted</td></tr>
-            <tr><td>BLE scan + GATT explorer + spam</td><td class="p">Partial</td><td class="p">Spam</td><td class="col-brucia y">Scan + GATT + spam hub</td></tr>
-            <tr><td>2.4 GHz NRF24 / MouseJack</td><td class="p">Add-on</td><td class="p">Add-on</td><td class="col-brucia y">Add-on, phone-driven</td></tr>
-            <tr class="hl"><td>Microphone tools (needs audio in)</td><td class="n">No microphone</td><td class="p">Mic, no tools</td><td class="col-brucia y-strong">Full audio suite</td></tr>
-            <tr class="hl"><td>SSTV decode to image + transmit</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes - Robot36 and more</td></tr>
-            <tr class="hl"><td>Oscilloscope + waterfall from mic</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes</td></tr>
-            <tr class="hl"><td>Session report + OSINT insights</td><td class="n">No</td><td class="n">No</td><td class="col-brucia y-strong">Yes</td></tr>
-            <tr class="hl"><td>Flash firmware from the companion app</td><td class="p">n/a</td><td class="n">Web / serial only</td><td class="col-brucia y-strong">Yes - over USB, in-app</td></tr>
-            <tr><td>Flash from the browser (no install)</td><td class="n">No (qFlipper desktop)</td><td class="y">Yes (web flasher)</td><td class="col-brucia y">Yes - Web Serial on this page</td></tr>
-            <tr class="hl"><td>OTA update (app + firmware, in-app notes)</td><td class="n">Desktop only</td><td class="n">No</td><td class="col-brucia y-strong">Yes - app self-update + device firmware, shows release notes</td></tr>
-            <tr><td>Full-size touch GUI + big datasets</td><td class="n">Tiny screen</td><td class="n">Tiny screen</td><td class="col-brucia y">Yes - the phone</td></tr>
-            <tr><td>Open source</td><td class="y">Yes</td><td class="y">AGPL-3.0</td><td class="col-brucia y">AGPL-3.0</td></tr>
-            <tr><td>Hardware cost</td><td class="p">~$169</td><td class="y">~$30-50</td><td class="col-brucia y">~$30-50 + a phone you own</td></tr>
-            <tr class="serialkill"><td>Never runs out of battery</td><td class="n">Own battery, dies</td><td class="n">Own battery, dies</td><td class="col-brucia y-strong">Never - charges from your phone (it's the phone that dies)</td></tr>
+            <tr><td>Wi-Fi</td><td>External Wi-Fi board</td><td>Native ESP32 Wi-Fi</td><td class="col-brucia">Native; phone-side maps, capture analysis and workflow</td></tr>
+            <tr><td>BLE</td><td>Built in; mobile app and community apps</td><td>Built in; board-dependent tools</td><td class="col-brucia">Device radio plus Android analysis and controls</td></tr>
+            <tr><td>Sub-GHz</td><td>CC1101 with supported protocol library</td><td>CC1101 on this board</td><td class="col-brucia">Same radio; protocol coverage and RF performance require individual verification</td></tr>
+            <tr><td>NFC 13.56 MHz</td><td>ST25R3916; card-specific reading/emulation</td><td>PN532 on this board</td><td class="col-brucia">PN532: compatible reads/writes, Type 4 NDEF and identity-only FeliCa target paths; no universal emulation</td></tr>
+            <tr><td>RFID 125 kHz</td><td>Native read/emulate/write for supported tags</td><td>No stock LF hardware</td><td class="col-brucia">Unavailable on stock T-Embed; compatible add-on integration required</td></tr>
+            <tr><td>iButton</td><td>Built-in contacts and supported protocols</td><td>No stock contacts</td><td class="col-brucia">Unavailable on stock T-Embed; hardware/interface support required</td></tr>
+            <tr><td>Infrared</td><td>Built-in TX/RX</td><td>Built-in TX/RX on this board</td><td class="col-brucia">Device TX/RX with phone catalog and custom layouts</td></tr>
+            <tr><td>Audio</td><td>No built-in microphone</td><td>Board microphone/speaker and audio tools</td><td class="col-brucia">Existing DSP, SSTV RX/TX, DTMF, scope and RTTTL composer; physical signal chain pending</td></tr>
+            <tr><td>NRF24 / LoRa / FM / Ethernet</td><td>External hardware where supported</td><td>External modules where supported</td><td class="col-brucia">Optional modules; presence and operation support gate each tool</td></tr>
+            <tr><td>Mobile workflow</td><td>Official mobile app exists</td><td>Primarily device UI / WebUI / CLI</td><td class="col-brucia">Native Android companion; phone compute, storage, GPS and display</td></tr>
+            <tr><td>Firmware updates</td><td>Official update tools and mobile workflow</td><td>Board-specific distribution</td><td class="col-brucia">Release parsing/download/flash code; final installation and recovery acceptance pending</td></tr>
+            <tr><td>Power</td><td>Standalone battery</td><td>Standalone board battery</td><td class="col-brucia">USB power depends on phone/OTG/cable; also consumes the phone battery</td></tr>
+            <tr class="serialkill"><td>Infinite battery · SERIAL-KILLER</td><td>Finite</td><td>Finite</td><td class="col-brucia">Powered by your phone. The phone has opinions.</td></tr>
           </tbody>
         </table>
       </div>
-      <p class="cmp-note reveal"><b>Early development:</b> the table shows what Brucia is designed to do. Everything compiles and the phone-side logic is unit-tested, but most radio features are still being verified on real hardware - treat any capability as "builds, pending on-device verification" until checked off in the repo's TESTS.md. Brucia builds and runs on the LilyGo T-Embed CC1101 (ESP32-S3), the reference board; it also builds for ~70 other Bruce-supported boards, but those are untested. Fair notes: Flipper Zero firmware is open source and has a large community-app ecosystem; some rows (NRF24, rolling-code, GATT) also exist on Flipper add-ons or on Bruce - there the gain is the phone's compute, storage and screen, not novelty. The rows marked <b>KILLER</b> are the standouts - genuinely absent on Bruce and Flipper (and, for the microphone tools, physically impossible on a Flipper: it has no audio input).</p>
+      <p class="cmp-note reveal">Stock T-Embed + phone compared with stock Flipper Zero. Hardware presence, implemented software and physical verification are separate. Final hardware acceptance is pending; three board builds do not verify all configured environments. No claim of universal Flipper parity. The infinite-battery row is a joke; USB power consumes the phone battery. Read the <a href="https://github.com/1vcian/BruciaDev/blob/main/docs/COMPARISON.md">comparison, limits and primary sources</a>.</p>
     </section>
 
     <section id="flash">
       <span class="eyebrow-sm reveal">Getting started</span>
       <h2 class="reveal">Flash in <span class="fire">three steps</span></h2>
-      <p class="lead reveal">No toolchain, no drivers - it all happens in this page.</p>
+      <p class="lead reveal">Use desktop Chrome or Edge with a USB data cable. Install choices come from the published release.</p>
+      <p class="cmp-note reveal">Hosted images are historical builds, not the current development validation artifacts. The bundled T-Embed manifest reports 0.6.3; development targets 0.1.1. New images will be published after acceptance. GitHub assets remain unavailable anonymously while the repository is private.</p>
       <div class="grid g2">
         <div class="card reveal">
           <h3>1 &middot; Flash the firmware</h3>
@@ -422,92 +415,93 @@
           <label class="field-label" for="boardSelect">Choose your board</label>
           <select id="boardSelect" class="board-select">
             <optgroup label="LilyGo">
-              <option value="lilygo-t-deck" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-deck.bin" data-chip="ESP32-S3">T-Deck &mdash; ESP32-S3</option>
-              <option value="lilygo-t-deck-pro" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-deck-pro.bin" data-chip="ESP32-S3">T-Deck Pro / Plus &mdash; ESP32-S3</option>
-              <option value="lilygo-t-display-s3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-s3.bin" data-chip="ESP32-S3">T-Display S3 &mdash; ESP32-S3</option>
-              <option value="lilygo-t-display-s3-mmc" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-s3-mmc.bin" data-chip="ESP32-S3">T-Display S3 (MMC) &mdash; ESP32-S3</option>
-              <option value="lilygo-t-display-S3-pro" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-S3-pro.bin" data-chip="ESP32-S3">T-Display S3 Pro &mdash; ESP32-S3</option>
-              <option value="lilygo-t-display-s3-touch" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-s3-touch.bin" data-chip="ESP32-S3">T-Display S3 Touch &mdash; ESP32-S3</option>
-              <option value="lilygo-t-display-s3-touch-mmc" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-s3-touch-mmc.bin" data-chip="ESP32-S3">T-Display S3 Touch (MMC) &mdash; ESP32-S3</option>
-              <option value="lilygo-t-display-ttgo" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-display-ttgo.bin" data-chip="ESP32">T-Display TTGO &mdash; ESP32</option>
-              <option value="lilygo-t-embed" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-embed.bin" data-chip="ESP32-S3">T-Embed &mdash; ESP32-S3</option>
-              <option value="lilygo-t-embed-cc1101" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-embed-cc1101.bin" data-chip="ESP32-S3" selected>T-Embed CC1101 &mdash; ESP32-S3</option>
-              <option value="lilygo-t-hmi" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-hmi.bin" data-chip="ESP32-S3">T-HMI &mdash; ESP32-S3</option>
-              <option value="lilygo-t-lora-pager" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-lora-pager.bin" data-chip="ESP32-S3">T-LoRa Pager &mdash; ESP32-S3</option>
-              <option value="lilygo-t-watch-s3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-lilygo-t-watch-s3.bin" data-chip="ESP32-S3">T-Watch S3 &mdash; ESP32-S3</option>
+              <option value="lilygo-t-deck" data-chip="ESP32-S3">T-Deck &mdash; ESP32-S3</option>
+              <option value="lilygo-t-deck-pro" data-chip="ESP32-S3">T-Deck Pro / Plus &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-s3" data-chip="ESP32-S3">T-Display S3 &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-s3-mmc" data-chip="ESP32-S3">T-Display S3 (MMC) &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-S3-pro" data-chip="ESP32-S3">T-Display S3 Pro &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-s3-touch" data-chip="ESP32-S3">T-Display S3 Touch &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-s3-touch-mmc" data-chip="ESP32-S3">T-Display S3 Touch (MMC) &mdash; ESP32-S3</option>
+              <option value="lilygo-t-display-ttgo" data-chip="ESP32">T-Display TTGO &mdash; ESP32</option>
+              <option value="lilygo-t-embed" data-chip="ESP32-S3">T-Embed &mdash; ESP32-S3</option>
+              <option value="lilygo-t-embed-cc1101" data-chip="ESP32-S3" selected>T-Embed CC1101 &mdash; ESP32-S3</option>
+              <option value="lilygo-t-hmi" data-chip="ESP32-S3">T-HMI &mdash; ESP32-S3</option>
+              <option value="lilygo-t-lora-pager" data-chip="ESP32-S3">T-LoRa Pager &mdash; ESP32-S3</option>
+              <option value="lilygo-t-watch-s3" data-chip="ESP32-S3">T-Watch S3 &mdash; ESP32-S3</option>
             </optgroup>
             <optgroup label="M5Stack">
-              <option value="m5stack-cardputer" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-cardputer.bin" data-chip="ESP32-S3">Cardputer &mdash; ESP32-S3</option>
-              <option value="m5stack-core16mb" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-core16mb.bin" data-chip="ESP32">Core (16MB) &mdash; ESP32</option>
-              <option value="m5stack-core4mb" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-core4mb.bin" data-chip="ESP32">Core (4MB) &mdash; ESP32</option>
-              <option value="m5stack-core2" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-core2.bin" data-chip="ESP32">Core2 &mdash; ESP32</option>
-              <option value="m5stack-cores3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-cores3.bin" data-chip="ESP32-S3">CoreS3 &mdash; ESP32-S3</option>
-              <option value="m5stack-dinmeter" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-dinmeter.bin" data-chip="ESP32-S3">DinMeter &mdash; ESP32-S3</option>
-              <option value="m5stack-cplus1_1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-cplus1_1.bin" data-chip="ESP32">StickC Plus 1.1 &mdash; ESP32</option>
-              <option value="m5stack-sticks3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-sticks3.bin" data-chip="ESP32-S3">StickC Plus S3 &mdash; ESP32-S3</option>
-              <option value="m5stack-cplus2" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-m5stack-cplus2.bin" data-chip="ESP32">StickC Plus2 &mdash; ESP32</option>
+              <option value="m5stack-cardputer" data-chip="ESP32-S3">Cardputer &mdash; ESP32-S3</option>
+              <option value="m5stack-core16mb" data-chip="ESP32">Core (16MB) &mdash; ESP32</option>
+              <option value="m5stack-core4mb" data-chip="ESP32">Core (4MB) &mdash; ESP32</option>
+              <option value="m5stack-core2" data-chip="ESP32">Core2 &mdash; ESP32</option>
+              <option value="m5stack-cores3" data-chip="ESP32-S3">CoreS3 &mdash; ESP32-S3</option>
+              <option value="m5stack-dinmeter" data-chip="ESP32-S3">DinMeter &mdash; ESP32-S3</option>
+              <option value="m5stack-cplus1_1" data-chip="ESP32">StickC Plus 1.1 &mdash; ESP32</option>
+              <option value="m5stack-sticks3" data-chip="ESP32-S3">StickC Plus S3 &mdash; ESP32-S3</option>
+              <option value="m5stack-cplus2" data-chip="ESP32">StickC Plus2 &mdash; ESP32</option>
             </optgroup>
             <optgroup label="CYD">
-              <option value="CYD-2USB" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2USB.bin" data-chip="ESP32">CYD 2-USB &mdash; ESP32</option>
-              <option value="CYD-2432S028" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2432S028.bin" data-chip="ESP32">CYD 2432S028 &mdash; ESP32</option>
-              <option value="CYD-2432W328C" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2432W328C.bin" data-chip="ESP32">CYD 2432W328C &mdash; ESP32</option>
-              <option value="CYD-2432W328C_2" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2432W328C_2.bin" data-chip="ESP32">CYD 2432W328C (cap. S024) &mdash; ESP32</option>
-              <option value="CYD-2432W328R-or-S024R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-2432W328R-or-S024R.bin" data-chip="ESP32">CYD 2432W328R / S024R &mdash; ESP32</option>
-              <option value="CYD-3248S035C" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-3248S035C.bin" data-chip="ESP32">CYD 3248S035C &mdash; ESP32</option>
-              <option value="CYD-3248S035R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-CYD-3248S035R.bin" data-chip="ESP32">CYD 3248S035R &mdash; ESP32</option>
+              <option value="CYD-2USB" data-chip="ESP32">CYD 2-USB &mdash; ESP32</option>
+              <option value="CYD-2432S028" data-chip="ESP32">CYD 2432S028 &mdash; ESP32</option>
+              <option value="CYD-2432W328C" data-chip="ESP32">CYD 2432W328C &mdash; ESP32</option>
+              <option value="CYD-2432W328C_2" data-chip="ESP32">CYD 2432W328C (cap. S024) &mdash; ESP32</option>
+              <option value="CYD-2432W328R-or-S024R" data-chip="ESP32">CYD 2432W328R / S024R &mdash; ESP32</option>
+              <option value="CYD-3248S035C" data-chip="ESP32">CYD 3248S035C &mdash; ESP32</option>
+              <option value="CYD-3248S035R" data-chip="ESP32">CYD 3248S035R &mdash; ESP32</option>
             </optgroup>
             <optgroup label="Launcher">
-              <option value="LAUNCHER_CYD-2USB" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-2USB.bin" data-chip="ESP32">CYD 2-USB - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_CYD-2432S028" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-2432S028.bin" data-chip="ESP32">CYD 2432S028 - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_CYD-2432W328C" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-2432W328C.bin" data-chip="ESP32">CYD 2432W328C - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_CYD-2432W328R-or-S024R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-2432W328R-or-S024R.bin" data-chip="ESP32">CYD 2432W328R / S024R - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_CYD-3248S035C" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-3248S035C.bin" data-chip="ESP32">CYD 3248S035C - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_CYD-3248S035R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_CYD-3248S035R.bin" data-chip="ESP32">CYD 3248S035R - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_Marauder-Mini" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Marauder-Mini.bin" data-chip="ESP32">Marauder Mini - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_Marauder-V4-V6" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Marauder-V4-V6.bin" data-chip="ESP32">Marauder V4-V6 - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_Marauder-v61" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Marauder-v61.bin" data-chip="ESP32">Marauder v6.1 - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_Marauder-v7" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Marauder-v7.bin" data-chip="ESP32">Marauder v7 - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_Phantom_S024R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_Phantom_S024R.bin" data-chip="ESP32">Phantom S024R - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_m5stack-cplus1_1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_m5stack-cplus1_1.bin" data-chip="ESP32">StickC Plus 1.1 - Launcher &mdash; ESP32</option>
-              <option value="LAUNCHER_WaveSentry-R1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-LAUNCHER_WaveSentry-R1.bin" data-chip="ESP32">WaveSentry R1 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-2USB" data-chip="ESP32">CYD 2-USB - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-2432S028" data-chip="ESP32">CYD 2432S028 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-2432W328C" data-chip="ESP32">CYD 2432W328C - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-2432W328R-or-S024R" data-chip="ESP32">CYD 2432W328R / S024R - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-3248S035C" data-chip="ESP32">CYD 3248S035C - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_CYD-3248S035R" data-chip="ESP32">CYD 3248S035R - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Marauder-Mini" data-chip="ESP32">Marauder Mini - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Marauder-V4-V6" data-chip="ESP32">Marauder V4-V6 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Marauder-v61" data-chip="ESP32">Marauder v6.1 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Marauder-v7" data-chip="ESP32">Marauder v7 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_Phantom_S024R" data-chip="ESP32">Phantom S024R - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_m5stack-cplus1_1" data-chip="ESP32">StickC Plus 1.1 - Launcher &mdash; ESP32</option>
+              <option value="LAUNCHER_WaveSentry-R1" data-chip="ESP32">WaveSentry R1 - Launcher &mdash; ESP32</option>
             </optgroup>
             <optgroup label="Marauder">
-              <option value="Marauder-Mini" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Marauder-Mini.bin" data-chip="ESP32">Marauder Mini &mdash; ESP32</option>
-              <option value="Marauder-V4-V6" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Marauder-V4-V6.bin" data-chip="ESP32">Marauder V4-V6 &mdash; ESP32</option>
-              <option value="Marauder-v61" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Marauder-v61.bin" data-chip="ESP32">Marauder v6.1 &mdash; ESP32</option>
-              <option value="Marauder-v7" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Marauder-v7.bin" data-chip="ESP32">Marauder v7 &mdash; ESP32</option>
+              <option value="Marauder-Mini" data-chip="ESP32">Marauder Mini &mdash; ESP32</option>
+              <option value="Marauder-V4-V6" data-chip="ESP32">Marauder V4-V6 &mdash; ESP32</option>
+              <option value="Marauder-v61" data-chip="ESP32">Marauder v6.1 &mdash; ESP32</option>
+              <option value="Marauder-v7" data-chip="ESP32">Marauder v7 &mdash; ESP32</option>
             </optgroup>
             <optgroup label="Elecrow">
-              <option value="elecrow-24B" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-elecrow-24B.bin" data-chip="ESP32">Elecrow 2.4&quot; B &mdash; ESP32</option>
-              <option value="elecrow-28B" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-elecrow-28B.bin" data-chip="ESP32">Elecrow 2.8&quot; B &mdash; ESP32</option>
-              <option value="elecrow-advance-35-s3" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-elecrow-advance-35-s3.bin" data-chip="ESP32-S3">Elecrow Advance 3.5&quot; S3 &mdash; ESP32-S3</option>
+              <option value="elecrow-24B" data-chip="ESP32">Elecrow 2.4&quot; B &mdash; ESP32</option>
+              <option value="elecrow-28B" data-chip="ESP32">Elecrow 2.8&quot; B &mdash; ESP32</option>
+              <option value="elecrow-advance-35-s3" data-chip="ESP32-S3">Elecrow Advance 3.5&quot; S3 &mdash; ESP32-S3</option>
             </optgroup>
             <optgroup label="ESP32 dev">
-              <option value="esp32-c5" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-esp32-c5.bin" data-chip="ESP32-C5">ESP32-C5 DevKit &mdash; ESP32-C5</option>
-              <option value="esp32-c5-tft" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-esp32-c5-tft.bin" data-chip="ESP32-C5">ESP32-C5 DevKit + TFT &mdash; ESP32-C5</option>
-              <option value="esp32-s3-devkitc-1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-esp32-s3-devkitc-1.bin" data-chip="ESP32-S3">ESP32-S3 DevKitC-1 &mdash; ESP32-S3</option>
-              <option value="esp32-s3-devkitc-1-psram" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-esp32-s3-devkitc-1-psram.bin" data-chip="ESP32-S3">ESP32-S3 DevKitC-1 (PSRAM) &mdash; ESP32-S3</option>
+              <option value="esp32-c5" data-chip="ESP32-C5">ESP32-C5 DevKit &mdash; ESP32-C5</option>
+              <option value="esp32-c5-tft" data-chip="ESP32-C5">ESP32-C5 DevKit + TFT &mdash; ESP32-C5</option>
+              <option value="esp32-s3-devkitc-1" data-chip="ESP32-S3">ESP32-S3 DevKitC-1 &mdash; ESP32-S3</option>
+              <option value="esp32-s3-devkitc-1-psram" data-chip="ESP32-S3">ESP32-S3 DevKitC-1 (PSRAM) &mdash; ESP32-S3</option>
             </optgroup>
             <optgroup label="Other">
-              <option value="arduino-nesso-n1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-arduino-nesso-n1.bin" data-chip="ESP32-C6">Arduino Nesso N1 &mdash; ESP32-C6</option>
-              <option value="Awok-Mini" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Awok-Mini.bin" data-chip="ESP32">Awok Mini &mdash; ESP32</option>
-              <option value="Awok-Touch" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Awok-Touch.bin" data-chip="ESP32">Awok Touch &mdash; ESP32</option>
-              <option value="nm-cyd-c5" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-nm-cyd-c5.bin" data-chip="ESP32-C5">NM CYD C5 &mdash; ESP32-C5</option>
-              <option value="Phantom_S024R" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-Phantom_S024R.bin" data-chip="ESP32">Phantom S024R &mdash; ESP32</option>
-              <option value="reaper" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-reaper.bin" data-chip="ESP32-S3">Reaper &mdash; ESP32-S3</option>
-              <option value="smoochiee-board" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-smoochiee-board.bin" data-chip="ESP32-S3">Smoochiee Board &mdash; ESP32-S3</option>
-              <option value="WaveSentry-R1" data-bin="https://github.com/1vcian/BruciaDev/releases/download/lastRelease/Bruce-WaveSentry-R1.bin" data-chip="ESP32">WaveSentry R1 &mdash; ESP32</option>
+              <option value="arduino-nesso-n1" data-chip="ESP32-C6">Arduino Nesso N1 &mdash; ESP32-C6</option>
+              <option value="Awok-Mini" data-chip="ESP32">Awok Mini &mdash; ESP32</option>
+              <option value="Awok-Touch" data-chip="ESP32">Awok Touch &mdash; ESP32</option>
+              <option value="nm-cyd-c5" data-chip="ESP32-C5">NM CYD C5 &mdash; ESP32-C5</option>
+              <option value="Phantom_S024R" data-chip="ESP32">Phantom S024R &mdash; ESP32</option>
+              <option value="reaper" data-chip="ESP32-S3">Reaper &mdash; ESP32-S3</option>
+              <option value="smoochiee-board" data-chip="ESP32-S3">Smoochiee Board &mdash; ESP32-S3</option>
+              <option value="WaveSentry-R1" data-chip="ESP32">WaveSentry R1 &mdash; ESP32</option>
             </optgroup>
           </select>
+          <p id="releaseStatus" class="warn" role="status">Checking published firmware assets...</p>
           <p class="chip-line">Chip family: <span id="chipFamily">ESP32-S3</span></p>
           <div class="flash-btn-row">
             <esp-web-install-button id="boardInstall">
-              <button class="btn btn-primary" slot="activate">Install Brucia</button>
+              <button class="btn btn-primary" slot="activate" disabled>Install Brucia</button>
               <span slot="unsupported" class="unsupported">Use desktop Chrome or Edge - this browser has no Web Serial.</span>
               <span slot="not-allowed" class="unsupported">Serial access was not allowed.</span>
             </esp-web-install-button>
           </div>
-          <p class="warn verified-note">Only the <b>LilyGo T-Embed CC1101</b> is verified. Every other board is built from the same source but <b>untested</b> - treat it as experimental; it may not boot or some features may not work. You cannot permanently brick an ESP32 by flashing: if a write fails or the board will not start, hold <b>BOOT</b> and press <b>RESET</b> to re-enter download mode, then flash again.</p>
+          <p class="warn verified-note">The <b>LilyGo T-Embed CC1101</b> is the reference board; final hardware acceptance of current builds is pending. Other configured boards are <b>experimental</b> - treat it as experimental; it may not boot or some features may not work. For a normal failed firmware write, if the board will not start, hold <b>BOOT</b> and press <b>RESET</b> to re-enter download mode, then flash again.</p>
           <details class="dl-modes">
             <summary>Cannot enter download mode?</summary>
             <ul>
@@ -517,7 +511,7 @@
               <li><b>Generic ESP32</b> - hold BOOT, plug in (or press RST), then release BOOT.</li>
             </ul>
           </details>
-          <p class="warn">CLI: <code>pio run -e <span id="cliEnv">lilygo-t-embed-cc1101</span> -t upload</code></p>
+          <p class="warn">Source build: <code>python3 tools/build_firmware.py -e <span id="cliEnv">lilygo-t-embed-cc1101</span></code>. See the repository guide for uploading.</p>
         </div>
         <div class="card reveal">
           <h3>2 &middot; Connect the app</h3>
@@ -534,20 +528,20 @@
 
     <section id="features">
       <span class="eyebrow-sm reveal">The split design</span>
-      <h2 class="reveal">The full <span class="fire">toolkit</span></h2>
+      <h2 class="reveal">What you can <span class="fire">work with</span></h2>
       <p class="lead reveal">The device captures and transmits; the phone brings compute, storage, GPS and a full GUI. Everything below is for authorized security research and education only.</p>
       <div class="grid g3">
         <article class="feat reveal"><div class="feat-num">01</div><h3>Wi-Fi</h3><p>Wardrive with GPS and WiGLE/KML export, PMKID and handshake capture cracked on the phone, deauth, station and probe sniffers, beacon spam, monitor mode with pcap export to Wireshark and PSK decrypt, and ARP MITM.</p></article>
-        <article class="feat reveal"><div class="feat-num">02</div><h3>MITM HTTPS proxy</h3><p>An on-phone intercepting proxy with its own Brucia CA, for full TLS decrypt of traffic you are authorized to inspect.</p></article>
+        <article class="feat reveal"><div class="feat-num">02</div><h3>MITM HTTPS proxy</h3><p>Inspect HTTP and HTTPS on configured lab clients with a local CA. Clients must trust that CA; certificate pinning can prevent inspection.</p></article>
         <article class="feat reveal"><div class="feat-num">03</div><h3>Sub-GHz</h3><p>Capture to CSV, a rolling-code-aware decoder, .sub import and export, De Bruijn brute force, a spectrum waterfall, replay, jammer and radio config.</p></article>
-        <article class="feat reveal"><div class="feat-num">04</div><h3>NFC / RFID</h3><p>Read, clone, emulate and write NDEF, default-key dictionary attack, NDEF push, EMV card read and magic-UID cards.</p></article>
+        <article class="feat reveal"><div class="feat-num">04</div><h3>NFC / RFID</h3><p>PN532 tools for compatible tags: reads, NDEF writes, dump comparison and selected emulation paths. Support depends on the card type and operation.</p></article>
         <article class="feat reveal"><div class="feat-num">05</div><h3>Infrared</h3><p>Universal remote catalog, signal learning, TV-B-Gone and raw replay.</p></article>
         <article class="feat reveal"><div class="feat-num">06</div><h3>Bluetooth LE</h3><p>Scanner, an advertisement spam hub (Apple, Android, Windows, Samsung), a GATT explorer and BadBLE.</p></article>
         <article class="feat reveal"><div class="feat-num">07</div><h3>NRF24 add-on</h3><p>With the 2.4 GHz module attached: channel scanner, Enhanced ShockBurst sniffer, jammer and MouseJack.</p></article>
         <article class="feat reveal"><div class="feat-num">08</div><h3>Tools &amp; offload</h3><p>On-device JavaScript, iButton, clock, speaker and mic, mic spectrum and ESP-NOW, plus phone-side session reports with OSINT and insights, a live console, a file manager and a remote screen mirror.</p></article>
         <article class="feat reveal"><div class="feat-num">09</div><h3>In-app updates</h3><p>Update the app over the air and flash new device firmware over USB, straight from inside the app.</p></article>
         <article class="feat reveal"><div class="feat-num">10</div><h3>Audio from the mic</h3><p>Driven by the ESP microphone and speaker: live spectrum, a waterfall spectrogram, an SSTV decoder and transmitter (Robot36 and more), a tone and DTMF detector/generator, and an oscilloscope.</p></article>
-        <article class="feat reveal"><div class="feat-num">11</div><h3>Adaptive UI</h3><p>Runtime module detection: every page adapts to the hardware actually present, so you only see the tools your device can run.</p></article>
+        <article class="feat reveal"><div class="feat-num">11</div><h3>Adaptive UI</h3><p>The device reports module capabilities; unavailable tools are disabled. Driver initialization and a physical end-to-end test are recorded separately in the verification checklist.</p></article>
         <article class="feat reveal"><div class="feat-num">12</div><h3>Private and local</h3><p>Everything runs on your phone and the device. No accounts, no analytics, no telemetry; nothing is collected or stored on our servers and your captures stay on your phone. Network access is used for updates, optional datasets, map tiles and services you choose, including WiGLE and network research tools.</p></article>
       </div>
     </section>
@@ -571,9 +565,9 @@
     <section class="support" id="support">
       <div class="panel reveal">
         <span class="eyebrow-sm">Support</span>
-        <h2>Free, <span class="fire">forever</span></h2>
+        <h2>Support <span class="fire">development</span></h2>
         <p class="lead">No ads, no paid tiers, no telemetry. Support is purely optional.</p>
-        <p class="lead" style="margin-top:-18px">Everything runs locally on your phone and the device - no accounts, no analytics, nothing is collected or stored on our servers; your captures stay on your phone. The internet is used only to download databases you choose and to check for updates (plus any export you trigger yourself, e.g. WiGLE).</p>
+        <p class="lead" style="margin-top:-18px">Captures are stored on your phone. Updates, map tiles, optional datasets and services such as WiGLE use the network. Uploads and exports are actions you choose.</p>
         <div class="cta" style="justify-content:center">
           <a class="btn btn-primary" href="https://github.com/sponsors/1vcian" target="_blank" rel="noopener">Sponsor on GitHub</a>
           <a class="btn btn-ghost" href="https://buymeacoffee.com/1vcian" target="_blank" rel="noopener">Buy me a coffee</a>
@@ -612,6 +606,7 @@
     <a href="https://github.com/1vcian/BruciaDev">github.com/1vcian/BruciaDev</a>
   </footer>
 
+  <script src="release-catalog.js"></script>
   <script>
     /* ---------- sticky header state ---------- */
     (function () {
@@ -830,28 +825,44 @@
       var chip = document.getElementById("chipFamily");
       var cliEnv = document.getElementById("cliEnv");
       if (!sel || !btn) return;
-      var currentUrl = null;
+      var quick = document.getElementById("quickInstall");
+      var status = document.getElementById("releaseStatus");
+      var release = null;
+      var manifests = new Map();
+      function setManifest(element, manifest) {
+        if (!element) return;
+        var old = manifests.get(element);
+        if (old) URL.revokeObjectURL(old);
+        element.removeAttribute("manifest");
+        var activate = element.querySelector('[slot="activate"]');
+        if (activate) activate.disabled = !manifest;
+        if (!manifest) { manifests.delete(element); return; }
+        var url = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: "application/json" }));
+        manifests.set(element, url);
+        element.setAttribute("manifest", url);
+      }
       function apply() {
         var opt = sel.options[sel.selectedIndex];
         if (!opt) return;
-        var bin = opt.getAttribute("data-bin");
         var cf = opt.getAttribute("data-chip");
         if (chip) chip.textContent = cf;
         if (cliEnv) cliEnv.textContent = opt.value;
-        var manifest = {
-          name: "Brucia",
-          version: "latest",
-          new_install_prompt_erase: true,
-          builds: [{ chipFamily: cf, parts: [{ path: bin, offset: 0 }] }]
-        };
-        var blob = new Blob([JSON.stringify(manifest)], { type: "application/json" });
-        var url = URL.createObjectURL(blob);
-        btn.setAttribute("manifest", url);
-        if (currentUrl) URL.revokeObjectURL(currentUrl);
-        currentUrl = url;
+        var selected = release && BruciaReleases.manifest(release, opt.value, cf);
+        setManifest(btn, selected);
+        setManifest(quick, release && BruciaReleases.manifest(release, "lilygo-t-embed-cc1101", "ESP32-S3"));
+        if (release && status) status.textContent = selected ? "Firmware release " + release.tag : "No firmware asset for this board in release " + release.tag;
       }
       sel.addEventListener("change", apply);
       apply();
+      fetch("https://api.github.com/repos/1vcian/BruciaDev/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+        .then(function (response) {
+          if (!response.ok) throw new Error(response.status === 404 ? "Releases unavailable: repository private or no published release" : "Release lookup failed (HTTP " + response.status + ")");
+          return response.json();
+        })
+        .then(function (body) { release = BruciaReleases.parse(body); apply(); })
+        .catch(function (error) { setManifest(btn, null); setManifest(quick, null); if (status) status.textContent = error.message; });
+      window.addEventListener("pagehide", function () { manifests.forEach(function (url) { URL.revokeObjectURL(url); }); manifests.clear(); });
+      window.addEventListener("pageshow", apply);
     })();
   </script>
 </body>

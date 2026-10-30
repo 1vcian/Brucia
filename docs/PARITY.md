@@ -2,20 +2,14 @@
 
 **Question answered:** is every native Bruce feature reachable from the Brucia Android app?
 
-**Answer: yes.** Every feature surfaced in the firmware menus is reachable from the app
-through one of three paths. Most features have either a dedicated app tool/screen (APP-TOOL)
-or a companion command (COMPANION-CMD) that the app drives over the framed USB-CDC protocol.
-Everything else is reachable through the **Remote** screen-mirror tool (MainActivity tab 9,
-`RemoteScreen`), which drives the real standalone Bruce UI over the native serial CLI
-(`display start` to stream the TFT and `nav <dir>` to move the cursor —
-`src/core/serialcmds.cpp:59`, `src/core/serial_commands/util_commands.cpp:321` and `:438`),
-and through the **Console** tool (tab 8), which runs any raw Bruce CLI line
-(`RemoteController.cli`, `android/.../remote/RemoteController.kt:26`). A handful of NFC
-features need an *external* companion device (ChameleonUltra / Amiibolink / PN532-Killer)
-rather than an onboard sensor; those are listed separately. There are **no MISSING
-features** (no native feature that is both unexposed and not mirror-reachable).
+**Status: historical source inventory, not a verified parity claim.** The tables
+below identify dedicated tools, commands and possible Remote/Console paths.
+Reachability through a mirrored menu does not prove native companion integration,
+correct operation, hardware availability or current acceptance. Reconcile entries
+with code under S11 in the [task ledger](../skills/brucia-maintenance/references/backlog.md).
+Line numbers and tab indices below are historical navigation hints.
 
-One caveat, not a gap: the Remote/Console path requires the device to be on its normal UI and
+Mode constraint: the Remote/Console path requires the device to be on its normal UI and
 is mutually exclusive with companion mode (`startRemote` cancels the companion loops,
 `WardriveViewModel.kt:626`). In companion mode the device is locked to the app and shows the
 status screen (`companionModeUSB`, `src/companion/companion.cpp:3770`); the user leaves
@@ -24,8 +18,8 @@ companion mode (or uses Remote/Console directly) to reach MIRROR-ONLY features.
 Buckets: **APP-TOOL** (dedicated app screen) / **COMPANION-CMD** (companion command, reachable
 from the app, at least via Console) / **MIRROR-ONLY** (no command, driven through the Remote
 screen-mirror) / **EXTERNAL-DEVICE** (needs extra hardware) / **MISSING** (genuine gap).
-Companion commands are the `cmdStr ==` / `startsWith` dispatch in
-`src/companion/companion.cpp`. App tools are `toolCategories` in
+Companion commands now live in the domain handlers under `src/companion/`; see
+[the module map](../src/companion/README.md). App tools are `toolCategories` in
 `android/app/src/main/java/app/brucia/MainActivity.kt:1211`.
 
 ---
@@ -233,13 +227,12 @@ Companion commands are the `cmdStr ==` / `startsWith` dispatch in
 
 ---
 
-## GENUINE GAPS (MISSING)
+## Coverage still to establish
 
-**None.** There is no native Bruce feature that lacks an app path: every feature is either an
-APP-TOOL, a COMPANION-CMD, or MIRROR-ONLY (reachable through the Remote screen-mirror / Console,
-which drive the standalone Bruce UI via the native `display`/`nav` CLI). The only reachability
-caveat is operational, not a missing feature: MIRROR-ONLY features require leaving companion
-mode (the Remote/Console path is exclusive with the companion loop).
+Do not infer complete parity from this inventory. Dedicated app tools, companion
+commands and mirrored standalone controls have different lifecycles and module
+requirements. Verify each path in the control checklist and record missing or
+unsupported behavior under S11; current evidence is in [TESTS.md](../TESTS.md).
 
 ## EXTERNAL-DEVICE (needs extra hardware, not an onboard sensor)
 

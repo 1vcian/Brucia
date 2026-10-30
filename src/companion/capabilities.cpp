@@ -280,6 +280,7 @@ void sendCaps(uint32_t id) {
     caps["eth"] = companionW5500Present();
     caps["wifi"] = true;
     caps["ble"] = true;
+    d["features"]["verified_files"] = true; // correlated chunks, size/CRC32 completion, empty/spaced writes
 
     // Legacy coarse module list (kept for backward compatibility with older app builds).
     JsonArray modules = d["modules"].to<JsonArray>();

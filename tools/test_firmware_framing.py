@@ -68,6 +68,17 @@ int main() {
     push(f.substr(0,5)); assert(!readFrame(out,20)); resetFrameReader();
     push(frame("new session")); assert(readFrame(out,20) && out=="new session");
     assert(!readFrame(out,20));
+    // millis() wraps after ~49 days. Short gaps across wrap retain fragments.
+    nowMs = UINT32_MAX - 100;
+    push(f.substr(0,3)); assert(!readFrame(out,20));
+    nowMs += 500;
+    push(f.substr(3)); assert(readFrame(out,20) && out=="{\"t\":10}");
+    // A stale prefix must expire across the same wrap boundary.
+    nowMs = UINT32_MAX - 100;
+    push(f.substr(0,3)); assert(!readFrame(out,20));
+    nowMs += 2001;
+    push(frame("expired across wrap"));
+    assert(readFrame(out,20) && out=="expired across wrap");
     std::cout << "Firmware framing PASS\n";
 }
 '''

@@ -262,3 +262,30 @@ names in cached library manifests (`h2zero/NimBLE-Arduino` and
 `whywilson/ESP-PN532-UART`) to their installed canonical names. This changes
 build metadata only; source authorship and licenses are retained. NimBLE is pinned
 to 2.5.2 in both full and light configurations.
+
+Additional targeted compatibility/bounds corrections retain upstream licensing:
+
+- NimBLE's `is_ble_hs_resolv_enabled` caller declaration now matches its `uint8_t`
+  definition, fixing an LTO return-type mismatch.
+- M5GFX always sees the same filesystem-wrapper base class. The vendored TFT_eSPI
+  header loads Brucia's shared configuration consistently in application/library
+  translation units, avoiding mismatched touch/font-dependent class layouts.
+- libmad's `fastsdct` output parameter declares the 17 slots it actually uses
+  (indices 0,2,...,16), including the call beginning at `X[1]`.
+- Helix AAC SBR noise handling validates and caches array bounds; invalid noise
+  frequency tables propagate a bitstream error instead of overflowing the noise
+  arrays. `tools/test_audio_noise_bounds.py` compiles the installed real routines
+  with UBSan and synthetic valid/invalid state. This is targeted coverage, not a
+  claim that every malformed AAC/MP3 file has been fuzzed or proven safe.
+
+Full/light root Git library references use immutable observed commits; main
+registry references use exact installed versions. Board-specific overrides have
+their own dependency requirements and are not certified by the three-board build.
+
+## Historical design references
+
+Earlier planning cited [BruceButBetter](https://github.com/Yoursel71/BruceButBetter)
+for hardware probing/spectrum ideas and
+[ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder) for capture and
+wardriving workflows. This records inspiration, not a verified claim that specific
+code was imported; retain source-level notices and check licenses for actual reuse.

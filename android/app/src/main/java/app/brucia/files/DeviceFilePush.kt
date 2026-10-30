@@ -24,10 +24,10 @@ object DeviceFilePush {
     fun chunk(bytes: ByteArray, maxRawChunk: Int = MAX_RAW_CHUNK): List<ByteArray> {
         val size = maxRawChunk.coerceAtLeast(1)
         if (bytes.isEmpty()) return listOf(ByteArray(0))
-        val out = ArrayList<ByteArray>((bytes.size + size - 1) / size)
+        val out = ArrayList<ByteArray>((bytes.size - 1) / size + 1)
         var i = 0
         while (i < bytes.size) {
-            val end = minOf(i + size, bytes.size)
+            val end = i + minOf(size, bytes.size - i)
             out.add(bytes.copyOfRange(i, end))
             i = end
         }
@@ -38,6 +38,13 @@ object DeviceFilePush {
      * The device command for chunk [index]: the first chunk truncates (fs_write), later chunks
      * append (fs_write_append). [b64] is the base64 of that chunk.
      */
-    fun command(path: String, index: Int, b64: String): String =
-        if (index == 0) "fs_write $path $b64" else "fs_write_append $path $b64"
+    fun pathError(path: String): String? =
+        if (path.isBlank() || path != path.trim() || path.any { it == '\u0000' || it == '\r' || it == '\n' })
+            "File path is empty or contains unsupported control/edge whitespace" else null
+
+    fun command(path: String, index: Int, b64: String): String {
+        require(pathError(path) == null) { pathError(path).orEmpty() }
+        require(index >= 0) { "Negative chunk index" }
+        return if (index == 0) "fs_write $path $b64" else "fs_write_append $path $b64"
+    }
 }

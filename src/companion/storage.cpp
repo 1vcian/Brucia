@@ -1,6 +1,7 @@
 #include "core/sd_functions.h"
 #include "internal.h"
 #include <globals.h>
+#include <algorithm>
 
 namespace brucia {
 namespace companion {
@@ -18,15 +19,37 @@ static void fsReadStream(const String &pathIn, uint32_t id) {
         sendErr(id, 404, "open failed");
         return;
     }
+    const size_t expected = f.size();
+    if (f.isDirectory() || expected > 16 * 1024 * 1024) {
+        f.close();
+        sendErr(id, 413, "not a file or exceeds 16 MiB transfer limit");
+        return;
+    }
     uint8_t buf[768];
     uint32_t seq = 0;
     uint32_t total = 0;
-    while (f.available()) {
-        int n = f.read(buf, sizeof(buf));
-        if (n <= 0) break;
+    uint32_t checksum = 0xFFFFFFFF;
+    const uint32_t started = millis();
+    while (total < expected) {
+        if (millis() - started > 120000) {
+            f.close();
+            sendErr(id, 408, "file transfer timed out");
+            return;
+        }
+        int n = f.read(buf, std::min<size_t>(sizeof(buf), expected - total));
+        if (n <= 0) {
+            f.close();
+            sendErr(id, 500, "read failed before end of file");
+            return;
+        }
         total += n;
+        for (int i = 0; i < n; ++i) {
+            checksum ^= buf[i];
+            for (int bit = 0; bit < 8; ++bit)
+                checksum = (checksum >> 1) ^ (0xEDB88320U & (0U - (checksum & 1U)));
+        }
         JsonDocument out;
-        beginEnvelope(out, MSG_DATA, 0);
+        beginEnvelope(out, MSG_DATA, id);
         JsonObject d = out["d"].to<JsonObject>();
         d["stream"] = "file";
         d["seq"] = seq++;
@@ -39,6 +62,7 @@ static void fsReadStream(const String &pathIn, uint32_t id) {
     JsonObject d = o["d"].to<JsonObject>();
     d["ok"] = true;
     d["size"] = total;
+    d["crc32"] = checksum ^ 0xFFFFFFFF;
     sendEnvelope(o);
 }
 
@@ -53,8 +77,9 @@ static void fsReadStream(const String &pathIn, uint32_t id) {
 static void fsWriteCmd(const String &args, uint32_t id, bool append) {
     const char *usage = append ? "usage: fs_write_append <path> <base64>" : "usage: fs_write <path> <base64>";
     String a = args;
-    a.trim();
-    int sp = a.indexOf(' ');
+    // Base64 has no spaces. Split at the last separator, preserving spaces in
+    // paths and the empty final field used to create/truncate an empty file.
+    int sp = a.lastIndexOf(' ');
     if (sp < 0) {
         sendErr(id, 400, usage);
         return;
@@ -63,7 +88,7 @@ static void fsWriteCmd(const String &args, uint32_t id, bool append) {
     path.trim();
     String b64 = a.substring(sp + 1);
     b64.trim();
-    if (path.length() == 0 || b64.length() == 0) {
+    if (path.length() == 0) {
         sendErr(id, 400, usage);
         return;
     }
@@ -76,7 +101,7 @@ static void fsWriteCmd(const String &args, uint32_t id, bool append) {
 
     size_t outLen = 0;
     uint8_t *data = companionB64decode(b64, &outLen);
-    if (!data || outLen == 0) {
+    if (b64.length() != 0 && !data) {
         if (data) free(data);
         sendErr(id, 400, "bad base64");
         return;
@@ -92,7 +117,13 @@ static void fsWriteCmd(const String &args, uint32_t id, bool append) {
         sendErr(id, 500, "open failed");
         return;
     }
-    size_t wrote = f.write(data, outLen);
+    if (f.isDirectory()) {
+        f.close();
+        free(data);
+        sendErr(id, 400, "cannot write a directory");
+        return;
+    }
+    size_t wrote = outLen ? f.write(data, outLen) : 0;
     f.close();
     free(data);
     if (wrote != outLen) {

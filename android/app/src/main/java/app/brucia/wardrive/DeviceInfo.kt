@@ -73,6 +73,12 @@ data class DeviceCaps(
 }
 
 /** Parsed device capabilities from the CAPS handshake. */
+data class DeviceFeatures(val verifiedFiles: Boolean = false) {
+    companion object {
+        fun fromJson(obj: JSONObject?) = DeviceFeatures(obj?.opt("verified_files") == true)
+    }
+}
+
 data class DeviceInfo(
     val board: String,
     val chip: String,
@@ -85,4 +91,5 @@ data class DeviceInfo(
     val ledBright: Int = -1,  // device LED brightness 0..100; -1 = unknown
     val ledEffect: Int = 0,   // device LED animation 0..9
     val screenBright: Int = -1, // device screen brightness 0..100; -1 = unknown
+    val features: DeviceFeatures = DeviceFeatures(),
 )
