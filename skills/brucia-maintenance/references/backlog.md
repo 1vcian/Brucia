@@ -1,9 +1,11 @@
 # Work queue — single operational ledger
 
-Updated 2026-10-30. Target: `VERSION` (currently 0.1.1). Work remains uncommitted;
-0.1.1 T-Embed firmware built locally, no fresh APK or published release. See
-[TESTS.md](../../../TESTS.md) for evidence. Recheck environment constraints before
-assuming an earlier build/Git/network blocker persists.
+Updated 2026-10-30. Target: `VERSION` (currently 0.1.1). 0.1.1 is committed and
+published to the private BruciaDev repo (APK + T-Embed CC1101 firmware); fresh
+app-release + unit-test and T-Embed/LITE firmware builds passed. Radio/hardware
+features remain pending on-device acceptance (S05). See [TESTS.md](../../../TESTS.md)
+for evidence. Recheck environment constraints before assuming an earlier
+build/Git/network blocker persists.
 
 Status vocabulary: OPEN, IN_PROGRESS, BLOCKED, DONE; worker packets also use PREPARED/HOLD. DONE needs a test/result;
 record unavailable devices, missing schemas and environment restrictions explicitly.
