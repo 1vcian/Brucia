@@ -22,7 +22,7 @@ Release correctness and physical acceptance gates still apply before publication
 
 | ID | Priority | State | Next action / acceptance |
 |---|---|---|---|
-| W06 | P0 FIRST | PREPARED | Existing feature registry extraction; full brief T06 in workers.md. Packet baseline/ID map/harness and real isolation still to prepare before launch. No code changes yet. |
+| W06 | P0 FIRST | DONE | Feature registry extracted to pure-JVM `features/FeatureRegistry`+`BuiltinFeatures` (50 tools/11 categories, caps incl. Wi-Fi gate + order preserved; byId/byTabId -> null on miss; duplicate/blank-ID validation; defensive copies). 9 unit tests (custom fixture, order, unknown, dup id/tab, blank/malformed, input-mutation) pass: `:app:testDebugUnitTest --tests FeatureRegistryTest`. NOT yet wired into MainActivity - coordinator UI integration is a later step. Stable-ID map frozen in BuiltinFeatures (reviewed; `24ghz` slug accepted). |
 | W07–W11 | P0 NEXT | HOLD | Session interfaces → phone-only pilot → device-backed pilot → firmware adapter → remaining families. Prepare each scoped packet after reviewing the previous result. |
 | D01 | P0 | DONE | Consolidated 13 redundant documents into skill/backlog, TESTS, CHANGELOG and ROADMAP; skill validation, local documentation links and seven website tests passed. |
 | S01 | P0 | OPEN | One release snapshot for metadata and board assets. `fetchLatest` / `fetchBoards` currently call latest independently. Test two changing API responses and stale selection after failed refresh. |

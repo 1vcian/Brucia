@@ -5,6 +5,15 @@ All notable changes to Brucia are documented here. Brucia is a fork of
 that offloads computation to the phone. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the app/firmware release.
 
+## Unreleased
+
+- Extracted the Android tool catalog into a pure-JVM validated feature registry
+  (`features/FeatureRegistry` + `BuiltinFeatures`): 50 tools / 11 categories, titles,
+  descriptions, caps (incl. the Wi-Fi gate) and order preserved; lookup by stable ID
+  or legacy tab ID (absent lookups return null); duplicate/blank-ID validation and
+  defensive copies; unit-tested. Not yet wired into the UI — `MainActivity` still owns
+  the live catalog; registry adoption is a later coordinator step.
+
 ## [0.1.1] - 2026-10-30
 
 Continues 0.1; the local 0.0.2 candidate was superseded without relabelling its
