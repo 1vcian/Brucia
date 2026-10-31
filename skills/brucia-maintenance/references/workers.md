@@ -476,6 +476,22 @@ the VM-owned EVENT tree; per-characteristic reads alongside, results map).
 Same rules as earlier batches: disjoint new files, no shared-file edits, texts preserved,
 timeouts from firmware bounds, `@Test(timeout = 5_000)`. Isolation as T07.
 
+## T11l — offline dictionary lifecycle (coordinator, completed 2026-10-31)
+
+Implemented directly at the user's request, without launching a worker. New
+`wifi/DictionaryTestService` owns CPU job cancellation and status; ViewModel keeps
+Android storage/asset adapters and target import. Existing crypto unchanged.
+Seven synthetic regressions and full cached-source checks passed; see TESTS.md.
+W11m (capture workflow) was subsequently implemented by the coordinator; see below.
+
+## T11m — capture orchestration (coordinator, completed 2026-10-31)
+
+Implemented at the user's request with existing commands and parsers unchanged.
+`wifi/CaptureWorkflow` owns orchestration, freshness comparison and guarded import;
+the VM supplies session-bound IO and retains the selected target/local-copy adapter.
+11 synthetic regressions; full cached Kotlin compile/tests recorded in TESTS.md.
+No worker launched. Next task W11n is tracked in backlog.md.
+
 ## Migration follow-ups — HOLD, no automatic chaining
 
 After accepting T06, prepare one packet at a time with actual source boundaries:

@@ -7754,7 +7754,9 @@ private fun CrackScreen(vm: WardriveViewModel) {
                         }
                         Spacer(Modifier.height(4.dp))
                         Text(hs.message, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                        if (!hs.active) {
+                        if (hs.active) {
+                            TextButton(onClick = { vm.cancelHandshakeFlow() }) { Text("Cancel import") }
+                        } else {
                             Spacer(Modifier.height(6.dp))
                             TextButton(onClick = { vm.resetHandshakeFlow() }) { Text("Dismiss") }
                         }
@@ -7773,8 +7775,8 @@ private fun CrackScreen(vm: WardriveViewModel) {
                             Text(crack.result!!, fontFamily = FontFamily.Monospace, color = cs.primary, style = MaterialTheme.typography.titleMedium)
                         }
                         crack.running -> Text("Cracking (${crack.note})...", fontWeight = FontWeight.SemiBold)
-                        crack.finished -> Text("Not found (${crack.note})", color = cs.onSurfaceVariant)
-                        crack.note == "Cancelled" -> Text("Cancelled", fontWeight = FontWeight.SemiBold, color = cs.error)
+                        crack.finished -> Text("No match in tested candidates (${crack.note})", color = cs.onSurfaceVariant)
+                        crack.note.isNotBlank() -> Text(crack.note, fontWeight = FontWeight.SemiBold, color = cs.error)
                         else -> Text("Idle - load a handshake and run a wordlist, or try the demo", color = cs.onSurfaceVariant)
                     }
                     if (crack.running || crack.finished) {

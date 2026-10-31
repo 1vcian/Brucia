@@ -20,6 +20,11 @@ import app.brucia.report.ReportBuilder
 import app.brucia.report.ReportData
 import app.brucia.report.SessionExport
 import app.brucia.report.SessionReport
+import app.brucia.files.FileList
+import app.brucia.wifi.CaptureWorkflow
+import app.brucia.wifi.CaptureLink
+import app.brucia.wifi.HandshakeFlow
+import app.brucia.wifi.DictionaryTestService
 import app.brucia.wifi.CrackStatus
 import app.brucia.wifi.Dot11Frame
 import app.brucia.wifi.Dot11Info
@@ -105,7 +110,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -168,19 +172,6 @@ data class CommandLogEntry(
     val doneAtMs: Long? = null,
     val result: String? = null,
     val ok: Boolean? = null,
-)
-
-/**
- * Progress of the guided "capture and crack" handshake flow (deauth -> capture -> auto-pull
- * -> load into the cracker). [step] is one of idle / deauth / capture / pull / ready / failed
- * and [message] is a human-readable status line for the Crack screen.
- */
-data class HandshakeFlow(
-    val active: Boolean = false,
-    val step: String = "idle",
-    val message: String = "",
-    val bssid: String = "",
-    val ssid: String = "",
 )
 
 /**
@@ -1196,83 +1187,69 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         dispatchCmd("wifi_handshake $bssid $channel $seconds $ssid")
     }
 
-    private val _hsFlow = MutableStateFlow(HandshakeFlow())
-    /** Live progress of the guided capture-and-crack flow (observed by the Crack screen). */
-    val hsFlow: StateFlow<HandshakeFlow> = _hsFlow.asStateFlow()
-
-    /** Reset the guided handshake flow status. */
-    fun resetHandshakeFlow() { _hsFlow.value = HandshakeFlow() }
-
-    /**
-     * Fully self-driven handshake flow for one AP: (1) short deauth burst to force a
-     * reconnect, (2) capture the 4-way handshake on the device, (3) automatically list
-     * /BrucePCAP/handshakes/, pick the newest .pcap for this BSSID, pull it and load it
-     * into the cracker. The user never types a path or pulls by hand; progress shows in
-     * [hsFlow]. The device runs these ops sequentially, so each step chains off the ACK of
-     * the previous one.
-     */
-    fun captureAndCrack(bssid: String, channel: Int, ssid: String, captureSeconds: Int = 20) {
-        if (client == null) {
-            _hsFlow.value = HandshakeFlow(step = "failed", message = "Connect the device over USB first.")
-            return
-        }
-        val label = ssid.ifEmpty { bssid }
-        _hsFlow.value = HandshakeFlow(active = true, step = "deauth", message = "Deauthing $label...", bssid = bssid, ssid = ssid)
-        // 1) Short deauth burst so clients reconnect and emit a fresh handshake.
-        dispatchCmd("wifi_deauth $bssid $channel 5") { _, _ ->
-            _hsFlow.value = _hsFlow.value.copy(step = "capture", message = "Capturing handshake (${captureSeconds}s)...")
-            // 2) Capture the handshake to /BrucePCAP/handshakes/.
-            dispatchCmd("wifi_handshake $bssid $channel $captureSeconds $ssid") { _, _ ->
-                _hsFlow.value = _hsFlow.value.copy(step = "pull", message = "Looking for capture...")
-                // 3) Find + pull the newest capture for this BSSID, then load it.
-                pullLatestHandshake(bssid)
-            }
-        }
-    }
-
-    /**
-     * Clientless PMKID flow for one AP: ask the device to capture a PMKID
-     * (`wifi_pmkid <bssid> <ch> <secs>`), then reuse [pullLatestHandshake] to pull the
-     * newest capture from /BrucePCAP/handshakes/ and load it. The pcap path extracts the
-     * PMKID (RSN PMKID KDE) and loads it as the crack target. Progress shows in [hsFlow].
-     */
-    fun capturePmkidAndCrack(bssid: String, channel: Int, ssid: String, seconds: Int = 15) {
-        if (client == null) {
-            _hsFlow.value = HandshakeFlow(step = "failed", message = "Connect the device over USB first.")
-            return
-        }
-        val label = ssid.ifEmpty { bssid }
-        _hsFlow.value = HandshakeFlow(active = true, step = "capture", message = "Capturing PMKID from $label (${seconds}s)...", bssid = bssid, ssid = ssid)
-        // Device writes a capture to /BrucePCAP/handshakes/ (same dir as handshakes).
-        dispatchCmd("wifi_pmkid $bssid $channel $seconds") { _, _ ->
-            _hsFlow.value = _hsFlow.value.copy(step = "pull", message = "Looking for PMKID capture...")
-            pullLatestHandshake(bssid, ssid)
-        }
-    }
-
-    /** List the handshakes dir, pick the newest .pcap/.cap for [bssid], pull and load it. */
-    private fun pullLatestHandshake(bssid: String, ssidHint: String = "") {
-        // Firmware names captures HS_{MAC}_{SSID}.pcap with an uppercase, separator-free MAC.
-        val macKey = bssid.replace(":", "").replace("-", "").uppercase()
-        listDir("/BrucePCAP/handshakes") { entries ->
-            val caps = entries.filter { !it.isDir && (it.name.endsWith(".pcap", true) || it.name.endsWith(".cap", true)) }
-            val matches = caps.filter { it.name.uppercase().contains(macKey) }
-            // No timestamps in the listing; the name sorts highest for the most recent capture.
-            val pick = (if (matches.isNotEmpty()) matches else caps).maxByOrNull { it.name }
-            if (pick == null) {
-                _hsFlow.value = _hsFlow.value.copy(active = false, step = "failed", message = "No handshake captured. Move closer and retry.")
-            } else {
-                _hsFlow.value = _hsFlow.value.copy(step = "pull", message = "Pulling ${pick.name}...")
-                pullFile("/BrucePCAP/handshakes/${pick.name}", ssidHint) { loaded ->
-                    _hsFlow.value = if (loaded) {
-                        _hsFlow.value.copy(active = false, step = "ready", message = "Handshake loaded - ready to crack.")
-                    } else {
-                        _hsFlow.value.copy(active = false, step = "failed", message = "Capture pulled but no usable handshake. Retry.")
+    private val captureWorkflow by lazy {
+        CaptureWorkflow(viewModelScope, blockedReason = {
+            if (session != null && _device.value?.features?.verifiedFiles != true)
+                "Update device firmware to enable verified file transfers" else null
+        }, connect = {
+            val captured = session
+            if (captured == null) null else object : CaptureLink {
+                override val commands = CommandRunner { cmd, timeout ->
+                    withContext(Dispatchers.IO) {
+                        if (session !== captured) throw java.io.IOException("Connection changed.")
+                        val id = logCmdStart(cmd)
+                        try {
+                            captured.await(cmd, timeout).also { logCmdDone(id, it.first, it.second) }
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            logCmdDone(id, false, "Stopped."); throw e
+                        }
                     }
                 }
+                override suspend fun list(): List<app.brucia.files.FileEntry> {
+                    suspend fun listing(path: String): Pair<Boolean, String> {
+                        val result = commands.run("storage list $path", 10_000)
+                        if (result.second.toByteArray(Charsets.UTF_8).size >= 3500 ||
+                            (result.first && result.second.isNotEmpty() && !result.second.endsWith("\n")))
+                            throw java.io.IOException("Capture listing may be truncated; select a file manually.")
+                        return result
+                    }
+                    val result = listing(CaptureWorkflow.DIRECTORY)
+                    if (result.first) return FileList.parse(result.second)
+                    // A first capture may not have created its directory yet. Distinguish
+                    // absence via successful parent listings, never turn a storage error into empty.
+                    val root = listing("/")
+                    if (!root.first) throw java.io.IOException(root.second.ifBlank { "Cannot list device storage." })
+                    if (FileList.parse(root.second).none { it.name == "BrucePCAP" }) return emptyList()
+                    val parent = listing("/BrucePCAP")
+                    if (parent.first && FileList.parse(parent.second).none { it.name == "handshakes" }) return emptyList()
+                    throw java.io.IOException(result.second.ifBlank { "Cannot list capture directory." })
+                }
+                override suspend fun read(path: String): ByteArray = withContext(Dispatchers.IO) {
+                    val result = readDeviceFile(path, captured)
+                    result.bytes ?: throw java.io.IOException(result.error)
+                }
             }
-        }
+        }, onLoaded = { target ->
+            loadedHandshake = target.handshake
+            loadedPmkid = target.pmkid
+            _handshakeInfo.value = target.handshake?.let { "${it.ssid} (WPA${it.keyVersion}) [pulled]" }
+                ?: "${target.pmkid?.ssid} (PMKID) [pulled]"
+            // Keep each accepted capture independently; delayed writes cannot overwrite a newer one.
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val dir = java.io.File(getApplication<Application>().filesDir, "pulled").apply { mkdirs() }
+                    java.io.File.createTempFile("capture-", ".pcap", dir).writeBytes(target.bytes)
+                } catch (e: Exception) { BruciaLog.d("Capture", "Local capture copy failed: ${e.message}") }
+            }
+        })
     }
+    val hsFlow: StateFlow<HandshakeFlow> get() = captureWorkflow.status
+    fun resetHandshakeFlow() = captureWorkflow.reset()
+    fun cancelHandshakeFlow() = captureWorkflow.stop()
+    fun captureAndCrack(bssid: String, channel: Int, ssid: String, captureSeconds: Int = 20) =
+        captureWorkflow.start(bssid, channel, ssid, captureSeconds, pmkid = false)
+    fun capturePmkidAndCrack(bssid: String, channel: Int, ssid: String, seconds: Int = 15) =
+        captureWorkflow.start(bssid, channel, ssid, seconds, pmkid = true)
 
     /** Console: send a command and echo it; the captured output arrives via ACK. */
     fun sendConsole(cmd: String) {
@@ -2870,6 +2847,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     fun resetFlash() { _flash.value = FlashState() }
 
     fun disconnect() {
+        captureWorkflow.stop("Disconnected")
         if (macroJob?.isActive == true || _macroRunning.value) stopMacro()
         dtmfJob?.cancel()
         dtmfJob = null
@@ -3000,14 +2978,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun wordlistDownloaded(name: String): Boolean = WordlistStore.has(getApplication(), name)
 
-    private val _crack = MutableStateFlow(CrackStatus())
-    val crack: StateFlow<CrackStatus> = _crack.asStateFlow()
-    private var crackJob: Job? = null
-
-    // Cooperative-cancel flag for the CPU-bound dictionary loop. Job.cancel() cannot interrupt
-    // the non-suspending PBKDF2 loop inside WpaCracker, so the loop polls this flag each
-    // candidate. Set true by cancelCrack(), reset false at the start of every crack.
-    private val crackCancelled = AtomicBoolean(false)
+    private val dictionaryTest = DictionaryTestService(viewModelScope)
+    val crack: StateFlow<CrackStatus> = dictionaryTest.status
 
     private val _rules = MutableStateFlow(false)
     val rules: StateFlow<Boolean> = _rules.asStateFlow()
@@ -3017,13 +2989,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var loadedPmkid: PmkidTarget? = null
 
     /** All downloads share a bounded, serialized reader with timeout and size validation. */
-    private suspend fun readDeviceFile(path: String): app.brucia.files.FileReadResult {
+    private suspend fun readDeviceFile(path: String, expectedSession: app.brucia.session.CommandSession? = session): app.brucia.files.FileReadResult {
         if (_device.value?.features?.verifiedFiles != true)
             return app.brucia.files.FileReadResult(error = "Update device firmware to enable verified file transfers")
         app.brucia.files.DeviceFilePush.pathError(path)?.let { return app.brucia.files.FileReadResult(error = it) }
-        val s = session ?: return app.brucia.files.FileReadResult(error = "Not connected.")
+        val s = expectedSession ?: return app.brucia.files.FileReadResult(error = "Not connected.")
+        if (session !== s) return app.brucia.files.FileReadResult(error = "Connection changed.")
         val id = s.nextId()
         return fileTransferMutex.withLock {
+        if (session !== s) return@withLock app.brucia.files.FileReadResult(error = "Connection changed.")
         try {
             fileReader.read(id) {
                 s.expectJson(id) { ok, data ->
@@ -3238,118 +3212,31 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         return base.copy(mic = WpaCracker.computeMic(pass, base))
     }
 
-    /**
-     * Stop a running crack. Sets the cooperative-cancel flag (so the CPU-bound loop stops within
-     * one candidate), cancels the coroutine, and resets the UI to a stopped state ("Cancelled").
-     * Leaves the cracker ready to start a fresh run.
-     */
-    fun cancelCrack() {
-        crackCancelled.set(true)
-        crackJob?.cancel()
-        crackJob = null
-        _crack.value = CrackStatus(running = false, finished = false, note = "Cancelled")
-    }
+    fun cancelCrack() = dictionaryTest.cancel()
 
-    /** Demo: recover a known passphrase from an in-memory list - proves the full
-     *  PMK/PTK/MIC pipeline + throughput on this phone, no capture needed. */
+    /** Synthetic target is used only by the explicit demo. */
     fun demoCrack() {
-        crackJob?.cancel()
-        crackCancelled.set(false)
-        _crack.value = CrackStatus(running = true, note = "demo (synthetic handshake)")
-        crackJob = viewModelScope.launch(Dispatchers.Default) {
-            val known = "brucia-demo-pass"
-            val h = sampleHandshake(known)
-            val list = buildList {
-                repeat(400) { add("fillerpass%05d".format(it)) }
-                add(known)
-            }
-            runCrack(h, list.asSequence(), list.size, "demo")
+        val h = sampleHandshake("brucia-demo-pass")
+        dictionaryTest.start(h, null, 401, "demo") {
+            (List(400) { "fillerpass%05d".format(it) } + "brucia-demo-pass")
+                .joinToString("\n").reader().buffered()
         }
     }
 
-    /** Run an imported wordlist against the sample handshake (real throughput). */
     fun crackWithWordlist(name: String) {
-        crackJob?.cancel()
-        crackCancelled.set(false)
-        _crack.value = CrackStatus(running = true, note = name)
-        crackJob = viewModelScope.launch(Dispatchers.Default) {
-            val total = _wordlists.value.firstOrNull { it.name == name }?.lines ?: 0
-            val pm = loadedPmkid
-            val h = loadedHandshake ?: sampleHandshake("not-in-any-wordlist-xyz")
-            try {
-                WordlistStore.file(getApplication(), name).bufferedReader().useLines { raw ->
-                    val seq = if (_rules.value) raw.flatMap { WordlistRules.expand(it) } else raw
-                    val t0 = System.currentTimeMillis()
-                    val onP: (Int) -> Unit = { tried ->
-                        val dt = (System.currentTimeMillis() - t0).coerceAtLeast(1)
-                        _crack.value = CrackStatus(running = true, tried = tried, total = total, keysPerSec = (tried.toLong() * 1000 / dt).toInt(), note = name)
-                    }
-                    val res = if (pm != null) {
-                        WpaCracker.crackPmkid(pm.ssid, pm.apMac, pm.staMac, pm.pmkid, seq, 100, onP, isCancelled = { crackCancelled.get() })
-                    } else {
-                        WpaCracker.crack(h, seq, 100, onP, isCancelled = { crackCancelled.get() })
-                    }
-                    if (crackCancelled.get()) return@useLines
-                    val dt = (System.currentTimeMillis() - t0).coerceAtLeast(1)
-                    _crack.value = CrackStatus(running = false, finished = true, tried = total, total = total, keysPerSec = (total.toLong() * 1000 / dt).toInt().coerceAtLeast(0), result = res, note = name)
-                }
-            } catch (_: Exception) {
-                _crack.value = CrackStatus(finished = true, note = "read error")
-            }
+        val total = _wordlists.value.firstOrNull { it.name == name }?.lines ?: 0
+        dictionaryTest.start(loadedHandshake, loadedPmkid, total, name, _rules.value) {
+            WordlistStore.file(getApplication(), name).bufferedReader()
         }
     }
 
-    /** Crack the loaded target using the bundled common-WPA wordlist (no import needed). */
     fun crackBuiltin() = crackBundled("common_wpa.txt", "built-in")
 
-    /** Crack the loaded target using any bundled dictionary (no import needed). */
     fun crackBundled(asset: String, note: String = asset) {
-        crackJob?.cancel()
-        crackCancelled.set(false)
-        val total = BundledWordlists.lines(getApplication(), asset)
-        _crack.value = CrackStatus(running = true, total = total, note = note)
-        crackJob = viewModelScope.launch(Dispatchers.Default) {
-            val pm = loadedPmkid
-            val h = loadedHandshake ?: sampleHandshake("not-in-any-wordlist-xyz")
-            try {
-                getApplication<Application>().assets.open(asset).bufferedReader().useLines { raw ->
-                    val seq = if (_rules.value) raw.flatMap { WordlistRules.expand(it) } else raw
-                    val t0 = System.currentTimeMillis()
-                    val onP: (Int) -> Unit = { tried ->
-                        val dt = (System.currentTimeMillis() - t0).coerceAtLeast(1)
-                        _crack.value = CrackStatus(running = true, tried = tried, total = total, keysPerSec = (tried.toLong() * 1000 / dt).toInt(), note = note)
-                    }
-                    val res = if (pm != null) WpaCracker.crackPmkid(pm.ssid, pm.apMac, pm.staMac, pm.pmkid, seq, 100, onP, isCancelled = { crackCancelled.get() })
-                              else WpaCracker.crack(h, seq, 100, onP, isCancelled = { crackCancelled.get() })
-                    if (crackCancelled.get()) return@useLines
-                    _crack.value = CrackStatus(running = false, finished = true, tried = total, total = total, result = res, note = note)
-                }
-            } catch (_: Exception) {
-                _crack.value = CrackStatus(finished = true, note = "read error")
-            }
+        val total = _bundledWordlists.value.firstOrNull { it.asset == asset }?.lines ?: 0
+        dictionaryTest.start(loadedHandshake, loadedPmkid, total, note, _rules.value) {
+            getApplication<Application>().assets.open(asset).bufferedReader()
         }
-    }
-
-    private fun runCrack(h: Handshake, candidates: Sequence<String>, total: Int, note: String) {
-        val t0 = System.currentTimeMillis()
-        val res = WpaCracker.crack(
-            h, candidates, progressEvery = 100,
-            onProgress = { tried ->
-                val dt = (System.currentTimeMillis() - t0).coerceAtLeast(1)
-                _crack.value = CrackStatus(
-                    running = true, tried = tried, total = total,
-                    keysPerSec = (tried.toLong() * 1000 / dt).toInt(), note = note,
-                )
-            },
-            isCancelled = { crackCancelled.get() },
-        )
-        if (crackCancelled.get()) return
-        val dt = (System.currentTimeMillis() - t0).coerceAtLeast(1)
-        _crack.value = CrackStatus(
-            running = false, finished = true, tried = total, total = total,
-            keysPerSec = (total.toLong() * 1000 / dt).toInt().coerceAtLeast(0),
-            result = res, note = note,
-        )
     }
 
     // --- Scripts (JS runner) and small device tools (iButton, clock) ---
@@ -3864,6 +3751,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // in the ViewModel. Transmit (sstvTransmit) stays here because it is phone->device output.
 
     override fun onCleared() {
+        dictionaryTest.cancel()
         fused.removeLocationUpdates(locationCallback)
         sstvTxJob?.cancel()
         stopPhoneMic()

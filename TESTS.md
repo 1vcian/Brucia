@@ -4,6 +4,26 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Latest software checkpoint — 2026-10-31
+
+W11l: `DictionaryTestService` is wired into the existing offline dictionary paths.
+Seven synthetic tests cover missing targets, early-match counts, read failures,
+cancel/restart with a blocked old reader, exhausted dictionaries, the existing
+handshake verifier and an already-cancelled parent scope. No live network tests.
+
+W11m: 11 synthetic `CaptureWorkflowTest` cases cover same-size file overwrites,
+unchanged/foreign/ambiguous files, parsed AP identity, command and verified-read
+failures, failed baseline listing, PMKID routing, stopped/superseded blocked reads,
+and missing hardware/link prerequisites. Tests use fake IO and parser fixtures;
+actual RF capture, USB timing and the final UI remain pending on-device acceptance.
+
+`python3 tools/check_android_changes.py --all-main --unit-tests` passed compilation
+of 147 production Kotlin files and 456 tests in 78 non-Paparazzi suites. This count
+excludes screenshot tests and is not directly comparable to the 455-test Gradle
+checkpoint below. A new Gradle unit/lint attempt failed before execution because
+the global wrapper lock was not writable. Current lint, fresh APK and device
+acceptance are not established by these cached-source checks.
+
 ## Current evidence — 2026-10-30, candidate 0.1.1
 
 - 113 production Kotlin files compiled with cached dependencies/generated resources;

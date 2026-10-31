@@ -7,6 +7,27 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+## [0.1.3] - 2026-10-31
+
+App and T-Embed CC1101 firmware, published to the private BruciaDev repo. Hardware
+features remain pending on-device acceptance (see TESTS.md).
+
+- Guided capture/import moved to `CaptureWorkflow`: fail on command errors, pin
+  connection identity and ignore late results after cancellation/reconnect/restart.
+  Compare matching file contents before/after; reject unchanged, foreign-BSSID or
+  ambiguous captures instead of guessing freshness from names. Validate parsed AP
+  identity, bound candidate reads and detect suspicious directory truncation.
+- Added Cancel import (firmware capture can continue to its own timeout). Accepted
+  captures are copied locally under unique names so delayed saves cannot overwrite
+  newer ones; a local copy failure is logged while the parsed target stays usable.
+
+- Extracted offline dictionary test lifecycle from the ViewModel into
+  `DictionaryTestService`. A cancelled/superseded job cannot publish into a newer
+  run; cancellation is checked by the CPU loop and readers close on completion.
+- Dictionary tests require a loaded target; synthetic targets are exclusive to the
+  demo. Count actual candidates on early matches/exhaustion, preserve target/rules
+  per run, and display IO errors separately from a completed run with no match.
+
 - Fixed: the WIDS monitor kept re-sending commands at full speed after a disconnect and was
   not stopped by "Stop all"; it now ends when the link closes, backs off after a failed
   window, and stops with everything else.
