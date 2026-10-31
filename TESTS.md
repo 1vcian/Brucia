@@ -9,7 +9,7 @@ development and recovery. Historical checks below are not proof for the current 
 - 113 production Kotlin files compiled with cached dependencies/generated resources;
   253 unit tests passed. The standalone subset passed 120 tests (overlapping).
 - 0.1.2 app (W06-W11): `./gradlew --offline :app:testDebugUnitTest`
-  passed 424/424 including `FeatureRegistryTest`, `CommandSessionTest` (13, fake
+  passed 455/455 including `FeatureRegistryTest`, `CommandSessionTest` (13, fake
   transport), `PcapDissectorTest` (7, synthetic pcaps), `IButtonServiceTest` (10),
   `DeviceOperationTest` (8), `ClockServiceTest` (2), `WifiMacServiceTest` (3),
   `ScriptServiceTest` (3), `DeviceAppearanceServiceTest` (4), `WifiJoinServiceTest` (3)

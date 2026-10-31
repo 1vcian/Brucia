@@ -1,6 +1,6 @@
 # Scoped worker preparation
 
-Stato: **W07-W10 e W11 lotti 1-6 completati e revisionati 2026-10-30 (esiti in backlog)**; altri pacchetti preparati, non avviati.
+Stato: **0.1.2 pubblicata; W11 lotto 7 (T11j monitor + T11k Evil Portal/GATT) completato e revisionato (esiti in backlog)**; altri pacchetti preparati, non avviati.
 L'avvio richiede la successiva istruzione dell'utente. Questo indice rimane al
 coordinatore; al worker si consegna soltanto il pacchetto del task selezionato.
 
@@ -456,6 +456,25 @@ it); timeout = duration + margin. Thin services for Responder, Karma and Brucego
 **Inputs:** `session/DeviceOperation.kt` + test, `WardriveViewModel.kt` (launchBurstLoop,
 startBleSpam/stopBleSpam, one loop caller, stopAllBurstLoops; Responder/Karma/Brucegotchi/
 stopLongOp/stopBrucegotchi), firmware `wifi.cpp` long-op handlers. Isolation as T07.
+
+## T11j / T11k — W11 batch 7, two parallel workers (launched 2026-10-30, after 0.1.2)
+
+Remaining VM callers: fire-and-forget/console/PCM-stream commands stay on `dispatchCmd`
+(no state to own; logged and bounded). Wi-Fi capture+crack is the next, separate batch.
+
+**T11j - bounded monitors:** `monitor/JamDetectService` (one-shot `jam_detect`),
+`monitor/WidsService` (back-to-back `jam_detect` windows, threshold alerts, event list;
+BUG to fix: after a disconnect the VM loop spins on immediate "Not connected." failures
+and is not covered by stop-all - it must end when the link is gone and be stoppable from
+the coordinator's stop-all), `subghz/SubGhzBruteforceService` (one-shot, bounded).
+
+**T11k - event-driven sessions:** `wifi/EvilPortalService` (optional template push through an
+injected suspend pusher, start/stop, active flag; captured creds stay in the VM EVENT
+handler) and `ble/GattService` (connect with connecting flag and an injected reset callback for
+the VM-owned EVENT tree; per-characteristic reads alongside, results map).
+
+Same rules as earlier batches: disjoint new files, no shared-file edits, texts preserved,
+timeouts from firmware bounds, `@Test(timeout = 5_000)`. Isolation as T07.
 
 ## Migration follow-ups — HOLD, no automatic chaining
 

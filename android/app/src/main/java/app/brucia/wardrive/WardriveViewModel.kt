@@ -42,6 +42,7 @@ import app.brucia.device.CliParse
 import app.brucia.BruciaLog
 import app.brucia.audio.MicRecordService
 import app.brucia.ble.BadBleService
+import app.brucia.ble.GattService as GattExplorer
 import app.brucia.ble.BleHidService
 import app.brucia.ble.BleMediaService
 import app.brucia.audio.SpeakerService
@@ -53,6 +54,8 @@ import app.brucia.ibutton.IButtonService
 import app.brucia.ir.IrReceiveService
 import app.brucia.ir.TvBGoneService
 import app.brucia.lora.LoraService
+import app.brucia.monitor.JamDetectService
+import app.brucia.monitor.WidsService
 import app.brucia.net.EthernetService
 import app.brucia.nfc.NfcToolsService
 import app.brucia.protocol.CompanionClient
@@ -60,8 +63,10 @@ import app.brucia.protocol.Kind
 import app.brucia.session.BurstLoop
 import app.brucia.session.BurstLoopRegistry
 import app.brucia.session.CommandRunner
+import app.brucia.subghz.SubGhzBruteforceService
 import app.brucia.session.JsonCommandRunner
 import app.brucia.wifi.BrucegotchiService
+import app.brucia.wifi.EvilPortalService
 import app.brucia.wifi.KarmaService
 import app.brucia.wifi.ResponderService
 import app.brucia.wifi.WifiJoinService
@@ -2028,54 +2033,19 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _gattMac = MutableStateFlow<String?>(null)
-    val gattMac: StateFlow<String?> = _gattMac.asStateFlow()
-    private val _gattStatus = MutableStateFlow("")
-    val gattStatus: StateFlow<String> = _gattStatus.asStateFlow()
-    private val _gattConnecting = MutableStateFlow(false)
-    val gattConnecting: StateFlow<Boolean> = _gattConnecting.asStateFlow()
-    // Per-characteristic read values, keyed by characteristic UUID.
-    private val _gattReads = MutableStateFlow<Map<String, String>>(emptyMap())
-    val gattReads: StateFlow<Map<String, String>> = _gattReads.asStateFlow()
 
     /**
      * Connect to [mac] over GATT and discover its services. Discovered characteristics arrive as
      * EVENT ble.gatt and build up [gattServices]; the command ACK reports connect-failed on
      * [gattStatus]. Clears any previous exploration state first.
      */
-    fun gattConnect(mac: String) {
-        if (client == null) { _gattStatus.value = "Connect the device over USB first."; return }
-        _gattMac.value = mac
-        _gattTree.value = emptyMap()
-        _gattReads.value = emptyMap()
-        _gattConnecting.value = true
-        _gattStatus.value = "Connecting to $mac..."
-        dispatchCmd("ble_gatt_connect $mac") { ok, out ->
-            _gattConnecting.value = false
-            _gattStatus.value =
-                if (ok) out.ifBlank { "Connected - services below." }
-                else out.ifBlank { "Connect failed." }
-        }
-    }
+    fun gattConnect(mac: String) = gatt.connect(mac)
 
     /** Forget the current GATT exploration and clear its state (used on screen leave). */
-    fun gattStop() {
-        _gattConnecting.value = false
-        _gattMac.value = null
-        _gattTree.value = emptyMap()
-        _gattReads.value = emptyMap()
-        _gattStatus.value = ""
-    }
+    fun gattStop() = gatt.stop()
 
     /** Read one characteristic (ble_gatt_read <mac> <uuid> -> ACK {ok,out}); result shown per-char. */
-    fun gattRead(mac: String, uuid: String) {
-        if (client == null) { _gattStatus.value = "Connect the device over USB first."; return }
-        _gattReads.value = _gattReads.value + (uuid to "reading...")
-        dispatchCmd("ble_gatt_read $mac $uuid") { ok, out ->
-            _gattReads.value = _gattReads.value +
-                (uuid to if (ok) out.ifBlank { "(empty)" } else "read failed: ${out.ifBlank { "error" }}")
-        }
-    }
+    fun gattRead(mac: String, uuid: String) = gatt.read(mac, uuid)
 
     /**
      * Run a DuckyScript over BLE HID (ble_badble <script> -> ACK {ok,out}). This is the real
@@ -2351,99 +2321,30 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     fun bleMedia(mac: String) = bleMediaService.send(mac)
 
     // --- Sub-GHz brute force (bounded one-shot): subghz_bruteforce <proto> <freqHz> <bits> <secs> ---
-    private val _subBruteActive = MutableStateFlow(false)
-    val subBruteActive: StateFlow<Boolean> = _subBruteActive.asStateFlow()
-    private val _subBruteStatus = MutableStateFlow("")
-    val subBruteStatus: StateFlow<String> = _subBruteStatus.asStateFlow()
-    fun subghzBruteforce(protocolIdx: Int, freqHz: Long, bits: Int, secs: Int) {
-        if (client == null) { _subBruteStatus.value = "Connect the device over USB first."; return }
-        if (_subBruteActive.value) return
-        _subBruteActive.value = true
-        _subBruteStatus.value = "Brute-forcing for ${secs}s..."
-        viewModelScope.launch(Dispatchers.IO) {
-            val (ok, out) = sendAwait("subghz_bruteforce $protocolIdx $freqHz $bits $secs", timeoutMs = (secs + 8) * 1000L)
-            _subBruteStatus.value = out.ifBlank { if (ok) "Done." else "Failed." }
-            _subBruteActive.value = false
-        }
-    }
+    val subBruteActive: StateFlow<Boolean> get() = subBrute.busy
+    val subBruteStatus: StateFlow<String> get() = subBrute.status
+    fun subghzBruteforce(protocolIdx: Int, freqHz: Long, bits: Int, secs: Int) = subBrute.run(protocolIdx, freqHz, bits, secs)
 
     // --- Wi-Fi jam detect (bounded): jam_detect <secs> -> "deauth=.. total=.." ---
-    private val _jamDetectActive = MutableStateFlow(false)
-    val jamDetectActive: StateFlow<Boolean> = _jamDetectActive.asStateFlow()
-    private val _jamDetectStatus = MutableStateFlow("")
-    val jamDetectStatus: StateFlow<String> = _jamDetectStatus.asStateFlow()
-    fun jamDetect(secs: Int) {
-        if (client == null) { _jamDetectStatus.value = "Connect the device over USB first."; return }
-        if (_jamDetectActive.value) return
-        _jamDetectActive.value = true
-        _jamDetectStatus.value = "Listening for ${secs}s..."
-        viewModelScope.launch(Dispatchers.IO) {
-            val (ok, out) = sendAwait("jam_detect $secs", timeoutMs = (secs + 8) * 1000L)
-            _jamDetectStatus.value = out.ifBlank { if (ok) "Done." else "Failed." }
-            _jamDetectActive.value = false
-        }
-    }
+    val jamDetectActive: StateFlow<Boolean> get() = jamDetector.busy
+    val jamDetectStatus: StateFlow<String> get() = jamDetector.status
+    fun jamDetect(secs: Int) = jamDetector.run(secs)
 
     // --- WIDS: continuous wireless-intrusion monitor. Loops jam_detect windows (802.11 monitor mode -
     //     only the ESP can do this, a phone cannot) and logs deauth/disassoc floods with a phone
     //     timestamp; raises an ALERT when a window exceeds the threshold. Defensive / authorized use.
-    private val _widsActive = MutableStateFlow(false)
-    val widsActive: StateFlow<Boolean> = _widsActive.asStateFlow()
-    private val _widsStatus = MutableStateFlow("")
-    val widsStatus: StateFlow<String> = _widsStatus.asStateFlow()
-    private val _widsEvents = MutableStateFlow<List<WidsEvent>>(emptyList())
-    val widsEvents: StateFlow<List<WidsEvent>> = _widsEvents.asStateFlow()
-    private var widsJob: Job? = null
+    val widsActive: StateFlow<Boolean> get() = wids.active
+    val widsStatus: StateFlow<String> get() = wids.status
+    val widsEvents: StateFlow<List<WidsEvent>> get() = wids.events
 
     /** Start the WIDS monitor: back-to-back jam_detect windows, alert when deauths >= [threshold]. */
-    fun startWids(windowSecs: Int = 15, threshold: Int = 20) {
-        if (client == null) { _widsStatus.value = "Connect the device over USB first."; return }
-        if (_widsActive.value) return
-        _widsActive.value = true
-        _widsEvents.value = emptyList()
-        widsJob = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                var windows = 0
-                while (true) {
-                    ensureActive()
-                    _widsStatus.value = "Monitoring (window ${windows + 1}, ${windowSecs}s)..."
-                    val (ok, out) = sendAwait("jam_detect $windowSecs", timeoutMs = (windowSecs + 8) * 1000L)
-                    windows++
-                    if (ok) {
-                        // Parse "deauth=<n> total=<m>".
-                        val deauth = Regex("deauth=(\\d+)").find(out)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                        val total = Regex("total=(\\d+)").find(out)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                        val alert = deauth >= threshold
-                        if (alert || deauth > 0) {
-                            _widsEvents.value = (_widsEvents.value + WidsEvent(System.currentTimeMillis(), deauth, total, alert)).takeLast(100)
-                        }
-                        _widsStatus.value = if (alert) "ALERT: deauth flood ($deauth in ${windowSecs}s)" else "Clear (window $windows, deauth=$deauth)"
-                    } else {
-                        _widsStatus.value = out.ifBlank { "jam_detect failed" }
-                    }
-                }
-            } catch (_: Exception) {
-                _widsStatus.value = "Monitor stopped."
-            } finally {
-                _widsActive.value = false
-            }
-        }
-    }
+    fun startWids(windowSecs: Int = 15, threshold: Int = 20) = wids.start(windowSecs, threshold)
 
-    fun stopWids() {
-        widsJob?.cancel()
-        widsJob = null
-        _widsActive.value = false
-        _widsStatus.value = "Monitor stopped."
-    }
+    fun stopWids() = wids.stop()
 
-    fun clearWidsEvents() { _widsEvents.value = emptyList() }
+    fun clearWidsEvents() = wids.clearEvents()
 
     // --- Evil Portal (captive-portal / evil twin) --- persistent device-side session, creds streamed.
-    private val _evilActive = MutableStateFlow(false)
-    val evilActive: StateFlow<Boolean> = _evilActive.asStateFlow()
-    private val _evilStatus = MutableStateFlow("")
-    val evilStatus: StateFlow<String> = _evilStatus.asStateFlow()
     private val _evilCreds = MutableStateFlow<List<EvilCred>>(emptyList())
     val evilCreds: StateFlow<List<EvilCred>> = _evilCreds.asStateFlow()
 
@@ -2458,29 +2359,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         templateName: String = "",
         channel: Int = 1,
         deauth: Boolean = false,
-    ) {
-        if (client == null) { _evilStatus.value = "Connect the device over USB first."; return }
-        _evilStatus.value = "Starting..."
-        _evilCreds.value = emptyList()
-        val name = ssid.ifBlank { "Free Wifi" }
-        val ch = channel.coerceIn(1, 14)
-        fun launch(tpath: String) {
-            // Always send 4 tab-separated fields: ssid, templatePath, channel, deauth(0/1).
-            val arg = "$name\t$tpath\t$ch\t${if (deauth) 1 else 0}"
-            dispatchCmd("evil_portal_start $arg") { ok, out ->
-                _evilActive.value = ok
-                _evilStatus.value = out
-            }
-        }
-        if (templateBytes != null && templateName.isNotBlank()) {
-            val path = "/$templateName"
-            pushFile(path, templateBytes) { ok, msg -> if (ok) launch(path) else _evilStatus.value = "Template push failed: $msg" }
-        } else launch("")
-    }
+    ) = evilPortal.start(ssid, templateBytes, templateName, channel, deauth)
 
-    fun stopEvilPortal() {
-        dispatchCmd("evil_portal_stop") { _, out -> _evilActive.value = false; _evilStatus.value = out.ifBlank { "Stopped." } }
-    }
+    fun stopEvilPortal() = evilPortal.stop()
 
     fun clearEvilCreds() { _evilCreds.value = emptyList() }
 
@@ -2694,6 +2575,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private fun stopAllBurstLoops(silent: Boolean) {
         burstLoops.stopAll(silent)
         _deauthTarget.value = ""
+        if (wids.active.value) wids.stop() // WIDS is a monitor loop, not a BurstLoop
     }
 
     /**
@@ -3491,6 +3373,11 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // Abortable short-burst loops. Every loop registers with [burstLoops] when first built, so
     // stopAllBurstLoops() cannot miss one. Lazy: a loop that never started needs no stopping.
     private val burstLoops = BurstLoopRegistry()
+
+    // Bounded monitors (lazy: built on first use, after commandRunner).
+    private val subBrute by lazy { SubGhzBruteforceService(viewModelScope, commandRunner, isConnected = { session != null }) }
+    private val jamDetector by lazy { JamDetectService(viewModelScope, commandRunner, isConnected = { session != null }) }
+    private val wids by lazy { WidsService(viewModelScope, commandRunner, isConnected = { session != null }, linkOpen = { transport?.isOpen == true }) }
     private fun burstLoop(line: MutableStateFlow<String> = MutableStateFlow("")) =
         BurstLoop(viewModelScope, commandRunner, { transport?.isOpen == true }, burstLoops, line)
 
@@ -3528,6 +3415,24 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val badbleStatus: StateFlow<String> = badBle.status
     private val bleMediaService = BleMediaService(viewModelScope, commandRunner, isConnected = { session != null })
     val bleMediaStatus: StateFlow<String> = bleMediaService.status
+
+    // GATT exploration: commands in GattService; the EVENT ble.gatt tree stays here (_gattTree).
+    private val gatt = GattExplorer(viewModelScope, commandRunner, isConnected = { session != null }) { _gattTree.value = emptyMap() }
+    val gattMac: StateFlow<String?> = gatt.mac
+    val gattStatus: StateFlow<String> = gatt.status
+    val gattConnecting: StateFlow<Boolean> = gatt.connecting
+    val gattReads: StateFlow<Map<String, String>> = gatt.reads
+
+    // Evil Portal: a device-side session; captured creds arrive as EVENT evil.cred (_evilCreds).
+    private val evilPortal = EvilPortalService(
+        viewModelScope, commandRunner, isConnected = { session != null },
+        pushTemplate = { path, bytes ->
+            kotlinx.coroutines.suspendCancellableCoroutine { c -> pushFile(path, bytes) { ok, msg -> if (c.isActive) c.resumeWith(Result.success(ok to msg)) } }
+        },
+        onStart = { _evilCreds.value = emptyList() },
+    )
+    val evilActive: StateFlow<Boolean> = evilPortal.active
+    val evilStatus: StateFlow<String> = evilPortal.status
 
     private val ibutton = IButtonService(
         viewModelScope, commandRunner,

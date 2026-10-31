@@ -5,6 +5,15 @@ All notable changes to Brucia are documented here. Brucia is a fork of
 that offloads computation to the phone. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the app/firmware release.
 
+## Unreleased
+
+- Fixed: the WIDS monitor kept re-sending commands at full speed after a disconnect and was
+  not stopped by "Stop all"; it now ends when the link closes, backs off after a failed
+  window, and stops with everything else.
+- Evil Portal, GATT exploration, jam detection and Sub-GHz brute force moved to tested
+  services. Stop now wins over an Evil Portal start that is still pushing its template,
+  and a stale GATT read no longer reappears after a stop or reconnect.
+
 ## [0.1.2] - 2026-10-30
 
 App and T-Embed CC1101 firmware, published to the private BruciaDev repo. Hardware
