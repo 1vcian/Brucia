@@ -43,6 +43,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -132,10 +134,14 @@ private fun concat(a: ShortArray, b: ShortArray, maxLen: Int): ShortArray {
 @Composable
 internal fun AudioDashboardScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
+    val device by vm.device.collectAsState()
     val connected = status == "Connected"
     val pcm by vm.micPcm.collectAsState() // single subscription, fanned to all panels below
 
-    DisposableEffect(Unit) { vm.startMicPcm(); onDispose { vm.stopMicPcm() } }
+    DisposableEffect(connected, device?.caps?.mic) {
+        if (connected && device?.caps?.mic == true) vm.startMicPcm()
+        onDispose { vm.stopMicPcm() }
+    }
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -156,10 +162,11 @@ internal fun AudioDashboardScreen(vm: WardriveViewModel, onConnect: () -> Unit) 
 private fun RecordBar(vm: WardriveViewModel, connected: Boolean) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    val recording by vm.recording.collectAsState()
-    val ready by vm.recordingReady.collectAsState()
+    val recState by vm.recordingState.collectAsState()
+    val recording = recState.active
+    val ready = recState.hasData
     val exporting by vm.recordingExporting.collectAsState()
-    var elapsed by remember { mutableStateOf(0) }
+    var elapsed by remember { mutableIntStateOf(0) }
     var msg by remember { mutableStateOf("") }
 
     LaunchedEffect(recording) {
@@ -174,9 +181,12 @@ private fun RecordBar(vm: WardriveViewModel, connected: Boolean) {
                     onClick = {
                         if (recording || ready) {
                             msg = "Saving..."
-                            vm.stopRecordingAndExport(context) { files ->
+                            vm.stopRecordingAndExport(context) { files, integrity ->
                                 if (files.isEmpty()) msg = "Export failed or no audio; captured data is kept for retry"
-                                else { msg = "Saved ${files.size} files"; shareAudioFiles(context, files) }
+                                else {
+                                    msg = "Saved ${files.size} files; ${integrity.summary()}"
+                                    shareAudioFiles(context, files)
+                                }
                             }
                         } else { msg = ""; vm.startRecording() }
                     },
@@ -191,7 +201,11 @@ private fun RecordBar(vm: WardriveViewModel, connected: Boolean) {
                     Spacer(Modifier.size(6.dp))
                     Text("REC  ${"%d:%02d".format(elapsed / 60, elapsed % 60)}", color = cs.onSurface)
                 } else {
-                    Text(if (msg.isNotBlank()) msg else "Save WAV + spectrum / waterfall / scope PNGs",
+                    Text(when {
+                            msg.isNotBlank() -> msg
+                            ready && recState.limitReached -> "Recording limit reached; save the captured audio"
+                            else -> "Save WAV + spectrum / waterfall / scope PNGs"
+                        },
                         color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -271,7 +285,7 @@ private fun WaterfallPanel(pcm: ShortArray) {
     val bins = 256
     val fb = remember { IntArray(cols * bins) }
     val bmp = remember { Bitmap.createBitmap(cols, bins, Bitmap.Config.ARGB_8888) }
-    var ver by remember { mutableStateOf(0) }
+    var ver by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(pcm) {
         if (pcm.size >= 512) {
@@ -324,15 +338,15 @@ internal fun ScopePanel(vm: WardriveViewModel, pcm: ShortArray) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
 
-    var scopeMode by remember { mutableStateOf(0) } // 0=Time, 1=XY mono, 2=XY 2-mic
+    var scopeMode by remember { mutableIntStateOf(0) } // 0=Time, 1=XY mono, 2=XY 2-mic
 
     // Time-mode controls.
-    var timebase by remember { mutableStateOf(1024f) }  // samples per screen
-    var gain by remember { mutableStateOf(1.5f) }
-    var triggerLevel by remember { mutableStateOf(0f) }
-    var triggerMode by remember { mutableStateOf(0) }   // 0=rising, 1=falling, 2=auto
+    var timebase by remember { mutableFloatStateOf(1024f) }  // samples per screen
+    var gain by remember { mutableFloatStateOf(1.5f) }
+    var triggerLevel by remember { mutableFloatStateOf(0f) }
+    var triggerMode by remember { mutableIntStateOf(0) }   // 0=rising, 1=falling, 2=auto
     // XY-mono control.
-    var xyDelay by remember { mutableStateOf(24f) }     // samples of delay for the phase plot
+    var xyDelay by remember { mutableFloatStateOf(24f) }     // samples of delay for the phase plot
 
     // Rolling ESP buffer (shared by Time and XY-mono).
     var buf by remember { mutableStateOf(ShortArray(0)) }
@@ -638,13 +652,17 @@ internal fun SstvScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
-    val speakerOk = device?.caps?.speaker != false
+    val speakerOk = device?.caps?.speaker == true
     val pcm by vm.micPcm.collectAsState() // single mic subscription; fanned to the all-modes decoders
     val tx by vm.sstvTx.collectAsState()
 
     var txMode by remember { mutableStateOf(Sstv.Mode.ROBOT36) }
 
-    DisposableEffect(Unit) { vm.startMicPcm(); onDispose { vm.stopMicPcm(); vm.sstvTransmitStop() } }
+    DisposableEffect(connected, device?.caps?.mic) {
+        if (connected && device?.caps?.mic == true) vm.startMicPcm()
+        onDispose { vm.stopMicPcm() }
+    }
+    DisposableEffect(Unit) { onDispose { vm.sstvTransmitStop() } }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
@@ -706,10 +724,14 @@ private fun modeLabel(m: Sstv.Mode): String = SSTV_MODES.firstOrNull { it.second
 @Composable
 internal fun OscilloscopeScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
+    val device by vm.device.collectAsState()
     val connected = status == "Connected"
     val pcm by vm.micPcm.collectAsState()
 
-    DisposableEffect(Unit) { vm.startMicPcm(); onDispose { vm.stopMicPcm() } }
+    DisposableEffect(connected, device?.caps?.mic) {
+        if (connected && device?.caps?.mic == true) vm.startMicPcm()
+        onDispose { vm.stopMicPcm() }
+    }
 
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         AudioHeader("Oscilloscope", "2D time-domain scope and XY vectorscope from the device mic", connected, onConnect)
@@ -726,7 +748,7 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
-    val speakerOk = device?.caps?.speaker != false
+    val speakerOk = device?.caps?.speaker == true
     val pcm by vm.micPcm.collectAsState()
     val tx by vm.sstvTx.collectAsState()
 
@@ -739,8 +761,8 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val toneHz = remember(pcm) { if (pcm.size >= 256) Fft.dominantFreq(pcm, AUDIO_FS, 2048) else 0.0 }
     val level = remember(pcm) { Fft.rms(pcm) }
 
-    var genFreq by remember { mutableStateOf(1000f) }
-    var genMs by remember { mutableStateOf(500f) }
+    var genFreq by remember { mutableFloatStateOf(1000f) }
+    var genMs by remember { mutableFloatStateOf(500f) }
 
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         AudioHeader("Tone", "Decode DTMF from the ESP mic; generate tones / DTMF on the speaker", connected, onConnect)
@@ -770,7 +792,7 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 if (!listening) {
-                    Button(enabled = connected, onClick = { vm.startDtmfDecode() }, modifier = Modifier.fillMaxWidth()) {
+                    Button(enabled = connected && device?.caps?.mic == true, onClick = { vm.startDtmfDecode() }, modifier = Modifier.fillMaxWidth()) {
                         Text("Start listening")
                     }
                 } else {
@@ -816,7 +838,7 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Text("Duration: ${genMs.roundToInt()} ms", color = cs.onSurfaceVariant)
                 Slider(value = genMs, onValueChange = { genMs = it }, valueRange = 50f..2000f)
                 val vol by vm.speakerVolume.collectAsState()
-                var volSlider by remember { mutableStateOf(vol.toFloat()) }
+                var volSlider by remember { mutableFloatStateOf(vol.toFloat()) }
                 Text("Speaker volume: ${volSlider.roundToInt()}%", color = cs.onSurfaceVariant)
                 Slider(
                     value = volSlider,
@@ -872,9 +894,9 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
 
                 var steps by remember { mutableStateOf(listOf<String>()) }
-                var dur by remember { mutableStateOf(8) }
-                var oct by remember { mutableStateOf(5) }
-                var bpm by remember { mutableStateOf(120f) }
+                var dur by remember { mutableIntStateOf(8) }
+                var oct by remember { mutableIntStateOf(5) }
+                var bpm by remember { mutableFloatStateOf(120f) }
                 var songName by remember { mutableStateOf("") }
                 val customSongs by vm.customSongs.collectAsState()
                 val composerPlaying by vm.songPlaying.collectAsState()

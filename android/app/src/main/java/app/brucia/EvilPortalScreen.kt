@@ -81,7 +81,7 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val scanning by vm.wardriving.collectAsState()
     val savedPortals by vm.savedPortals.collectAsState()
     var ssid by remember { mutableStateOf("Free Wifi") }
-    var templateIdx by remember { mutableStateOf(0) }
+    var templateIdx by remember { mutableIntStateOf(0) }
     var deauth by remember { mutableStateOf(false) }
     var channel by remember { mutableStateOf("1") }
     var showTargets by remember { mutableStateOf(false) }

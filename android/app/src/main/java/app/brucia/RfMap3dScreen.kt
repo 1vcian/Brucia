@@ -42,8 +42,8 @@ internal fun RfMap3dScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val spectrum by vm.spectrum.collectAsState()
 
     var webView by remember { mutableStateOf<WebView?>(null) }
-    var zoom by remember { mutableStateOf(1f) }
-    var sourceCount by remember { mutableStateOf(0) }
+    var zoom by remember { mutableFloatStateOf(1f) }
+    var sourceCount by remember { mutableIntStateOf(0) }
 
     // Build the source list from the current ESP data: {name, band(0=wifi,1=ble,2=subghz), rssi}.
     fun buildSourcesJson(): String {

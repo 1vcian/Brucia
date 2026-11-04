@@ -10,6 +10,30 @@ import org.junit.Test
 /** Reuses [GateRunner] and [until] from DeviceOperationTest. Non-sticky by default so a Stop
  * (which cancels the job) frees any pending await and runBlocking does not hang. */
 class BurstLoopTest {
+    @Test(timeout = 5000) fun immediateFailureOnUnconfinedScopeClearsOwnershipExactlyOnce() {
+        var ends = 0
+        val loop = BurstLoop(CoroutineScope(Dispatchers.Unconfined), CommandRunner { _, _ -> false to "" },
+            { true }, BurstLoopRegistry())
+        loop.start("Running", { "test" }, 100, onEnd = { ends++ })
+        assertFalse(loop.active.value)
+        assertEquals("Failed.", loop.status.value)
+        assertEquals(1, ends)
+        loop.stop()
+        assertEquals(1, ends)
+    }
+
+    @Test(timeout = 5000) fun cancelledParentBeforeStartDoesNotPublishRunningOrSend() {
+        val parent = Job().apply { cancel() }
+        var calls = 0
+        val loop = BurstLoop(CoroutineScope(parent + Dispatchers.Unconfined), CommandRunner { _, _ ->
+            calls++; true to ""
+        }, { true }, BurstLoopRegistry())
+        loop.start("Running", { "test" }, 100)
+        assertFalse(loop.active.value)
+        assertEquals("Stopped.", loop.status.value)
+        assertEquals(0, calls)
+    }
+
     private val registry = BurstLoopRegistry()
     private var linkOpen = true
     private val runner = GateRunner()
@@ -83,13 +107,13 @@ class BurstLoopTest {
         assertEquals(1, runner.calls.size) // did not continue past the rejection
     }
 
-    @Test(timeout = 5_000) fun blankFailureContinues() = runBlocking {
+    @Test(timeout = 5_000) fun blankFailureStopsInsteadOfRetryingForever() = runBlocking {
         val loop = loop()
         loop.start("run", { "b" }, 8000)
-        answer(0, false, "") // blank failure keeps looping (as the VM)
-        until { runner.calls.size == 2 }
-        assertEquals("run" to true, loop.state())
-        loop.stop()
+        answer(0, false, "")
+        until { !loop.active.value }
+        assertEquals("Failed." to false, loop.state())
+        assertEquals(1, runner.calls.size)
     }
 
     @Test(timeout = 5_000) fun runnerExceptionEndsLoopWithMessageOrFailed() = runBlocking {
@@ -127,14 +151,16 @@ class BurstLoopTest {
 
     @Test(timeout = 5_000) fun cancellationPropagatesToRunner() = runBlocking {
         val sawCancel = CompletableDeferred<Unit>()
+        val entered = CompletableDeferred<Unit>()
         val probe = CommandRunner { _, _ ->
+            entered.complete(Unit)
             try { CompletableDeferred<Pair<Boolean, String>>().await() }
             catch (e: CancellationException) { sawCancel.complete(Unit); throw e }
         }
         val scope = CoroutineScope(Dispatchers.Default + Job())
         val loop = BurstLoop(scope, probe, { linkOpen }, registry)
         loop.start("run", { "b" }, 8000)
-        until { loop.active.value }
+        entered.await()
         scope.cancel()
         sawCancel.await() // the cancellation reached the in-flight burst
         until { !loop.active.value }

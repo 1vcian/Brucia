@@ -1,13 +1,12 @@
 package app.brucia.ble
 
+import app.brucia.session.CommandTasks
 import app.brucia.session.CommandRunner
 import app.brucia.session.DeviceOperation
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
 /**
  * BLE HID presenter / keyboard (ble_hid_begin / _end / _status / _key / _type). The advertise
@@ -22,6 +21,7 @@ class BleHidService(
     private val runner: CommandRunner,
     private val isConnected: () -> Boolean,
 ) {
+    private val alongside = CommandTasks(scope)
     private val op = DeviceOperation(scope, runner, isConnected, TIMEOUT_MS)
     private val _status = MutableStateFlow("off")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -70,7 +70,9 @@ class BleHidService(
     /** Stop waiting for the current lifecycle reply; a late reply is then ignored. */
     fun stop() {
         synchronized(lifeLock) { ++life }
+        alongside.cancel()
         op.stop()
+        _status.value = "Stopped."
     }
 
     /** Apply [text] only while [gen] is still the latest lifecycle command. */
@@ -80,15 +82,9 @@ class BleHidService(
 
     /** Fire-and-forget command off the operation, reporting its reply to [onReply]. */
     private fun sendAlongside(cmd: String, onReply: (Boolean, String) -> Unit) {
-        scope.launch {
-            val (ok, out) = try {
-                runner.run(cmd, TIMEOUT_MS)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                false to (e.message ?: "")
-            }
-            onReply(ok, out)
+        val token = synchronized(lifeLock) { life }
+        alongside.run(runner, cmd, TIMEOUT_MS) { ok, out ->
+            if (synchronized(lifeLock) { token == life }) onReply(ok, out)
         }
     }
 

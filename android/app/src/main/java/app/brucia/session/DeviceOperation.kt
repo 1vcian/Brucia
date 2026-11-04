@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import org.json.JSONObject
 
 /**
@@ -76,6 +79,7 @@ class DeviceOperation(
     ) {
         synchronized(lock) {
             val gen = supersede()
+            if (!scope.isActive) return publish(gen, "Stopped.")
             val rejection = if (!isConnected()) NOT_CONNECTED else precheck()
             if (rejection != null) return publish(gen, rejection)
             publish(gen, running, busy = true)
@@ -87,7 +91,20 @@ class DeviceOperation(
                 } catch (e: Exception) {
                     onError(e)
                 }
-                publish(gen, result(reply))
+                currentCoroutineContext().ensureActive()
+                // Check before invoking the mapper: it may update feature state or chain a command.
+                if (synchronized(lock) { gen != generation }) return@launch
+                try {
+                    publish(gen, result(reply))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    publish(gen, "Operation failed: ${e.message}")
+                }
+            }.also { runningJob ->
+                runningJob.invokeOnCompletion { cause ->
+                    if (cause != null) publish(gen, if (cause is CancellationException) "Stopped." else "Operation failed: ${cause.message}")
+                }
             }
         }
     }
@@ -106,6 +123,16 @@ class DeviceOperation(
         synchronized(lock) { publish(supersede(), text) }
     }
 
+    /**
+     * Show a late, unsolicited [text] (e.g. a device EVENT) only while no command awaits its
+     * reply, so a notification never cancels a pending wait. Returns false when skipped.
+     */
+    fun showIfIdle(text: String): Boolean = synchronized(lock) {
+        if (_busy.value) return false
+        publish(supersede(), text)
+        true
+    }
+
     /** Clear [status] when idle; a running command keeps its text and its pending reply. */
     fun clearStatus(): Boolean = synchronized(lock) {
         if (_busy.value) return false
@@ -115,9 +142,10 @@ class DeviceOperation(
 
     /** Cancel the current command and return the token for the next one. */
     private fun supersede(): Long {
+        ++generation // invalidate completion handlers before cancel() can invoke them inline
         job?.cancel()
         job = null
-        return ++generation
+        return generation
     }
 
     /** Apply [text] (null keeps it) and [busy] only while [gen] still owns the operation. */

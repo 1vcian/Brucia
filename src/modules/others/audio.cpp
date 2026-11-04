@@ -341,6 +341,12 @@ bool isAudioPlaying() {
     return (state == PLAYBACK_PLAYING || state == PLAYBACK_PAUSED);
 }
 
+// Lock-free: true from a successful async start until the player task has released the
+// decoder, source and I2S output (it clears taskHandle last, under the lock). Unlike
+// isAudioPlaying() this stays true while the task is still cleaning up (PLAYBACK_STOPPING).
+// Additive helper for the companion; the existing playback paths do not use it.
+bool isAudioPlaybackTaskActive() { return g_audioPlayer && g_audioPlayer->taskHandle != nullptr; }
+
 AudioPlaybackInfo getAudioPlaybackInfo() {
     initAudioPlayer();
 

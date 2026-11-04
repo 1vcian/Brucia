@@ -21,13 +21,59 @@ internal class JsonGate : JsonCommandRunner {
 }
 
 class LoraServiceTest {
+    @Test(timeout = 5000) fun configureOrSendSupersedesReceiveAndClearsItsIndicator() = runBlocking {
+        val s = svc()
+        for (configure in listOf(true, false)) {
+            val i = json.calls.size
+            val j = runner.calls.size
+            s.receive(5)
+            until { json.calls.size == i + 1 }
+            if (configure) s.configure("868") else s.send("test")
+            assertFalse(s.receiving.value)
+            until { runner.calls.size == j + 1 }
+            json.reply(i, true, JSONObject().put("data", JSONObject().put("data", "late")))
+            runner.reply(j, true, "ok")
+            until { !s.busy.value }
+            assertTrue(packets.isEmpty())
+        }
+    }
+
+    @Test(timeout = 5000) fun cancelledScopeBeforeOrDuringReceiveClearsIndicator() = runBlocking {
+        for (before in listOf(true, false)) {
+            val parent = Job().apply { if (before) cancel() }
+            val entered = CompletableDeferred<Unit>()
+            val scope = CoroutineScope(parent + Dispatchers.Unconfined)
+            val s = LoraService(scope, runner, JsonCommandRunner { _, _ ->
+                entered.complete(Unit)
+                awaitCancellation()
+            }, { true }) { fail("Cancelled receive delivered data") }
+            s.receive(5)
+            if (!before) entered.await()
+            parent.cancelAndJoin()
+            assertFalse(s.receiving.value)
+            assertFalse(s.busy.value)
+        }
+    }
+
+    @Test(timeout = 5000) fun invalidReceiveDurationNeverArmsIndicatorOrSends() = runBlocking {
+        val s = svc()
+        for (seconds in listOf(Int.MIN_VALUE, 0, 121, Int.MAX_VALUE)) {
+            s.receive(seconds)
+            assertFalse(s.receiving.value)
+            assertFalse(s.busy.value)
+            assertTrue(s.status.value.contains("Duration must"))
+            assertTrue(LoraService.recvTimeoutFor(seconds) in 11_000L..130_000L)
+        }
+        assertTrue(json.calls.isEmpty())
+    }
+
     private val runner = GateRunner().apply { sticky = true }
     private val json = JsonGate()
     private val packets = CopyOnWriteArrayList<JSONObject>()
     private fun CoroutineScope.svc(connected: Boolean = true) =
         LoraService(this, runner, json, { connected }) { packets += it }
 
-    @Test fun notConnectedRejectsLocallyAndSendsNothing() = runBlocking {
+    @Test(timeout = 5000) fun notConnectedRejectsLocallyAndSendsNothing() = runBlocking {
         val s = svc(connected = false)
         s.configure("868"); s.send("hi"); s.receive(20)
         assertEquals("Connect the device over USB first.", s.status.value)
@@ -36,7 +82,7 @@ class LoraServiceTest {
         assertTrue(runner.calls.isEmpty() && json.calls.isEmpty())
     }
 
-    @Test fun configureBuildsCommandDropsTrailingBlanksAndMapsResult() = runBlocking {
+    @Test(timeout = 5000) fun configureBuildsCommandDropsTrailingBlanksAndMapsResult() = runBlocking {
         val s = svc()
         s.configure("", "125")
         assertEquals("Enter a frequency in MHz.", s.status.value)
@@ -58,7 +104,7 @@ class LoraServiceTest {
         assertEquals("No LoRa module on this device.", s.status.value)
     }
 
-    @Test fun sendRejectsBlankAndMapsResult() = runBlocking {
+    @Test(timeout = 5000) fun sendRejectsBlankAndMapsResult() = runBlocking {
         val s = svc()
         s.send("   ")
         assertEquals("Enter a message to send.", s.status.value)
@@ -73,7 +119,7 @@ class LoraServiceTest {
         assertEquals("ok", s.status.value)
     }
 
-    @Test fun receiveTogglesFlagDeliversPacketOnceAndTimesOutBySeconds() = runBlocking {
+    @Test(timeout = 5000) fun receiveTogglesFlagDeliversPacketOnceAndTimesOutBySeconds() = runBlocking {
         val s = svc()
         s.receive(20)
         assertTrue(s.receiving.value)
@@ -87,7 +133,7 @@ class LoraServiceTest {
         assertEquals("AB", packets[0].optString("data"))
     }
 
-    @Test fun supersededReceiveNeverDeliversNorClearsNewerFlag() = runBlocking {
+    @Test(timeout = 5000) fun supersededReceiveNeverDeliversNorClearsNewerFlag() = runBlocking {
         val s = svc()
         s.receive(5)
         until { json.calls.size == 1 }
@@ -102,20 +148,22 @@ class LoraServiceTest {
         assertEquals(listOf("fresh"), packets.map { it.optString("data") })
     }
 
-    @Test fun stopReceiveClearsFlagLocallyButStillDelivers() = runBlocking {
+    @Test(timeout = 5000) fun stopReceiveCancelsWaitAndSuppressesLatePacket() = runBlocking {
         val s = svc()
         s.receive(5)
         until { json.calls.size == 1 }
         s.stopReceive()
         assertFalse(s.receiving.value)
-        assertEquals(1, json.calls.size)                    // wait not stopped
-        assertEquals("Listening for LoRa packets (5s)...", s.status.value)
+        assertEquals(1, json.calls.size)
+        assertFalse(s.busy.value)
+        assertEquals("Stopped.", s.status.value)
         json.reply(0, true, JSONObject().put("out", "received 1 packet(s)").put("data", JSONObject().put("data", "X")))
-        until { s.status.value == "received 1 packet(s)" }
-        assertEquals(listOf("X"), packets.map { it.optString("data") })  // parity: packet still delivered
+        delay(20)
+        assertEquals("Stopped.", s.status.value)
+        assertTrue(packets.isEmpty())
     }
 
-    @Test fun stopCancelsAndClearsFlagIgnoringLateReply() = runBlocking {
+    @Test(timeout = 5000) fun stopCancelsAndClearsFlagIgnoringLateReply() = runBlocking {
         val s = svc()
         s.receive(5)
         until { json.calls.size == 1 }

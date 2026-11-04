@@ -14,6 +14,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Third-party actions are pinned to full commit SHAs; the comment names the tag.
+
 jobs:
   firmware:
     runs-on: ubuntu-latest
@@ -22,8 +24,8 @@ jobs:
       matrix:
         board: [lilygo-t-embed-cc1101, m5stack-core4mb, m5stack-cardputer]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.11'
       - name: Install PlatformIO
@@ -32,7 +34,7 @@ jobs:
         run: python3 tools/build_firmware.py -e ${{ matrix.board }}
       - name: AAC SBR noise bounds regression
         run: python3 tools/test_audio_noise_bounds.py -e ${{ matrix.board }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: brucia-firmware-${{ matrix.board }}
           path: Bruce-${{ matrix.board }}.bin
@@ -40,38 +42,65 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
+    env:
+      # AGP 8.7.3 default build-tools; compileSdk/targetSdk 34 (android/app/build.gradle.kts).
+      ANDROID_BUILD_TOOLS: '34.0.0'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      # JDK 21 LTS: supported by Gradle 8.11.1, AGP 8.7.3 and Kotlin 2.0.21
+      # (app bytecode targets 17). Local builds with JDK 23 are also used.
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '21'
+      # Explicit SDK setup instead of relying on whatever the runner image ships.
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: platform-tools platforms;android-34 build-tools;${{ env.ANDROID_BUILD_TOOLS }}
       - name: Unit tests (offload logic)
         working-directory: android
         run: ./gradlew :app:testDebugUnitTest --no-daemon
       - name: Android lint
         working-directory: android
         run: ./gradlew :app:lintDebug --no-daemon
-      - name: Build debug APK
+      # No keystore.properties in CI: the release APK is unsigned by design.
+      # Signing stays local (release.sh).
+      - name: Build debug and unsigned release APKs
         working-directory: android
-        run: ./gradlew :app:assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon
+      - name: Check APK identity (applicationId, VERSION, min/target SDK, debuggable)
+        run: |
+          aapt2="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt2"
+          python3 tools/check_apk_identity.py --aapt2 "$aapt2" --build-type debug \
+            android/app/build/outputs/apk/debug/app-debug.apk
+          python3 tools/check_apk_identity.py --aapt2 "$aapt2" --build-type release \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
+      # Signed with the runner's throwaway debug key: cannot update an install
+      # signed with any other key.
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: brucia-app-debug
+          name: brucia-app-debug-ci-debug-key
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      # Unsigned: not installable until signed locally.
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: brucia-app-release-unsigned
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
 
   protocol-e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.11'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '22.20.0'
       - run: pip install pyserial
-      - name: Build, release, dependency and database regressions
+      - name: Build, release, dependency, database and APK-identity regressions
         run: python3 -m unittest discover -s tools -p 'test_*.py'
       - name: Website release and installer logic
         run: node --test tools/test_site_release.cjs
@@ -79,7 +108,11 @@ jobs:
         run: python3 tools/test_firmware_codec.py
       - name: Firmware file transfer regression
         run: python3 tools/test_firmware_storage.py
+      - name: Firmware transactional upload failure and recovery regression
+        run: python3 tools/test_firmware_upload.py
       - name: Firmware frame reader regression
         run: python3 tools/test_firmware_framing.py
+      - name: Firmware iButton core regression (host C++)
+        run: python3 tools/test_firmware_ibutton.py
       - name: End-to-end protocol test (mock device + client)
         run: python3 tools/test_protocol_e2e.py

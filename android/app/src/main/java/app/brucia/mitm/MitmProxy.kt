@@ -108,7 +108,7 @@ class MitmProxy(context: Context, private val port: Int) {
             val cin = BufferedInputStream(client.getInputStream())
             val cout = BufferedOutputStream(client.getOutputStream())
             val first = runCatching { readRequest(cin) }.getOrNull() ?: return
-            if (first.method.equals("CONNECT", true)) {
+            if (first.method == "CONNECT") {
                 handleConnect(client, cout, first)
             } else {
                 handlePlainHttp(cin, cout, first)

@@ -6,6 +6,7 @@
 #include <globals.h>
 #if defined(COMPANION_HAS_FM)
 #include "driver/i2s_std.h"
+#include "fm_pcm_ring.h"
 #include "modules/fm/fm.h"
 #endif
 #if defined(COMPANION_HAS_MIC)
@@ -80,10 +81,9 @@ static bool fmAudioMic = false; // true = onboard mic source, false = phone PCM 
 static i2s_chan_handle_t fmTxChan = nullptr;
 static const uint32_t FM_AUDIO_IN_RATE = 16000; // phone/mic PCM rate (mono 16-bit)
 static const uint32_t FM_AUDIO_TX_RATE = 32000; // Si4713 digital min is 32 kHz (AN332)
-static const int FM_RING_SAMPLES = 8192;        // ~0.5 s of 16 kHz mono PCM
-static int16_t fmRing[FM_RING_SAMPLES];
-static volatile int fmRingHead = 0;
-static volatile int fmRingTail = 0;
+static const int FM_RING_SAMPLES = 8192;        // ~0.5 s of 16 kHz mono PCM (8191 usable)
+static FmPcmRing<FM_RING_SAMPLES> fmRing;       // filled by fm_audio_data, drained by fmAudioService
+static uint32_t fmLostSamples = 0; // since begin: mono samples dequeued but not fully written to I2S
 
 static bool fmI2sTxBegin() {
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
@@ -127,7 +127,10 @@ static void fmI2sTxEnd() {
 // stream to real time; on overrun the block is truncated (non-blocking by design).
 static void fmWriteUpsampled(const int16_t *mono, int n) {
     static int16_t out[256 * 4]; // 256 mono samples -> 512 stereo frames (4 int16 each)
-    if (n > 256) n = 256;
+    if (n > 256) {
+        fmLostSamples += (uint32_t)(n - 256); // accounting only; callers pass <= 256
+        n = 256;
+    }
     int j = 0;
     for (int i = 0; i < n; i++) {
         int16_t s = mono[i];
@@ -138,7 +141,9 @@ static void fmWriteUpsampled(const int16_t *mono, int n) {
     }
     if (!fmTxChan || j == 0) return;
     size_t wrote = 0;
-    i2s_channel_write(fmTxChan, out, (size_t)j * sizeof(int16_t), &wrote, pdMS_TO_TICKS(10));
+    const size_t bytes = (size_t)j * sizeof(int16_t);
+    i2s_channel_write(fmTxChan, out, bytes, &wrote, pdMS_TO_TICKS(10));
+    fmLostSamples += fmLostMonoSamples(bytes, wrote); // reported in fm_audio_data replies as `lost`
 }
 
 static void fmAudioStopInternal() {
@@ -146,7 +151,7 @@ static void fmAudioStopInternal() {
     fmAudioActive = false;
     fmI2sTxEnd();
     fm_stop();
-    fmRingHead = fmRingTail = 0;
+    fmRing.reset();
 }
 
 // fm_audio_begin <freqKHz> <phone|mic>
@@ -194,34 +199,51 @@ static void runFmAudioBegin(const String &argsIn, uint32_t id) {
         return;
     }
     fmAudioMic = mic;
-    fmRingHead = fmRingTail = 0;
+    fmRing.reset();
+    fmLostSamples = 0;
     fmAudioActive = true;
     String out = "FM audio TX on " + String(khz / 1000.0, 2) + " MHz (" + (mic ? "mic" : "phone") + ")";
     companionAckMsg(id, true, out.c_str());
 }
 
 // fm_audio_data <base64 pcm>  (16 kHz mono 16-bit; only for the "phone" source)
+// Every reply carries `accepted` (samples queued from this frame, in order from its start).
+// A full ring accepts what fits (possibly 0) and says so: ok:true with accepted < samples is
+// flow control, not a failure; the sender resends the remainder later. Never a silent drop.
+static void sendFmAudioDataReply(uint32_t id, bool ok, const char *out, int samples, int accepted) {
+    JsonDocument o;
+    beginEnvelope(o, MSG_ACK, id);
+    JsonObject d = o["d"].to<JsonObject>();
+    d["ok"] = ok;
+    d["out"] = out;
+    d["samples"] = samples;          // whole samples decoded from this frame
+    d["accepted"] = accepted;        // queued for transmission; samples - accepted were not
+    d["free"] = fmRing.freeSlots();  // ring free space after this frame
+    d["lost"] = fmLostSamples;       // cumulative since begin: dequeued, not fully written to I2S
+    sendEnvelope(o);
+}
+
 static void runFmAudioData(const String &b64, uint32_t id) {
     if (!fmAudioActive || fmAudioMic) {
-        sendAck(id, false); // not streaming, or mic source owns the audio
+        // not streaming, or mic source owns the audio
+        sendFmAudioDataReply(id, false, fmAudioActive ? "mic source active" : "FM audio not active", 0, 0);
         return;
     }
     size_t outLen = 0;
     uint8_t *pcm = companionB64decode(b64, &outLen);
     if (!pcm) {
-        sendAck(id, false);
+        sendFmAudioDataReply(id, false, "invalid base64 PCM", 0, 0);
         return;
     }
     int nSamples = (int)(outLen / 2);
-    const int16_t *s = (const int16_t *)pcm;
-    for (int i = 0; i < nSamples; i++) {
-        int next = (fmRingHead + 1) % FM_RING_SAMPLES;
-        if (next == fmRingTail) break; // ring full: drop the rest (non-blocking)
-        fmRing[fmRingHead] = s[i];
-        fmRingHead = next;
-    }
+    int accepted = fmRing.push((const int16_t *)pcm, nSamples);
     free(pcm);
-    sendAck(id, true);
+    if (accepted < nSamples) {
+        String out = "ring full: accepted " + String(accepted) + " of " + String(nSamples) + " samples";
+        sendFmAudioDataReply(id, true, out.c_str(), nSamples, accepted);
+    } else {
+        sendFmAudioDataReply(id, true, "", nSamples, accepted);
+    }
 }
 
 static void runFmAudioStop(uint32_t id) {
@@ -247,11 +269,7 @@ void fmAudioService() {
 #endif
     } else {
         int16_t chunk[256];
-        int n = 0;
-        while (n < 256 && fmRingTail != fmRingHead) {
-            chunk[n++] = fmRing[fmRingTail];
-            fmRingTail = (fmRingTail + 1) % FM_RING_SAMPLES;
-        }
+        int n = fmRing.pop(chunk, 256);
         if (n > 0) fmWriteUpsampled(chunk, n);
     }
 }
@@ -351,7 +369,9 @@ void micService() {
 }
 
 // --- mic.pcm stream: raw continuous mic PCM for phone-side DSP (SSTV/tone/FFT). ---
-//     EVENT ev="mic.pcm" d { sr:16000, pcm:"<base64 S16LE mono>" }, ~2048 samples/chunk.
+//     EVENT ev="mic.pcm" d { sr:16000, pcm:"<base64 S16LE mono>", seq, dropped? }, 2048 samples/chunk.
+//     seq: chunk counter, 0 at every SUB on. dropped: cumulative samples the I2S driver discarded
+//     (RX overrun) since that SUB; omitted when the driver cannot report overruns.
 //     Uses mic_stream_begin/read/end() (persistent I2S) so chunks are gapless; the plain
 //     mic.spectrum sampler re-inits I2S per call and would leave holes. The I2S peripheral
 //     is opened lazily on first service and released on micPcmStop(), so it never contends
@@ -361,11 +381,17 @@ static bool subPcm = false;              // phone subscribed to mic.pcm
 static bool micPcmOpen = false;          // the continuous I2S capture is running
 static int micPcmFill = 0;               // samples accumulated in micPcmBuf so far
 static int16_t micPcmBuf[MIC_PCM_CHUNK]; // assembles one chunk across service calls
+static uint32_t micPcmSeq = 0;           // next chunk sequence number (per subscription)
+static uint32_t micPcmDropBase = 0;      // driver overrun count when this subscription began
 
 void micPcmStart() {
     micStop();
     subPcm = true;
-    micPcmFill = 0;
+    micPcmFill = 0; // a partial chunk is discarded; the seq restart below shows the app a gap
+    micPcmSeq = 0;
+    micPcmDropBase = 0;
+    uint32_t dropped = 0;
+    if (micPcmOpen && mic_stream_dropped_samples(&dropped)) micPcmDropBase = dropped;
     // The I2S peripheral is opened lazily in micPcmService() (first call), so a transient
     // init failure just retries instead of failing the SUB ack.
 }
@@ -384,6 +410,7 @@ void micPcmService() {
     if (!micPcmOpen) {
         if (!mic_stream_begin(16000, 2.0f)) return; // retry next loop
         micPcmOpen = true;
+        micPcmDropBase = 0; // mic_stream_begin() restarts the driver overrun count
     }
     // Drain whatever the I2S DMA has ready (non-blocking) into the chunk buffer; emit when full.
     int want = MIC_PCM_CHUNK - micPcmFill;
@@ -400,16 +427,21 @@ void micPcmService() {
     d["ev"] = "mic.pcm";
     d["sr"] = 16000;
     d["pcm"] = b64;
+    d["seq"] = micPcmSeq++;
+    uint32_t dropped = 0;
+    if (mic_stream_dropped_samples(&dropped)) d["dropped"] = dropped - micPcmDropBase;
     sendEnvelope(out);
 }
 #endif // COMPANION_HAS_MIC
 
 // --- Onboard speaker (NS4168 / MAX98357A) companion commands ------------------------------
 //   speaker_tone <freqHz> <ms> : play a tone on the onboard I2S speaker.
-//   speaker_play <path>        : play an audio file (WAV/MP3/...) from SD/LittleFS.
+//   speaker_play <path>        : start an audio file (WAV/MP3/...) from SD/LittleFS (async).
 // Both reuse modules/others/audio.cpp. Guarded by HAS_NS4168_SPKR; boards without the onboard
 // speaker reply ok:false "no speaker" at the dispatch site.
 #if defined(HAS_NS4168_SPKR)
+static void speakerFileAbort(const char *reason, bool notify = true); // speaker_play, below
+
 static void runSpeakerTone(const String &args, uint32_t id) {
     String a = args;
     a.trim();
@@ -422,6 +454,7 @@ static void runSpeakerTone(const String &args, uint32_t id) {
     }
     if (ms <= 0) ms = 200;      // sensible default
     if (ms > 10000) ms = 10000; // clamp to 10s (playTone blocks for the duration)
+    speakerFileAbort("superseded"); // playTone opens its own I2S output
     // playTone() is a no-op when sound is globally muted, and its output gain scales with
     // soundVolume - a saved volume of 0 (or very low) produces NO audible output even with
     // sound enabled. For an explicit, phone-requested tone, force both enabled AND an audible
@@ -438,6 +471,50 @@ static void runSpeakerTone(const String &args, uint32_t id) {
     companionAckMsg(id, true, out.c_str());
 }
 
+// --- speaker_play: non-blocking file playback (CAPS features.speaker_play_async) ---------
+//   speaker_play <path> ACKs as soon as the decoder has started (ok:true, out "playing <path>",
+//   play:<CMD id>) or fails at once (ok:false). The file is then decoded by Bruce's own
+//   PLAYBACK_ASYNC player task (the path the standalone audio player uses; the blocking
+//   variant is untouched), so the companion loop keeps serving PING and other commands.
+//   speakerPlayService() polls the task from the companion loop and sends exactly one terminal
+//   EVENT ev="speaker.play" d.data{play, state:"completed"|"stopped"|"error", path, ms, reason?}.
+//   speaker_stop, a newer speaker/mic command or leaving companion mode stops it; the player
+//   task stops within one decoder step and stopAudioPlayback() waits at most ~2.5 s for it to
+//   release the decoder, file and I2S output.
+static bool spkrPcmActive = false; // spkr_pcm_* session open (handlers below)
+static bool spkFileActive = false;
+static uint32_t spkFilePlay = 0;    // CMD id of the speaker_play that started the file
+static String spkFilePath;
+static uint32_t spkFileStartMs = 0;
+static uint32_t spkFileLastPoll = 0;
+static const uint32_t SPK_FILE_POLL_MS = 25;
+
+static void speakerFileEnd(const char *state, const char *reason, bool notify) {
+    if (!spkFileActive) return;
+    spkFileActive = false;
+    if (notify) {
+        JsonDocument out;
+        beginEnvelope(out, MSG_EVENT, 0);
+        JsonObject d = out["d"].to<JsonObject>();
+        d["ev"] = "speaker.play";
+        JsonObject data = d["data"].to<JsonObject>();
+        data["play"] = spkFilePlay;
+        data["state"] = state;
+        data["path"] = spkFilePath;
+        data["ms"] = (uint32_t)(millis() - spkFileStartMs);
+        if (reason) data["reason"] = reason;
+        sendEnvelope(out);
+    }
+    spkFilePath = "";
+}
+
+// Stop the file started by speaker_play, if any; reports state "stopped" with [reason].
+static void speakerFileAbort(const char *reason, bool notify) {
+    if (!spkFileActive) return;
+    stopAudioPlayback(); // signals the player task and waits (bounded) until it has released I2S
+    speakerFileEnd("stopped", reason, notify);
+}
+
 static void runSpeakerPlay(const String &args, uint32_t id) {
     String path = args;
     path.trim();
@@ -446,6 +523,12 @@ static void runSpeakerPlay(const String &args, uint32_t id) {
         return;
     }
     if (!path.startsWith("/")) path = "/" + path;
+    String lower = path;
+    lower.toLowerCase();
+    if (!isAudioFile(lower)) {
+        companionAckMsg(id, false, "unsupported format");
+        return;
+    }
     FS *fs;
     if (!getFsStorage(fs)) {
         companionAckMsg(id, false, "no storage");
@@ -455,27 +538,53 @@ static void runSpeakerPlay(const String &args, uint32_t id) {
         companionAckMsg(id, false, "file not found");
         return;
     }
+    // One speaker owner at a time: report a previous file as superseded, close a streamed-PCM
+    // session and (half-duplex, as spkr_pcm_begin) a live mic.pcm capture before opening I2S.
+    speakerFileAbort("superseded");
+    if (spkrPcmActive) {
+        audio_pcm_end();
+        spkrPcmActive = false;
+    }
+#if defined(COMPANION_HAS_MIC)
+    micPcmStop();
+#endif
     // Force sound enabled + an audible volume floor for this explicit phone-requested playback
-    // (the output gain scales with soundVolume; a muted/low saved volume yields silence).
+    // (the output gain scales with soundVolume; a muted/low saved volume yields silence). The
+    // async start captures the gain before returning, so the saved values are restored at once.
     int prevSound = bruceConfig.soundEnabled;
     int prevVol = bruceConfig.soundVolume;
     bruceConfig.soundEnabled = 1;
     if (bruceConfig.soundVolume < 60) bruceConfig.soundVolume = 80; // audible floor
-    bool ok = playAudioFile(fs, path, PLAYBACK_BLOCKING);           // decode -> I2S (blocks until done)
+    bool ok = playAudioFile(fs, path, PLAYBACK_ASYNC); // opens + begins the decoder, then returns
     bruceConfig.soundEnabled = prevSound;
     bruceConfig.soundVolume = prevVol;
-    String out = ok ? ("played " + path) : ("playback failed: " + path);
-    companionAckMsg(id, ok, out.c_str());
+    if (!ok) {
+        String out = "playback failed: " + path;
+        companionAckMsg(id, false, out.c_str());
+        return;
+    }
+    spkFileActive = true;
+    spkFilePlay = id;
+    spkFilePath = path;
+    spkFileStartMs = millis();
+    spkFileLastPoll = spkFileStartMs;
+    JsonDocument o;
+    beginEnvelope(o, MSG_ACK, id);
+    JsonObject d = o["d"].to<JsonObject>();
+    d["ok"] = true;
+    d["out"] = "playing " + path;
+    d["play"] = id;
+    sendEnvelope(o);
 }
 
 // --- Streamed raw-PCM speaker playback (spkr_pcm_begin / spkr_pcm_data / spkr_pcm_stop). ---
 //     Modeled on the fm_audio_* path but routed to the onboard I2S speaker via audio.cpp's
 //     audio_pcm_* helpers (AudioOutputI2S, auto-allocated I2S peripheral - distinct from the
 //     FM path on I2S_NUM_1 and the mic on I2S_NUM_0). S16LE mono, 16 kHz.
-static bool spkrPcmActive = false;
 
 static void runSpkrPcmBegin(uint32_t sr, uint32_t id) {
     if (sr == 0) sr = 16000;
+    speakerFileAbort("superseded"); // a speaker_play file would contend for the I2S output
     // Mic and speaker are half-duplex: if a mic.pcm capture is live, stop it so the onboard
     // audio peripherals do not contend while we play back.
 #if defined(COMPANION_HAS_MIC)
@@ -517,6 +626,30 @@ static void runSpkrPcmStop(uint32_t id) {
 }
 #endif // HAS_NS4168_SPKR
 
+// Companion loop hook: report the end of a speaker_play file once the player task is gone.
+// Polled every SPK_FILE_POLL_MS; the decoding itself runs in the player task, not here.
+void speakerPlayService() {
+#if defined(HAS_NS4168_SPKR)
+    if (!spkFileActive) return;
+    uint32_t now = millis();
+    if (now - spkFileLastPoll < SPK_FILE_POLL_MS) return;
+    spkFileLastPoll = now;
+    if (isAudioPlaybackTaskActive()) return;
+    // The decoder ended on its own. ESP8266Audio does not distinguish end of stream from a
+    // decoder giving up on corrupt data, so both are reported as "completed".
+    speakerFileEnd("completed", nullptr, true);
+#endif
+}
+
+// Stop a speaker_play file before another user of the audio peripherals (e.g. the mic) starts.
+void speakerPlayRelease(const char *reason) {
+#if defined(HAS_NS4168_SPKR)
+    speakerFileAbort(reason);
+#else
+    (void)reason;
+#endif
+}
+
 // --- Onboard microphone record command ----------------------------------------------------
 //   mic_record <secs 1..30> : record the mic to a WAV on SD. Reuses mic.cpp's
 //   mic_record_wav_to_path() (self-managed I2S + WAV header writer). Guarded by the mic macro.
@@ -547,6 +680,8 @@ static void runMicRecord(const String &args, uint32_t id) {
 
 void stopCompanionAudio() {
 #if defined(HAS_NS4168_SPKR)
+    // Leaving companion mode: release the decoder/file/I2S. No EVENT, the link may be gone.
+    speakerFileAbort("link", false);
     if (spkrPcmActive) {
         audio_pcm_end(); // close the streamed-PCM speaker if it was left open
         spkrPcmActive = false;
@@ -637,6 +772,7 @@ bool dispatchAudioCommand(const CommandRequest &request) {
         if (cmdStr.startsWith("speaker_rtttl ")) {
 #if defined(HAS_NS4168_SPKR)
             String rt = cmdStr.substring(14);
+            speakerFileAbort("superseded");
             int prevSound = bruceConfig.soundEnabled;
             int prevVol = bruceConfig.soundVolume;
             bruceConfig.soundEnabled = 1;
@@ -656,6 +792,7 @@ bool dispatchAudioCommand(const CommandRequest &request) {
         if (cmdStr.startsWith("speaker_song ")) {
 #if defined(HAS_NS4168_SPKR)
             String rt = cmdStr.substring(13);
+            speakerFileAbort("superseded"); // the player replaces the file with the song
             bruceConfig.soundEnabled = 1; // ensure audible; user volume kept
             bool okm = playAudioRTTTLString(rt, PLAYBACK_ASYNC);
             companionAckMsg(id, okm, okm ? "playing" : "song failed");
@@ -665,10 +802,12 @@ bool dispatchAudioCommand(const CommandRequest &request) {
             break;
         }
 
-        //   speaker_stop : stop any background playback (song).
+        //   speaker_stop : stop any background playback (song or speaker_play file). A file
+        //   reports its EVENT state "stopped" (reason "stop") before this ACK.
         if (cmdStr == "speaker_stop") {
 #if defined(HAS_NS4168_SPKR)
-            stopAudioPlayback();
+            if (spkFileActive) speakerFileAbort("stop");
+            else stopAudioPlayback();
             companionAckMsg(id, true, "stopped");
 #else
             companionAckMsg(id, false, "no speaker");
@@ -703,6 +842,7 @@ bool dispatchAudioCommand(const CommandRequest &request) {
                 sendErr(id, 400, "usage: speaker_dtmf <0-9,*,#,A-D> [ms]");
                 break;
             }
+            speakerFileAbort("superseded");
             int prevSound = bruceConfig.soundEnabled;
             int prevVol = bruceConfig.soundVolume;
             bruceConfig.soundEnabled = 1;
@@ -773,6 +913,7 @@ bool dispatchAudioCommand(const CommandRequest &request) {
         //   mic_record <secs 1..30>
         if (cmdStr == "mic_record" || cmdStr.startsWith("mic_record ")) {
 #if defined(COMPANION_HAS_MIC)
+            speakerPlayRelease("superseded"); // mic and speaker share the I2S peripherals
             runMicRecord(cmdStr.length() > 11 ? cmdStr.substring(11) : String(""), id);
 #else
             companionAckMsg(id, false, "no microphone on this board");
@@ -782,6 +923,32 @@ bool dispatchAudioCommand(const CommandRequest &request) {
         return false;
     } while (false);
     return true;
+}
+
+// Recovery diagnostics (`diag`): read the existing drop counters, never a copy of them.
+bool fmAudioLostSamples(uint32_t &lost, bool &active) {
+#if defined(COMPANION_HAS_FM_AUDIO)
+    lost = fmLostSamples; // since the last fm_audio_begin, same value as fm_audio_data `lost`
+    active = fmAudioActive;
+    return true;
+#else
+    (void)lost;
+    (void)active;
+    return false;
+#endif
+}
+
+bool micPcmDroppedSamples(uint32_t &dropped) {
+#if defined(COMPANION_HAS_MIC)
+    uint32_t total = 0;
+    // Same figure as the mic.pcm EVENT `dropped`: driver overruns since the current SUB.
+    if (!subPcm || !micPcmOpen || !mic_stream_dropped_samples(&total)) return false;
+    dropped = total - micPcmDropBase;
+    return true;
+#else
+    (void)dropped;
+    return false;
+#endif
 }
 
 } // namespace companion

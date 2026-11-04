@@ -3,9 +3,9 @@ package app.brucia.features
 /**
  * The built-in Brucia feature catalog (the single source for the home grid, search and
  * capability gating in [app.brucia.MainActivity]). Titles, descriptions, category/tool order, tab
- * ids and caps are preserved exactly; a null cap keeps its existing meaning (always
- * available). The Wi-Fi gate (cap = "wifi") on the dictionary/WPA tools is kept;
- * operation-level gating is a later migration.
+ * ids and ordering are stable. A null cap permits opening a screen; it does not
+ * authorize device operations. Mixed offline/device tools gate their actual commands
+ * and streams, so a missing radio/microphone does not hide local analysis or playback.
  *
  * Each feature carries a FROZEN stable string id, derived deterministically from the
  * category and tool (reverse-DNS: "org.brucia.<categorySlug>.<toolSlug>"). These ids
@@ -21,7 +21,7 @@ object BuiltinFeatures {
         listOf(
             FeatureCategory("Wi-Fi", "Wi-Fi", listOf(
                 FeatureDescriptor("org.brucia.wifi.wardrive", 0, "Wardrive", "Scan and map nearby access points", "wifi"),
-                FeatureDescriptor("org.brucia.wifi.crack", 7, "Crack", "Crack captured handshakes and PMKIDs", "wifi"),
+                FeatureDescriptor("org.brucia.wifi.crack", 7, "Crack", "Crack captured handshakes and PMKIDs"),
                 FeatureDescriptor("org.brucia.wifi.sniffer", 11, "Sniffer", "Sniff nearby Wi-Fi client stations", "wifi"),
                 FeatureDescriptor("org.brucia.wifi.probes", 15, "Probes", "Profile client probe requests - who seeks which networks", "wifi"),
                 FeatureDescriptor("org.brucia.wifi.monitor", 17, "Monitor", "Monitor your own network - live packet list and pcap export", "wifi"),
@@ -77,8 +77,8 @@ object BuiltinFeatures {
             FeatureCategory("Audio", "Audio", listOf(
                 FeatureDescriptor("org.brucia.audio.audio", 25, "Audio", "All mic visualizations live in parallel - spectrum, waterfall, scope, SSTV", "mic"),
                 FeatureDescriptor("org.brucia.audio.oscilloscope", 29, "Oscilloscope", "2D time-domain scope plus XY / dual-mic vectorscope", "mic"),
-                FeatureDescriptor("org.brucia.audio.sstv", 27, "SSTV", "Decode (live cascade, all modes) and transmit slow-scan TV", "mic"),
-                FeatureDescriptor("org.brucia.audio.tone", 28, "Tone", "Detect tones / DTMF and generate them", "mic"),
+                FeatureDescriptor("org.brucia.audio.sstv", 27, "SSTV", "Decode (live cascade, all modes) and transmit slow-scan TV"),
+                FeatureDescriptor("org.brucia.audio.tone", 28, "Tone", "Detect tones / DTMF and generate them"),
             )),
             FeatureCategory("Tools", "Tools", listOf(
                 FeatureDescriptor("org.brucia.tools.report", 21, "Report", "Session report and heuristic insights from everything captured"),

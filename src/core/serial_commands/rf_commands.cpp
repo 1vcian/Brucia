@@ -243,7 +243,20 @@ uint32_t rfScanCallback(cmd *c) {
     startFreq /= 1000000;
     stopFreq /= 1000000;
 
-    rf_scan(startFreq, stopFreq, 10 * 1000); // 10s timeout
+    // rf_scan() shows a blocking on-screen error for non-CC1101 modules; report it here instead.
+    if (bruceConfigPins.rfModule != CC1101_SPI_MODULE) {
+        serialDevice->println("rf scan requires a CC1101 module");
+        return false;
+    }
+    bool started = false;
+    String found = rf_scan(startFreq, stopFreq, 10 * 1000, &started); // bounded: 10000 steps, Esc stops
+    if (!started) {
+        serialDevice->println("RF receiver init failed");
+        return false;
+    }
+    if (found.endsWith(",")) found.remove(found.length() - 1);
+    if (found.length()) serialDevice->println("Signals found (MHz): " + found);
+    else serialDevice->println("No signal found");
     return true;
 }
 

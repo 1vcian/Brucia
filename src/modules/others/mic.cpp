@@ -1143,6 +1143,16 @@ cleanup:
 static i2s_chan_handle_t mic_stream_chan = nullptr;
 static bool mic_stream_gpio_input = false;
 static float mic_stream_gain = 1.0f;
+// RX overrun accounting. When the reader falls behind, the driver drops the oldest filled DMA
+// buffer and reports its byte size through on_recv_q_ovf (ISR context). Single writer (the ISR);
+// aligned 32-bit reads from the task are atomic on ESP32 targets.
+static volatile uint32_t mic_stream_dropped_bytes = 0;
+static bool mic_stream_drop_tracked = false;
+
+static bool IRAM_ATTR mic_stream_on_rx_overflow(i2s_chan_handle_t, i2s_event_data_t *event, void *) {
+    if (event) mic_stream_dropped_bytes = mic_stream_dropped_bytes + (uint32_t)event->size;
+    return false;
+}
 
 bool mic_stream_begin(uint32_t sampleRate, float gain) {
     if (mic_stream_chan) return true; // already running
@@ -1250,6 +1260,13 @@ bool mic_stream_begin(uint32_t sampleRate, float gain) {
 #endif
     if (err != ESP_OK) goto fail;
 
+    mic_stream_dropped_bytes = 0;
+    {
+        i2s_event_callbacks_t cbs = {};
+        cbs.on_recv_q_ovf = mic_stream_on_rx_overflow;
+        mic_stream_drop_tracked = i2s_channel_register_event_callback(mic_stream_chan, &cbs, NULL) == ESP_OK;
+    }
+
     err = i2s_channel_enable(mic_stream_chan);
     if (err != ESP_OK) goto fail;
 
@@ -1282,8 +1299,15 @@ int mic_stream_read(int16_t *out, int maxSamples) {
     return n;
 }
 
+bool mic_stream_dropped_samples(uint32_t *out) {
+    if (!out || !mic_stream_chan || !mic_stream_drop_tracked) return false;
+    *out = mic_stream_dropped_bytes / sizeof(int16_t); // same unit as mic_stream_read()
+    return true;
+}
+
 void mic_stream_end() {
     if (!mic_stream_chan) return;
+    mic_stream_drop_tracked = false;
     i2s_channel_disable(mic_stream_chan);
     i2s_del_channel(mic_stream_chan);
     mic_stream_chan = nullptr;
@@ -1336,4 +1360,8 @@ int mic_stream_read(int16_t *out, int maxSamples) {
     return 0;
 }
 void mic_stream_end() {}
+bool mic_stream_dropped_samples(uint32_t *out) {
+    (void)out;
+    return false;
+}
 #endif

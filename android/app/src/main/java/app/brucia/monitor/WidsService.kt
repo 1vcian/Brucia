@@ -4,6 +4,7 @@ import app.brucia.session.CommandRunner
 import app.brucia.wardrive.WidsEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,10 +51,15 @@ class WidsService(
         synchronized(lock) {
             if (!isConnected()) { _status.value = NOT_CONNECTED; return }
             if (_active.value) return
+            if (!scope.isActive) { _status.value = STOPPED; return }
+            if (windowSecs !in 1..120 || threshold < 1) {
+                _status.value = "Window must be 1–120 seconds and threshold positive."
+                return
+            }
             _active.value = true
             _events.value = emptyList()
             _status.value = windowStatus(1, windowSecs)
-            job = scope.launch {
+            val next = scope.launch(start = CoroutineStart.LAZY) {
                 val myJob = coroutineContext[Job]
                 var windows = 0
                 try {
@@ -87,15 +93,22 @@ class WidsService(
                     }
                 } finally {
                     // Natural end = link closed; stop() cancels and is guarded out here, keeping its own STOPPED.
-                    finish(myJob, LINK_CLOSED)
+                    finish(myJob, if (isActive) LINK_CLOSED else STOPPED)
                 }
             }
+            job = next
+            next.invokeOnCompletion { finish(next, STOPPED) }
+            next.start()
         }
     }
 
     /** Stop the monitor; late replies from the superseded run are ignored. */
     fun stop() = synchronized(lock) {
-        job?.cancel(); job = null; _active.value = false; _status.value = STOPPED
+        val previous = job
+        job = null
+        previous?.cancel()
+        _active.value = false
+        _status.value = STOPPED
     }
 
     /** Clear the logged events. */

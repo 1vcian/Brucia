@@ -15,6 +15,30 @@ import java.util.concurrent.CopyOnWriteArrayList
 /** Reuses [GateRunner] and [until] from DeviceOperationTest. Non-sticky runner so stop() (which
  *  cancels the loop) frees any pending await and runBlocking does not hang. */
 class WidsServiceTest {
+    @Test(timeout = 5000) fun cancelledParentAndImmediateClosedLinkDoNotLeaveMonitorActive() {
+        for (cancelled in listOf(true, false)) {
+            val parent = Job().apply { if (cancelled) cancel() }
+            var calls = 0
+            val svc = WidsService(CoroutineScope(parent + kotlinx.coroutines.Dispatchers.Unconfined),
+                CommandRunner { _, _ -> calls++; true to "" }, { true }, { false })
+            svc.start()
+            assertFalse(svc.active.value)
+            assertEquals(if (cancelled) WidsService.STOPPED else WidsService.LINK_CLOSED, svc.status.value)
+            assertEquals(0, calls)
+            parent.cancel()
+        }
+    }
+
+    @Test(timeout = 5000) fun invalidWindowOrThresholdDoesNotSendOrWait() = runBlocking {
+        val svc = svc()
+        for ((seconds, threshold) in listOf(Int.MIN_VALUE to 1, 0 to 1, 121 to 1, Int.MAX_VALUE to 1, 15 to 0)) {
+            svc.start(seconds, threshold)
+            assertFalse(svc.active.value)
+            assertTrue(svc.status.value.contains("Window must"))
+        }
+        assertTrue(runner.calls.isEmpty())
+    }
+
     private val runner = GateRunner()
     @Volatile private var connected = true
     @Volatile private var linkOpen = true

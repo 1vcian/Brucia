@@ -31,6 +31,7 @@ public:
 SHIM = r'''
 #include "Arduino.h"
 #include "codec.h"
+#include "storage_upload.h"
 #include <cassert>
 #include <cstring>
 #include <cstdlib>
@@ -57,19 +58,24 @@ struct File {
     FS *fs=nullptr;std::string path;size_t offset=0;bool valid=false;
     explicit operator bool()const{return valid;}
     size_t size(); bool isDirectory();int read(uint8_t*,size_t);size_t write(const uint8_t*,size_t);
-    void close(){}
+    void close(){} void flush(){}
 };
 struct FS {
     std::map<std::string,std::string> files;
     bool readFail=false,writeFail=false,directory=false;
     bool growOnRead=false;uint32_t readDelay=0;
+    bool exists(const String &p){return files.count(p);}
+    bool rename(const String &a,const String &b){if(!files.count(a)||files.count(b))return false;files[b]=files[a];files.erase(a);return true;}
+    bool remove(const String &p){return files.erase(p)>0;}
     File open(const String&p,int mode){
         if(mode==FILE_READ && !files.count(p))return {};
         if(mode==FILE_WRITE)files[p]="";
         if(mode==FILE_APPEND)files.try_emplace(p,"");
         return {this,p,0,true};
     }
-} storage;
+} storage, littleStorage;
+FS &SD=storage; FS &LittleFS=littleStorage; bool sdcardMounted=true;
+void delay(uint32_t n){nowMs+=n;}
 size_t File::size(){return fs->files[path].size();}
 bool File::isDirectory(){return fs->directory;}
 int File::read(uint8_t*b,size_t n){nowMs+=fs->readDelay;if(fs->readFail)return 0;
@@ -118,6 +124,48 @@ int main(){
     storage.writeFail=true;command("fs_write /failed YWJj");error();storage.writeFail=false;
     storageAvailable=false;command("fs_read /long");error();storageAvailable=true;
     command("fs_write no_separator");error();
+    // Exercise the real upload dispatcher/FS adapter, not only the pure transaction engine.
+    startCompanionStorage();
+    command("fs_upload_begin 0123456789abcdef0123456789abcdef 3 891568578 /transaction.txt");ack();
+    assert(sent.back()["d"]["token"].text=="0123456789abcdef0123456789abcdef");
+    command("fs_write /hello world.txt ZA==");error();assert(storage.files["/hello world.txt"]=="abc");
+    command("fs_write_append /hello world.txt ZA==");error();assert(storage.files["/hello world.txt"]=="abc");
+    command("fs_upload_chunk 0123456789abcdef0123456789abcdef 0 YWJj");ack();
+    assert(sent.back()["d"]["size"].number==3);
+    command("fs_upload_commit 0123456789abcdef0123456789abcdef");ack();
+    assert(sent.back()["d"]["committed"].number==1 && sent.back()["d"]["crc32"].number==891568578);
+    assert(storage.files["/transaction.txt"]=="abc");
+    command("fs_upload_begin 0123456789abcdef0123456789abcdef 0 0 /transaction.txt");ack();
+    command("fs_upload_commit 0123456789abcdef0123456789abcdef");ack();
+    assert(storage.files["/transaction.txt"].empty());
+    command("fs_upload_begin 0123456789abcdef0123456789abcdef 3 891568578 /transaction.txt");ack();
+    command("fs_upload_chunk 0123456789abcdef0123456789abcdef 0 ?bad");error();
+    command("fs_upload_chunk 0123456789abcdef0123456789abcdef -1 YWJj");error();
+    command("fs_upload_abort 0123456789abcdef0123456789abcdef");ack();
+    assert(storage.files["/transaction.txt"].empty());
+    command("fs_upload_begin short 0 0 /transaction.txt");error();
+    command("fs_upload_begin 0123456789abcdef0123456789abcdef 4294967296 0 /transaction.txt");error();
+    command("fs_upload_begin 0123456789abcdef0123456789abcdef 0 0 /../transaction.txt");error();
+    for (const char *path : {"/.brucia-upload.part", "/.BRUCIA-UPLOAD.bak", "/a/../.brucia-upload.pending", "/.brucia-upload.part.", "/a\\..\\.brucia-upload.part"}) {
+        auto before=storage.files;
+        command((std::string("fs_write ")+path+" YWJj").c_str());error();
+        command((std::string("fs_write_append ")+path+" YWJj").c_str());error();
+        assert(storage.files==before);
+    }
+    // Idle time starts after slow journal IO, not before begin/recovery ran.
+    storage.readDelay=120001;
+    command("fs_upload_begin 0123456789abcdef0123456789abcdef 3 891568578 /transaction.txt");ack();
+    storage.readDelay=0;serviceCompanionStorage();
+    // A changed storage selection must not redirect the existing upload to LittleFS.
+    sdcardMounted=false;
+    command("fs_upload_chunk 0123456789abcdef0123456789abcdef 0 YWJj");ack();
+    command("fs_upload_commit 0123456789abcdef0123456789abcdef");ack();
+    assert(storage.files["/transaction.txt"]=="abc");assert(littleStorage.files.empty());
+    command("fs_upload_begin 0123456789abcdef0123456789abcdef 3 891568578 /internal.txt");ack();
+    nowMs+=120000;serviceCompanionStorage();
+    command("fs_upload_commit 0123456789abcdef0123456789abcdef");error();
+    assert(littleStorage.files.empty());sdcardMounted=true;
+    stopCompanionStorage();
     assert(!dispatchStorageCommand({String("other"),123}));
     std::cout<<"Firmware storage PASS (native fake FS/JSON, real handlers + codec)\n";
 }
@@ -135,7 +183,7 @@ def main():
         subprocess.run([
             os.environ.get("CXX", "c++"), "-std=c++17", "-fsanitize=undefined", "-fno-sanitize-recover=undefined",
             "-I", str(tmp), "-I", str(ROOT / "src/companion"), str(tmp / "storage.cpp"),
-            str(ROOT / "src/companion/codec.cpp"), "-o", str(exe),
+            str(ROOT / "src/companion/codec.cpp"), str(ROOT / "src/companion/storage_upload.cpp"), "-o", str(exe),
         ], check=True)
         subprocess.run([str(exe)], check=True)
 

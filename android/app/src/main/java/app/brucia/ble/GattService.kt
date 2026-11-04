@@ -1,13 +1,12 @@
 package app.brucia.ble
 
+import app.brucia.session.CommandTasks
 import app.brucia.session.CommandRunner
 import app.brucia.session.DeviceOperation
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
 /**
  * GATT exploration control (ble_gatt_connect / ble_gatt_read): the connect runs on one
@@ -27,6 +26,7 @@ class GattService(
     private val isConnected: () -> Boolean,
     private val onReset: () -> Unit,
 ) {
+    private val readTasks = CommandTasks(scope)
     private val op = DeviceOperation(scope, runner, isConnected, TIMEOUT_MS)
     val status: StateFlow<String> = op.status
     /** True only while a connect awaits its reply. */
@@ -68,16 +68,9 @@ class GattService(
             _reads.value = _reads.value + (uuid to "reading...")
             readGen
         }
-        scope.launch {
-            val (ok, out) = try {
-                runner.run("ble_gatt_read $mac $uuid", TIMEOUT_MS)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                false to (e.message ?: "")
-            }
+        readTasks.run(runner, "ble_gatt_read $mac $uuid", TIMEOUT_MS) { ok, out ->
             synchronized(readLock) {
-                if (token != readGen) return@launch
+                if (token != readGen) return@run
                 val text = if (ok) out.ifBlank { "(empty)" } else "read failed: ${out.ifBlank { "error" }}"
                 _reads.value = _reads.value + (uuid to text)
             }
@@ -86,6 +79,7 @@ class GattService(
 
     private fun resetReads() = synchronized(readLock) {
         readGen++
+        readTasks.cancel()
         _reads.value = emptyMap()
     }
 

@@ -16,6 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * complete through the same ERR path as firmware errors, never as exceptions.
  * [preflight] may throw to reject a command before it is written (e.g. missing caps).
  * [onCallbackError] observes a callback that threw during [close]; the others still run.
+ * Await timeouts and ACK/ERR replies with no pending request are counted in the client's
+ * [app.brucia.protocol.LinkCounters] (Diagnostics).
  */
 class CommandSession(
     private val client: CompanionClient,
@@ -37,13 +39,27 @@ class CommandSession(
     /** Send [cmd] and suspend until its reply; (false, msg) on timeout or local failure. */
     suspend fun await(cmd: String, timeoutMs: Long): Pair<Boolean, String> {
         val id = client.nextId()
-        return awaitReply(pending, id, timeoutMs, NO_RESPONSE) { transmit(cmd, id) }
+        return awaitReply(pending, id, timeoutMs, NO_RESPONSE, client.counters::noteTimeout) { transmit(cmd, id) }
+    }
+
+    /** CMD variants with fields in d{} (e.g. speaker PCM sr/pcm), with identical reply ownership. */
+    suspend fun awaitFields(cmd: String, fields: JSONObject, timeoutMs: Long): Pair<Boolean, String> {
+        val body = JSONObject(fields.toString()).put("cmd", cmd)
+        val id = client.nextId()
+        return awaitReply(pending, id, timeoutMs, NO_RESPONSE, client.counters::noteTimeout) {
+            write(id, "Unable to send command") {
+                preflight(cmd)
+                client.cmdFields(cmd, body, id)
+            }
+        }
     }
 
     /** Like [await] but yields the full reply data object ({"msg"} on failure). */
     suspend fun awaitJson(cmd: String, timeoutMs: Long): Pair<Boolean, JSONObject?> {
         val id = client.nextId()
-        return awaitReply(pendingJson, id, timeoutMs, JSONObject().put("msg", NO_RESPONSE)) { transmit(cmd, id) }
+        return awaitReply(pendingJson, id, timeoutMs, JSONObject().put("msg", NO_RESPONSE), client.counters::noteTimeout) {
+            transmit(cmd, id)
+        }
     }
 
     /** Register a non-suspending reply callback for [id]; pair with [transmit] and [release]. */
@@ -75,8 +91,12 @@ class CommandSession(
     }
 
     /** Resolve only the command named by an ACK/ERR; returns its output text. Ignored after [close]. */
-    fun route(message: JSONObject): String =
-        if (closed.get()) "" else routeCommandReply(message, pending, pendingJson)
+    fun route(message: JSONObject): String {
+        if (closed.get()) return ""
+        val id = message.optInt("id", -1)
+        if (!pending.containsKey(id) && !pendingJson.containsKey(id)) client.counters.noteUnmatchedReply()
+        return routeCommandReply(message, pending, pendingJson)
+    }
 
     /** Idempotent: reject new sends, then fail every pending command once with [reason]. */
     fun close(reason: String = "Disconnected") {

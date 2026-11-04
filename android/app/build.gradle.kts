@@ -33,6 +33,7 @@ android {
         // lower codes even when development version names change.
         versionCode = 1000000 + (vparts.getOrElse(0) { 0 }) * 10000 + (vparts.getOrElse(1) { 0 }) * 100 + (vparts.getOrElse(2) { 0 })
         versionName = bruciaVersion
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     if (hasKeystore) {
@@ -99,6 +100,11 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    // Instrumentation tests (emulator/device): ConnectionService lifecycle, Activity recreation.
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 
     // Room persistence
     implementation("androidx.room:room-runtime:2.6.1")

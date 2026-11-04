@@ -20,7 +20,10 @@ namespace companion {
 static QueueHandle_t rfQueue = nullptr;
 static rmt_channel_handle_t rfRxCh = nullptr;
 static bool subRf = false;
-static rmt_symbol_word_t rfItem[64];
+static bool rfArmed = false;     // a receive job is pending on rfRxCh
+static uint32_t rfArmRetryAt = 0; // millis() of the last failed re-arm attempt
+static const size_t RF_RAW_MAX_SYMBOLS = 64;
+static rmt_symbol_word_t rfItem[RF_RAW_MAX_SYMBOLS];
 static const float SUBGHZ_FREQ_MHZ = 433.92f;
 
 static bool
@@ -31,31 +34,27 @@ companion_rf_rx_done(rmt_channel_t *channel, const rmt_rx_done_event_data_t *eda
     return high_task_wakeup == pdTRUE;
 }
 
-void subghzStart() {
-    if (subRf) return;
-    initRfModule("rx", SUBGHZ_FREQ_MHZ);
-    rfRxCh = setup_rf_rx();
-    if (rfRxCh == nullptr) {
-        deinitRfModule();
-        return;
-    }
-    rfQueue = xQueueCreate(4, sizeof(rmt_rx_done_event_data_t));
-    rmt_rx_event_callbacks_t cbs = {};
-    cbs.on_recv_done = companion_rf_rx_done;
-    rmt_rx_register_event_callbacks(rfRxCh, &cbs, rfQueue);
-    rmt_enable(rfRxCh);
+static bool rfRawArm() {
     rmt_receive_config_t cfg = {};
     cfg.signal_range_min_ns = 3000;
     cfg.signal_range_max_ns = 12000000;
-    rmt_receive(rfRxCh, rfItem, sizeof(rfItem), &cfg);
-    subRf = true;
+    rfArmed = rmt_receive(rfRxCh, rfItem, sizeof(rfItem), &cfg) == ESP_OK;
+    return rfArmed;
 }
 
-void subghzStop() {
-    if (!subRf) return;
-    subRf = false;
+// setup_rf_rx() (re)initializes the module at bruceConfigPins.rfFreq (which subghz_config and the
+// jammer also update), so that, not SUBGHZ_FREQ_MHZ, is the frequency the receiver is tuned to.
+// setMHZ() falls back to 433.92 MHz for out-of-band values; mirror that here.
+static float rfRawTunedMHz() {
+    float f = bruceConfigPins.rfFreq;
+    if (f > 928 || f < 280) f = SUBGHZ_FREQ_MHZ;
+    return f;
+}
+
+static void rfRawRelease() {
+    rfArmed = false;
     if (rfRxCh) {
-        rmt_disable(rfRxCh);
+        rmt_disable(rfRxCh); // harmless error when the channel was never enabled
         rmt_del_channel(rfRxCh); // release the channel; the S3 has only ~4 (was leaking -> reboot)
         rfRxCh = nullptr;
     }
@@ -66,10 +65,44 @@ void subghzStop() {
     deinitRfModule();
 }
 
+// Returns false (with everything released) when the radio or the RMT receiver cannot be started,
+// so the SUB handler can answer ERR instead of acknowledging a stream that will never deliver.
+bool subghzStart() {
+    if (subRf) return true;
+    if (!initRfModule("rx", SUBGHZ_FREQ_MHZ)) return false; // e.g. CC1101 not answering on SPI
+    rfRxCh = setup_rf_rx();
+    if (rfRxCh == nullptr) {
+        deinitRfModule();
+        return false;
+    }
+    rfQueue = xQueueCreate(4, sizeof(rmt_rx_done_event_data_t));
+    rmt_rx_event_callbacks_t cbs = {};
+    cbs.on_recv_done = companion_rf_rx_done;
+    if (rfQueue == nullptr || rmt_rx_register_event_callbacks(rfRxCh, &cbs, rfQueue) != ESP_OK ||
+        rmt_enable(rfRxCh) != ESP_OK || !rfRawArm()) {
+        rfRawRelease();
+        return false;
+    }
+    subRf = true;
+    return true;
+}
+
+void subghzStop() {
+    if (!subRf) return;
+    subRf = false;
+    rfRawRelease();
+}
+
 void subghzService() {
     if (!subRf || rfQueue == nullptr) return;
+    // A failed re-arm used to end the stream silently; retry it (throttled: the driver logs each failure).
+    if (!rfArmed) {
+        if (millis() - rfArmRetryAt >= 500 && !rfRawArm()) rfArmRetryAt = millis();
+        return;
+    }
     rmt_rx_done_event_data_t rx;
     if (xQueueReceive(rfQueue, &rx, 0) != pdPASS) return;
+    rfArmed = false;
     size_t n = rx.num_symbols;
     if (n >= 5) {
         JsonDocument out;
@@ -77,7 +110,16 @@ void subghzService() {
         JsonObject d = out["d"].to<JsonObject>();
         d["ev"] = "subghz.raw";
         JsonObject data = d["data"].to<JsonObject>();
-        data["freq"] = (uint32_t)(SUBGHZ_FREQ_MHZ * 1000000.0f);
+        // Hz, rounded to the nearest kHz: a float MHz * 1e6 product reports artifacts such as
+        // 868349952 for 868.35 MHz (the CC1101 synthesizer step is ~397 Hz anyway).
+        data["freq"] = (uint32_t)lroundf(rfRawTunedMHz() * 1000.0f) * 1000u;
+        // Completeness metadata (additive; absent from older firmware = unknown). The IDF 5.5 RMT
+        // driver copies at most the buffer size and silently drops the rest (no overflow flag
+        // without en_partial_rx), so symbols < max_symbols rules out a buffer cut, while
+        // symbols == max_symbols leaves completeness unknown. Neither proves loss or completeness
+        // of the over-the-air burst.
+        data["symbols"] = (uint32_t)n;
+        data["max_symbols"] = (uint32_t)RF_RAW_MAX_SYMBOLS;
         JsonArray t = data["timings"].to<JsonArray>();
         for (size_t i = 0; i < n; i++) {
             if (rx.received_symbols[i].duration0) t.add(rx.received_symbols[i].duration0);
@@ -85,15 +127,14 @@ void subghzService() {
         }
         sendEnvelope(out);
     }
-    rmt_receive_config_t cfg = {};
-    cfg.signal_range_min_ns = 3000;
-    cfg.signal_range_max_ns = 12000000;
-    rmt_receive(rfRxCh, rfItem, sizeof(rfItem), &cfg);
+    if (!rfRawArm()) rfArmRetryAt = millis();
 }
 
 // --- sub-ghz spectrum sweep (CC1101): tune the CC1101 across a frequency range reading its
 //     RSSI register per step, and stream one compact EVENT ev="subghz.spectrum" per completed
-//     sweep: data { start, step (both kHz), count, rssi:[dBm...] }. The RSSI-per-frequency read
+//     sweep: data { start, step (both kHz), count, rssi:[dBm...] }. The grid is validated and
+//     quantized to whole kHz by planSpectrumSweep() (subghz_spectrum_plan.h) before the radio is
+//     touched, so point i is tuned to exactly start + i * step kHz as reported. The RSSI-per-frequency read
 //     (setMHZ -> ELECHOUSE_cc1101.getRssi, with the T-Embed shared-SPI/TFT workaround) is reused
 //     from modules/rf/rf_waterfall.cpp::rf_waterfall_run(). Non-blocking: each service call sweeps
 //     only a small bounded chunk of steps. Shares the CC1101 with subghz.raw -> mutually exclusive.
@@ -101,39 +142,29 @@ void subghzService() {
 #ifndef TFT_MOSI
 #define TFT_MOSI -1 // boards without a defined TFT MOSI never match the shared-bus workaround
 #endif
-static const int SPEC_MAX = 128; // max frequency points per sweep (one frame holds the array)
 static const int SPEC_CHUNK = 8; // steps swept per service call (keeps each call ~1ms, non-blocking)
 static bool subSpec = false;
-static float specFStart = 300.0f; // MHz
-static float specFStep = 1.0f;    // MHz
+static uint32_t specStartKHz = 300000;
+static uint32_t specStepKHz = 1000;
 static int specCount = 0;
 static int specIdx = 0;
-static int16_t specRssi[SPEC_MAX];
+static int16_t specRssi[SPEC_MAX_POINTS];
 
-void subghzSpecStart(float fStart, float fEnd, float fStep) {
-    if (subSpec) return;
-    if (fStart <= 0) fStart = 300.0f;
-    if (fEnd <= 0) fEnd = 348.0f;
-    if (fEnd < fStart) {
-        float t = fStart;
-        fStart = fEnd;
-        fEnd = t;
+// `plan` must come from planSpectrumSweep() with maxPoints <= SPEC_MAX_POINTS. A start while the
+// sweep is already running applies the new grid (restarting the sweep) instead of ignoring it.
+bool subghzSpecStart(const SpecPlan &plan) {
+    if (plan.count < 1 || plan.count > SPEC_MAX_POINTS) return false;
+    if (!subSpec) {
+        // CC1101 not found -> stay off; the SUB handler answers ERR 503.
+        if (!initRfModule("rx", plan.startKHz / 1000.0f)) return false;
+        ELECHOUSE_cc1101.setRxBW(200);
     }
-    if (fStep < 0.01f) fStep = 1.0f;
-    int count = (int)((fEnd - fStart) / fStep) + 1;
-    if (count < 1) count = 1;
-    // Keep the point count within one frame; widen the step if the range is too fine.
-    if (count > SPEC_MAX) {
-        count = SPEC_MAX;
-        fStep = (fEnd - fStart) / (float)(count - 1 > 0 ? count - 1 : 1);
-    }
-    if (!initRfModule("rx", fStart)) return; // CC1101 not found -> stay off (caps already report it)
-    ELECHOUSE_cc1101.setRxBW(200);
-    specFStart = fStart;
-    specFStep = fStep;
-    specCount = count;
+    specStartKHz = plan.startKHz;
+    specStepKHz = plan.stepKHz;
+    specCount = plan.count;
     specIdx = 0;
     subSpec = true;
+    return true;
 }
 
 void subghzSpecStop() {
@@ -146,8 +177,7 @@ void subghzSpecService() {
     if (!subSpec) return;
     // Sweep a bounded chunk of steps this call (non-blocking).
     for (int n = 0; n < SPEC_CHUNK && specIdx < specCount; n++, specIdx++) {
-        float f = specFStart + specIdx * specFStep;
-        setMHZ(f);
+        setMHZ((float)((specStartKHz + (uint32_t)specIdx * specStepKHz) / 1000.0));
         // T-Embed shares the CC1101 SPI bus with the TFT: a dummy TFT write + extra settle time
         // keeps the bus happy (same workaround as rf_waterfall_run()).
         if (bruceConfigPins.CC1101_bus.mosi == TFT_MOSI) {
@@ -166,8 +196,8 @@ void subghzSpecService() {
         JsonObject d = out["d"].to<JsonObject>();
         d["ev"] = "subghz.spectrum";
         JsonObject data = d["data"].to<JsonObject>();
-        data["start"] = (uint32_t)(specFStart * 1000.0f); // kHz
-        data["step"] = (uint32_t)(specFStep * 1000.0f);   // kHz
+        data["start"] = specStartKHz; // kHz, exactly the tuned grid
+        data["step"] = specStepKHz;   // kHz
         data["count"] = specCount;
         JsonArray r = data["rssi"].to<JsonArray>();
         for (int i = 0; i < specCount; i++) r.add(specRssi[i]);

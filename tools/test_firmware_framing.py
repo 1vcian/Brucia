@@ -14,6 +14,8 @@ source = (ROOT / "src/companion/protocol.cpp").read_text()
 start = source.index("static uint8_t rxHeader[4];")
 end = source.index("static void writeFrame", start)
 shim = r'''
+#include "diag_core.h"
+using namespace brucia::companion;
 #include <cassert>
 #include <cstdint>
 #include <deque>
@@ -61,9 +63,15 @@ int main() {
     push(std::string(4,'\0')); assert(!readFrame(out,20));
     push(std::string("\1\x20\0\0",4)); assert(!readFrame(out,20)); // 8193
     push(frame("valid")); assert(readFrame(out,20) && out=="valid");
+    // Recovery diagnostics: each rejected length is counted once, by kind; nothing else moves.
+    const DiagLinkCounters &dc = diagLink();
+    assert(dc.rxRejected[DIAG_RX_ZERO_LEN]==1 && dc.rxRejected[DIAG_RX_OVERSIZE]==1);
+    assert(dc.rxRejected[DIAG_RX_STALE]==0 && dc.rxRejected[DIAG_RX_ALLOC_FAIL]==0);
+    const uint32_t framesBefore = dc.rxFrames;
     push(f.substr(0,2)); assert(!readFrame(out,20));
     nowMs+=2001; push(frame("after timeout"));
     assert(readFrame(out,20) && out=="after timeout");
+    assert(dc.rxRejected[DIAG_RX_STALE]==1 && dc.rxFrames==framesBefore+1);
     // A mode change discards the previous session's prefix.
     push(f.substr(0,5)); assert(!readFrame(out,20)); resetFrameReader();
     push(frame("new session")); assert(readFrame(out,20) && out=="new session");
@@ -79,6 +87,10 @@ int main() {
     nowMs += 2001;
     push(frame("expired across wrap"));
     assert(readFrame(out,20) && out=="expired across wrap");
+    // Every complete frame above counted exactly once: split loop, one/two, 8192, valid,
+    // after timeout, new session, across wrap, expired across wrap. Stale prefixes: 2.
+    assert(dc.rxFrames == (f.size()-1) + 2 + 6);
+    assert(dc.rxRejected[DIAG_RX_STALE]==2 && dc.txFrames==0);
     std::cout << "Firmware framing PASS\n";
 }
 '''
@@ -87,7 +99,8 @@ def main():
         cpp = Path(tmp) / "framing.cpp"
         exe = Path(tmp) / "framing"
         cpp.write_text(shim + source[start:end] + tests)
-        subprocess.run([os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra", str(cpp), "-o", str(exe)], check=True)
+        subprocess.run([os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra", "-I", str(ROOT / "src/companion"),
+                        str(cpp), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 
 

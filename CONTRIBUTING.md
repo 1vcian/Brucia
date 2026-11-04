@@ -45,11 +45,21 @@ A merged, flashable image is produced at
 
 ### Android app (JDK 17+; 21/23 tested)
 
+CI uses Temurin JDK 21 (LTS) with an explicitly installed SDK (platform 34,
+build-tools 34.0.0).
+
 ```sh
 cd android
 ./gradlew :app:testDebugUnitTest   # unit + Paparazzi screenshot tests
 ./gradlew :app:assembleDebug       # debug APK
 ./gradlew :app:recordPaparazziDebug  # re-record UI snapshots after a UI change
+```
+
+Check a built APK's applicationId, `VERSION`-derived versionName/versionCode,
+min/target SDK and debuggable flag with the SDK's aapt2 (CI runs the same check):
+
+```sh
+python3 tools/check_apk_identity.py --build-type release android/app/build/outputs/apk/release/app-release-unsigned.apk
 ```
 
 WebUI assets are gzip-compressed locally without a network minifier. Validate

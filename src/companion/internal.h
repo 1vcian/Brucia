@@ -7,6 +7,7 @@
 #include "command_request.h"
 #include "commands.h"
 #include "config.h"
+#include "diag.h"
 #include "infrared.h"
 #include "network.h"
 #include "nfc.h"

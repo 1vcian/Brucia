@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Themed-icon (monochrome) layer for ic_launcher_foreground: same group transform
+         (glyph inside the 66dp safe zone), outer flame path only, flattened to one fill.
+         The inner flame is left as negative space instead of a second tone, so the mark
+         still reads as a flame when tinted. Coordinates are the foreground's outer path
+         rounded to 3 decimals (max 0.0014dp off), which keeps it under lint's
+         VectorPath limit without a suppression. -->
+    <group android:scaleX="2.7" android:scaleY="2.7" android:translateX="21.6" android:translateY="21.6">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M20 15C20 19.255 17.382 21.122 15.359 21.751C15.275 21.777 15.196 21.779 15.126 21.763C14.837 21.694 14.694 21.31 14.902 21.012C15.782 19.746 16.8 17.816 16.8 16C16.8 14.05 15.156 11.747 13.872 10.326C13.579 10.002 13.067 10.216 13.051 10.654C12.998 12.103 12.769 14.042 11.783 15.562C11.624 15.806 11.287 15.826 11.106 15.598C10.798 15.208 10.49 14.727 10.182 14.346C10.016 14.142 9.716 14.139 9.525 14.32C8.778 15.027 7.733 16.129 7.733 17.5C7.733 18.43 8.094 19.405 8.5 20.189C8.702 20.579 8.397 21.041 8.018 20.959C7.978 20.951 7.937 20.936 7.896 20.914C6.113 19.979 4 18.084 4 15C4 11.854 8.31 7.495 9.956 3.377C10.216 2.727 11.016 2.422 11.573 2.846C14.944 5.414 20 10.378 20 15Z" />
+    </group>
+</vector>

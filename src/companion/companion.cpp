@@ -4,6 +4,7 @@
 #include "core/mykeyboard.h"
 #include "core/serialcmds.h"
 #include "core/settings.h"
+#include "diag_core.h"
 #include "internal.h"
 #include "modules/others/qrcode_menu.h"
 #include <WiFi.h>
@@ -80,16 +81,38 @@ void drawCompanionScreen(bool connected, bool wifi, bool ble, bool subghz) {
 // long runner would ignore an app-sent stop. Runners call this (non-blocking) poll each loop: it
 // reads one pending frame and returns true if it is a CMD "stop" or "<name>_stop", so one generic
 // "stop" from the app ends whatever is running. Safe to call at high frequency (guards on
-// Serial.available()). Non-stop frames (e.g. a stray ping) are consumed and ignored.
+// Serial.available()).
+//
+// This poll drains a frame off the wire, so it owns answering it; otherwise a concurrent command
+// would get no reply and block the app until its own timeout. To keep the link responsive during a
+// blocking op WITHOUT queueing/replaying frames:
+//   - MSG_PING  -> PONG (same payload as the main loop, incl. battery), so keepalives stay alive.
+//   - MSG_CMD that is not stop/*_stop -> ERR 409 "device busy", so the app's await fails fast and
+//     clearly (CommandSession surfaces it as a command failure) instead of hanging.
+//   - anything else (e.g. a stray ACK) -> consumed and ignored, as before.
+// Only stop/*_stop returns true.
 bool companionPollStop() {
     if (!Serial.available()) return false;
     String p;
     if (!readFrame(p, 40)) return false;
     JsonDocument a;
-    if (deserializeJson(a, p)) return false;
-    if ((a["t"] | 0) != MSG_CMD) return false;
+    if (deserializeJson(a, p)) {
+        diagNoteRxReject(DIAG_RX_BAD_JSON); // dropped as before; only counted
+        return false;
+    }
+    uint8_t t = a["t"] | 0;
+    uint32_t id = a["id"] | 0;
+    if (t == MSG_PING) {
+        sendPong(id);
+        return false;
+    }
+    if (t != MSG_CMD) return false;
     String cs(a["d"]["cmd"] | "");
-    return cs == "stop" || cs.endsWith("_stop");
+    if (cs == "stop" || cs.endsWith("_stop")) return true;
+    // A different command arrived mid-op: we cannot service it now and must not leave it unanswered.
+    diagNoteBusy();
+    sendErr(id, 409, "device busy");
+    return false;
 }
 
 static void runCompanionUSB(bool headless) {
@@ -111,7 +134,9 @@ static void runCompanionUSB(bool headless) {
     if (serialcmdsTaskHandle) vTaskSuspend(serialcmdsTaskHandle);
     while (Serial.available()) Serial.read(); // drain stale bytes
     resetFrameReader();
+    diagNoteSession();
     g_companionActive = true; // from here Serial is the framed protocol: mute module debug prints
+    startCompanionStorage();
 
     bool helloSeen = false;
     bool subWifiAp = false;        // wifi.ap stream subscription
@@ -132,6 +157,7 @@ static void runCompanionUSB(bool headless) {
     bool leaveForRemote = false;
 
     while (true) {
+        serviceCompanionStorage();
         if (leaveForRemote) break;
         if (!helloSeen) {
             if (check(EscPress)) break; // not locked yet: a single ESC leaves
@@ -175,6 +201,7 @@ static void runCompanionUSB(bool headless) {
             JsonDocument in;
             DeserializationError err = deserializeJson(in, payload);
             if (err) {
+                diagNoteRxReject(DIAG_RX_BAD_JSON);
                 sendErr(0, 400, "bad json");
             } else {
                 uint8_t t = in["t"] | 0;
@@ -207,32 +234,54 @@ static void runCompanionUSB(bool headless) {
                             sendAck(id, true);
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
                         } else if (strcmp(stream, "subghz.raw") == 0) {
+                            bool started = true;
                             if (on) {
 #if defined(COMPANION_HAS_CC1101)
                                 subghzSpecStop(); // raw + spectrum both own the CC1101
 #endif
-                                subghzStart();
+                                started = subghzStart();
                             } else {
                                 subghzStop();
                             }
-                            subGhzOn = on;
-                            sendAck(id, true);
+                            subGhzOn = on && started;
+                            // Radio/RMT init failure: the receiver is released, so report it
+                            // instead of acknowledging a stream that would never deliver.
+                            if (started) sendAck(id, true);
+                            else sendErr(id, 503, "sub-ghz receiver init failed");
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
                         } else if (strcmp(stream, "subghz.spectrum") == 0) {
 #if defined(COMPANION_HAS_CC1101)
+                            // Optional sweep window (MHz); absent fields default to 300-348 MHz,
+                            // step 1 MHz. Invalid values get ERR 400 before any stream changes.
+                            SpecPlan plan = {};
+                            const char *bad = nullptr;
                             if (on) {
-                                subghzStop(); // spectrum + raw both own the CC1101 -> exclusive
-                                // Optional sweep window (MHz); defaults to the ~300-348 MHz band.
-                                float fs = in["d"]["f_start"] | 300.0;
-                                float fe = in["d"]["f_end"] | 348.0;
-                                float st = in["d"]["step"] | 1.0;
-                                subghzSpecStart(fs, fe, st);
-                            } else {
-                                subghzSpecStop();
+                                JsonVariantConst req = in["d"];
+                                double v[3] = {300.0, 348.0, 1.0};
+                                const char *keys[3] = {"f_start", "f_end", "step"};
+                                for (int k = 0; k < 3 && !bad; k++) {
+                                    JsonVariantConst f = req[keys[k]];
+                                    if (f.isNull()) continue;
+                                    if (!f.is<double>()) bad = "f_start, f_end and step must be numbers (MHz)";
+                                    else v[k] = f.as<double>();
+                                }
+                                if (!bad) bad = planSpectrumSweep(v[0], v[1], v[2], SPEC_MAX_POINTS, plan);
                             }
-                            subGhzOn = on;
-                            sendAck(id, true);
-                            drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
+                            if (bad) {
+                                sendErr(id, 400, bad); // nothing started or stopped
+                            } else {
+                                bool started = true;
+                                if (on) {
+                                    subghzStop(); // spectrum + raw both own the CC1101 -> exclusive
+                                    started = subghzSpecStart(plan);
+                                } else {
+                                    subghzSpecStop();
+                                }
+                                subGhzOn = on && started;
+                                if (started) sendAck(id, true);
+                                else sendErr(id, 503, "CC1101 init failed");
+                                drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
+                            }
 #else
                             sendErr(id, 501, "no CC1101 on this board");
 #endif
@@ -295,6 +344,7 @@ static void runCompanionUSB(bool headless) {
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
                         } else if (strcmp(stream, "mic.spectrum") == 0) {
 #ifdef COMPANION_HAS_MIC
+                            if (on) speakerPlayRelease("superseded"); // mic shares the I2S peripherals
                             if (on) micStart();
                             else micStop();
                             sendAck(id, true);
@@ -303,6 +353,7 @@ static void runCompanionUSB(bool headless) {
 #endif
                         } else if (strcmp(stream, "mic.pcm") == 0) {
 #ifdef COMPANION_HAS_MIC
+                            if (on) speakerPlayRelease("superseded"); // mic shares the I2S peripherals
                             if (on) micPcmStart();
                             else micPcmStop();
                             sendAck(id, true);
@@ -381,6 +432,8 @@ static void runCompanionUSB(bool headless) {
 #ifdef COMPANION_HAS_FM_AUDIO
         fmAudioService();
 #endif
+        // 8) Report the end of a non-blocking speaker_play file (decoded in the player task).
+        speakerPlayService();
         // The frame reader is non-blocking; yield a full scheduler tick so idle
         // tasks and the watchdog are serviced even when no streams are active.
         vTaskDelay(1);
@@ -403,6 +456,7 @@ static void runCompanionUSB(bool headless) {
     micPcmStop(); // release the continuous mic capture if a mic.pcm sub was left running
 #endif
     stopCompanionAudio();
+    stopCompanionStorage();
     stopCompanionNetwork();
     stopCompanionBluetoothControls();
     companionRestoreOutputs(); // leaving companion mode: screen/LED back on

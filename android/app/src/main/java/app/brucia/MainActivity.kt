@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.content.pm.PackageManager
+import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.widget.Toast
@@ -49,6 +50,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.filled.ScreenShare
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,6 +75,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -100,7 +109,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.brucia.transport.PortLease
+import app.brucia.transport.UsbPermissionRequests
+import app.brucia.transport.releaseUsbPort
 import app.brucia.transport.UsbTransport
 import app.brucia.update.AppUpdater
 import app.brucia.update.EspFlasher
@@ -140,6 +153,7 @@ import app.brucia.wardrive.RssiDistance
 import app.brucia.wardrive.DeviceInfo
 import app.brucia.wardrive.DEFAULT_SPAM_COPIES
 import app.brucia.wardrive.DeviceCaps
+import app.brucia.wardrive.CapabilityEvidence
 import app.brucia.wardrive.Nrf24Device
 import app.brucia.wardrive.Nrf24MjDevice
 import app.brucia.wardrive.LoraPacket
@@ -185,9 +199,29 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
+    // USB permission requests, correlated by request id + device and bounded by a deadline. One
+    // receiver for the Activity's lifetime (the permission dialog pauses us, so not onResume/onPause).
+    private val usbPermissions = UsbPermissionRequests<(UsbPermissionRequests.Outcome) -> Unit>()
+    private val usbPermissionTimeouts = android.os.Handler(android.os.Looper.getMainLooper())
+    private val usbPermissionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            if (intent.action != ACTION_USB_PERMISSION) return
+            val id = intent.getIntExtra(EXTRA_PERMISSION_REQUEST, -1)
+            val device = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+            val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+            val result = usbPermissions.resolve(id, device?.deviceName, granted)
+            val settle = result.payload
+            if (settle == null) app.brucia.BruciaLog.d("USB", "ignored permission result ${result.outcome} for request $id")
+            else settle(result.outcome)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
+        ContextCompat.registerReceiver(
+            this, usbPermissionReceiver, IntentFilter(ACTION_USB_PERMISSION), ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         setContent {
             val vm: WardriveViewModel = viewModel()
@@ -231,6 +265,28 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
 
+    override fun onDestroy() {
+        usbPermissionTimeouts.removeCallbacksAndMessages(null)
+        try { unregisterReceiver(usbPermissionReceiver) } catch (e: Exception) { app.brucia.BruciaLog.d("USB", "unregister permission receiver: ${e.message}") }
+        // Results for these requests can no longer reach this Activity: settle them now.
+        usbPermissions.drain().forEach { it(UsbPermissionRequests.Outcome.CANCELLED) }
+        super.onDestroy()
+    }
+
+    /** Ask for USB permission on [device]; [onResult] runs once with GRANTED, DENIED, TIMED_OUT or CANCELLED. */
+    private fun requestUsbPermission(device: UsbDevice, onResult: (UsbPermissionRequests.Outcome) -> Unit) {
+        val id = usbPermissions.begin(device.deviceName, USB_PERMISSION_TIMEOUT_MS, onResult)
+        // Unique request code per request so the system never merges two pending requests.
+        val pi = PendingIntent.getBroadcast(
+            this, id, Intent(ACTION_USB_PERMISSION).setPackage(packageName).putExtra(EXTRA_PERMISSION_REQUEST, id),
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        usbPermissionTimeouts.postDelayed({
+            usbPermissions.expire(id)?.invoke(UsbPermissionRequests.Outcome.TIMED_OUT)
+        }, USB_PERMISSION_TIMEOUT_MS)
+        usbManager.requestPermission(device, pi)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -255,6 +311,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun connectUsb(vm: WardriveViewModel) {
+        if (vm.isFlashing()) { toast("Firmware update in progress"); return }
         val drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
         if (drivers.isEmpty()) {
             toast("No USB serial device found")
@@ -265,37 +322,40 @@ class MainActivity : ComponentActivity() {
             openPort(vm, driver)
             return
         }
-        val pi = PendingIntent.getBroadcast(
-            this, 0, Intent(ACTION_USB_PERMISSION).setPackage(packageName),
-            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context, intent: Intent) {
-                if (intent.action != ACTION_USB_PERMISSION) return
-                if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                    openPort(vm, driver)
-                } else {
-                    toast("USB permission denied")
-                }
-                try { unregisterReceiver(this) } catch (e: Exception) { app.brucia.BruciaLog.d("USB", "unregister permission receiver: ${e.message}") }
+        requestUsbPermission(driver.device) { outcome ->
+            when (outcome) {
+                UsbPermissionRequests.Outcome.GRANTED -> openPort(vm, driver)
+                UsbPermissionRequests.Outcome.DENIED -> toast("USB permission denied")
+                UsbPermissionRequests.Outcome.TIMED_OUT -> toast("USB permission request timed out")
+                else -> Unit
             }
         }
-        ContextCompat.registerReceiver(
-            this, receiver, IntentFilter(ACTION_USB_PERMISSION), ContextCompat.RECEIVER_NOT_EXPORTED
-        )
-        usbManager.requestPermission(driver.device, pi)
     }
 
     private fun openPort(vm: WardriveViewModel, driver: UsbSerialDriver) {
+        // The flasher owns the USB device for the whole update (including the permission wait).
+        if (vm.isFlashing()) { toast("Firmware update in progress"); return }
+        // One owner of the USB device at a time: attach auto-connect, manual Connect and the flash
+        // handoff all claim it by token; this open is refused while another owner holds it.
+        val token = vm.beginCompanionLink() ?: run { toast("USB device busy"); return }
         val connection = usbManager.openDevice(driver.device)
         if (connection == null) {
+            vm.abortCompanionLink(token)
             toast("Could not open USB device")
             return
         }
-        try {
-            vm.connect(UsbTransport(connection, driver.ports[0]))
-            toast("Connected")
+        val transport = try {
+            UsbTransport(connection, driver.ports[0]) // releases port/connection itself on failure
         } catch (e: Exception) {
+            vm.abortCompanionLink(token)
+            toast("Open failed: ${e.message}")
+            return
+        }
+        try {
+            if (vm.connect(token, transport)) toast("Connected") else toast("USB device busy")
+        } catch (e: Exception) {
+            vm.disconnect()
+            vm.abortCompanionLink(token)
             toast("Open failed: ${e.message}")
         }
     }
@@ -316,47 +376,36 @@ class MainActivity : ComponentActivity() {
             startFlash(vm, driver)
             return
         }
-        val pi = PendingIntent.getBroadcast(
-            this, 0, Intent(ACTION_USB_PERMISSION).setPackage(packageName),
-            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context, intent: Intent) {
-                if (intent.action != ACTION_USB_PERMISSION) return
-                if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                    startFlash(vm, driver)
-                } else {
-                    toast("USB permission denied")
-                }
-                try { unregisterReceiver(this) } catch (e: Exception) { app.brucia.BruciaLog.d("USB", "unregister permission receiver: ${e.message}") }
+        requestUsbPermission(driver.device) { outcome ->
+            when (outcome) {
+                UsbPermissionRequests.Outcome.GRANTED -> startFlash(vm, driver)
+                UsbPermissionRequests.Outcome.DENIED -> toast("USB permission denied")
+                UsbPermissionRequests.Outcome.TIMED_OUT -> toast("USB permission request timed out")
+                else -> Unit
             }
         }
-        ContextCompat.registerReceiver(
-            this, receiver, IntentFilter(ACTION_USB_PERMISSION), ContextCompat.RECEIVER_NOT_EXPORTED
-        )
-        usbManager.requestPermission(driver.device, pi)
     }
 
     private fun startFlash(vm: WardriveViewModel, driver: UsbSerialDriver) {
         // Verify the board BEFORE dropping companion: the safety gate must read the reported board
         // while the link is still up. (Reading it after disconnect() - which clears the device - was
         // the regression that made every flash abort with "supports only the T-Embed".)
-        // When the user explicitly picked a board image, trust their choice (skip the auto-detect
-        // gate). Otherwise require the connected board to be the T-Embed CC1101 (the default image).
-        if (vm.selectedBoard.value == null) {
+        // Auto requires a connected T-Embed. An explicit T-Embed selection also permits recovery
+        // without companion identification; flashEnteringBootloader rejects other board images.
+        if (vm.releaseUpdates.value.selectedBoard == null) {
             val board = vm.device.value?.board?.lowercase().orEmpty()
             if (!(board.contains("t-embed") && board.contains("cc1101"))) {
                 val shown = vm.device.value?.board?.takeIf { it.isNotBlank() } ?: "this board"
                 vm.flashError(
                     "In-app firmware update supports only the LilyGo T-Embed CC1101 by default. " +
-                        "For \"$shown\", pick its board image in the list below first."
+                        "For \"$shown\", use the matching image with the web flasher."
                 )
                 return
             }
         }
-        // Flashing takes over the serial line; drop companion mode so it releases the port.
-        vm.disconnect()
-        vm.flashEnteringBootloader()
+        // Flashing takes over the serial line: the VM drops companion mode, moves USB ownership and
+        // the foreground service + wake lock to this flash operation, and returns its token.
+        val token = vm.flashEnteringBootloader() ?: return
         // The T-Embed CC1101 is an ESP32-S3 with the native hardware USB-Serial-JTAG (PID 0x1001).
         // Entering the ROM download loader resets the WHOLE chip, so the USB peripheral drops and
         // RE-ENUMERATES; an already-open handle then goes stale. So we must reset FIRST (on a scratch
@@ -367,12 +416,16 @@ class MainActivity : ComponentActivity() {
             try { Thread.sleep(2000) } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "sleep after reset: ${e.message}") } // let the chip reset + ROM re-enumerate
             val romDriver = waitForEspSerial(9000)
             runOnUiThread {
-                if (romDriver == null) {
-                    vm.flashError("Device did not enter the bootloader. Unplug/replug and try again, or flash from a PC.")
+                if (isDestroyed) {
+                    vm.flashAbort(token, "Update screen closed during the bootloader handoff. Unplug/replug and try again.")
                     return@runOnUiThread
                 }
-                if (usbManager.hasPermission(romDriver.device)) openAndFlash(vm, romDriver)
-                else requestPermThenFlash(vm, romDriver)
+                if (romDriver == null) {
+                    vm.flashAbort(token, "Device did not enter the bootloader. Unplug/replug and try again, or flash from a PC.")
+                    return@runOnUiThread
+                }
+                if (usbManager.hasPermission(romDriver.device)) openAndFlash(vm, token, romDriver)
+                else requestPermThenFlash(vm, token, romDriver)
             }
         }.start()
     }
@@ -384,10 +437,15 @@ class MainActivity : ComponentActivity() {
      */
     private fun resetIntoBootloader(driver: UsbSerialDriver) {
         val c = usbManager.openDevice(driver.device) ?: return
+        val p = driver.ports.firstOrNull() ?: run {
+            try { c.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "close reset connection: ${e.message}") }
+            return
+        }
+        var opened = false
         try {
-            val p = driver.ports[0]
             try {
                 p.open(c)
+                opened = true
                 p.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
                 fun dtr(v: Boolean) = try { p.setDTR(v) } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "setDTR: ${e.message}") }
                 fun rts(v: Boolean) = try { p.setRTS(v) } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "setRTS: ${e.message}") }
@@ -396,10 +454,14 @@ class MainActivity : ComponentActivity() {
                 rts(true); dtr(false); Thread.sleep(100)    // reset, going through (1,1)
                 rts(true); Thread.sleep(100)                // re-assert RTS (host DTR-on-RTS quirk)
                 dtr(false); rts(false)                      // release
-            } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "setRTS: ${e.message}") }
-            try { p.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "setRTS: ${e.message}") }
-        } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "setRTS: ${e.message}") }
-        try { c.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "setRTS: ${e.message}") }
+            } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "reset pulse: ${e.message}") }
+        } finally {
+            releaseUsbPort(
+                opened,
+                closePort = { try { p.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "close reset port: ${e.message}") } },
+                closeConnection = { try { c.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "close reset connection: ${e.message}") } },
+            )
+        }
     }
 
     /** Poll for an ESP serial device (the re-enumerated ROM loader) for up to [timeoutMs]. */
@@ -414,41 +476,44 @@ class MainActivity : ComponentActivity() {
         return null
     }
 
-    private fun requestPermThenFlash(vm: WardriveViewModel, driver: UsbSerialDriver) {
-        val pi = PendingIntent.getBroadcast(
-            this, 0, Intent(ACTION_USB_PERMISSION).setPackage(packageName),
-            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context, intent: Intent) {
-                if (intent.action != ACTION_USB_PERMISSION) return
-                if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) openAndFlash(vm, driver)
-                else vm.flashError("USB permission denied for the bootloader device.")
-                try { unregisterReceiver(this) } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "unregister permission receiver: ${e.message}") }
+    private fun requestPermThenFlash(vm: WardriveViewModel, token: Long, driver: UsbSerialDriver) {
+        requestUsbPermission(driver.device) { outcome ->
+            when (outcome) {
+                UsbPermissionRequests.Outcome.GRANTED -> openAndFlash(vm, token, driver)
+                UsbPermissionRequests.Outcome.DENIED -> vm.flashAbort(token, "USB permission denied for the bootloader device.")
+                UsbPermissionRequests.Outcome.TIMED_OUT -> vm.flashAbort(token, "USB permission for the bootloader device timed out.")
+                UsbPermissionRequests.Outcome.CANCELLED -> vm.flashAbort(token, "Update screen closed while waiting for USB permission. Try again.")
+                else -> Unit
             }
         }
-        ContextCompat.registerReceiver(this, receiver, IntentFilter(ACTION_USB_PERMISSION), ContextCompat.RECEIVER_NOT_EXPORTED)
-        usbManager.requestPermission(driver.device, pi)
     }
 
-    private fun openAndFlash(vm: WardriveViewModel, driver: UsbSerialDriver) {
+    private fun openAndFlash(vm: WardriveViewModel, token: Long, driver: UsbSerialDriver) {
         val connection = usbManager.openDevice(driver.device)
-        if (connection == null) { vm.flashError("Could not open the bootloader device."); return }
+        if (connection == null) { vm.flashAbort(token, "Could not open the bootloader device."); return }
+        val port = driver.ports[0]
+        var opened = false
+        // Every path below releases the port + connection through this one lease (exactly once);
+        // closing an opened port also closes its connection (see releaseUsbPort).
+        val lease = PortLease {
+            releaseUsbPort(
+                opened,
+                closePort = { try { port.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "close port: ${e.message}") } },
+                closeConnection = { try { connection.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "close connection: ${e.message}") } },
+            )
+        }
         try {
-            val port = driver.ports[0]
             port.open(connection)
+            opened = true
             port.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
             val io = EspFlasher.UsbSerialIo(port)
             // The device was already pulsed into the ROM loader by resetIntoBootloader() before this
             // port was (re-)opened, so the flasher must NOT reset again (that would re-enumerate and
             // kill this fresh handle). It just SYNCs on the already-in-download-mode port.
-            vm.flashFirmware(io, closePort = {
-                try { port.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "close port: ${e.message}") }
-                try { connection.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "close connection: ${e.message}") }
-            }, skipBoardCheck = true, doReset = false)
+            vm.flashFirmware(token, io, lease, skipBoardCheck = true, doReset = false)
         } catch (e: Exception) {
-            try { connection.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "close connection on error: ${e.message}") }
-            vm.flashError("Flash open failed: ${e.message}")
+            lease.close()
+            vm.flashAbort(token, "Flash open failed: ${e.message}")
         }
     }
 
@@ -456,6 +521,8 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val ACTION_USB_PERMISSION = "app.brucia.USB_PERMISSION"
+        const val EXTRA_PERMISSION_REQUEST = "app.brucia.USB_PERMISSION_REQUEST"
+        const val USB_PERMISSION_TIMEOUT_MS = 60_000L
     }
 }
 
@@ -873,16 +940,87 @@ private fun DeviceCard(device: DeviceInfo?) {
                     }
                 }
                 Text(
-                    "${device.chip}  -  fw ${device.fw}",
+                    "${device.chip}  -  fw ${device.fw}" + (device.proto?.let { "  -  protocol $it" } ?: ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = cs.onSurfaceVariant,
                 )
+                // Release provenance (CAPS d.build); older firmware shows "not reported".
+                device.buildLines().forEach { line ->
+                    Text(line, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
                 if (device.modules.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         device.modules.forEach { Tag(it) }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Per-module evidence from CAPS d.evidence: compiled / configured / probed / initialized, the probe
+ * outcome and static pin conflicts. Older firmware shows one fallback line. Nothing here is a
+ * physical test result.
+ */
+@Composable
+private fun CapabilityEvidenceCard(device: DeviceInfo?) {
+    if (device == null) return
+    val cs = MaterialTheme.colorScheme
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text("Hardware evidence", fontWeight = FontWeight.SemiBold, color = cs.primary)
+            val evidence = device.evidence
+            if (evidence == null) {
+                Text("Evidence: not reported by this firmware", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            } else {
+                Text(
+                    "What the firmware checked this session. Detection is not a physical test.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                )
+                evidence.rows().forEach { row ->
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(row.label, fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        Text(row.status, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                    }
+                    row.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+                    row.conflicts.forEach { Text("Conflict: $it", style = MaterialTheme.typography.bodySmall, color = cs.error) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Recovery diagnostics: app link counters (malformed frames skipped, timeouts, unmatched replies)
+ * and, on firmware with `features.diag`, the device counters fetched only when Refresh is tapped.
+ * Nothing here is sent automatically or proves hardware health.
+ */
+@Composable
+private fun DiagnosticsCard(vm: WardriveViewModel, device: DeviceInfo?) {
+    val cs = MaterialTheme.colorScheme
+    val appDiag by vm.appDiag.collectAsState()
+    val deviceDiag by vm.deviceDiag.collectAsState()
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Diagnostics", fontWeight = FontWeight.SemiBold, color = cs.primary, modifier = Modifier.weight(1f))
+                OutlinedButton(
+                    onClick = { vm.refreshDiagnostics() },
+                    enabled = deviceDiag !is app.brucia.wardrive.DeviceDiagState.Loading,
+                ) { Text("Refresh") }
+            }
+            Text(
+                "Local counters, fetched only on Refresh. Included in log exports and session reports.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            val deviceLines = if (device == null) listOf("Device diagnostics: no device connected")
+                else app.brucia.wardrive.Diagnostics.deviceLines(deviceDiag)
+            (appDiag.lines() + deviceLines).forEach { line ->
+                Text(line, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
         }
     }
@@ -1266,21 +1404,21 @@ private fun toolIcon(title: String): androidx.compose.ui.graphics.vector.ImageVe
         "MITM" -> I.Security
         "Device info" -> I.Info
         "Console" -> I.Terminal
-        "Remote" -> I.ScreenShare
+        "Remote" -> Icons.AutoMirrored.Filled.ScreenShare
         "Files" -> I.Folder
         "Updates" -> I.SystemUpdate
         "Ethernet" -> I.SettingsEthernet
         "Audio" -> I.GraphicEq
-        "Oscilloscope" -> I.ShowChart
+        "Oscilloscope" -> Icons.AutoMirrored.Filled.ShowChart
         "SSTV" -> I.Image
         "Tone" -> I.MusicNote
         "Report" -> I.Assessment
         "Scripts" -> I.Code
-        "Macros" -> I.PlaylistPlay
+        "Macros" -> Icons.AutoMirrored.Filled.PlaylistPlay
         "RF Map 3D" -> I.Sensors
         "Bug Sweep" -> I.TravelExplore
         "WIDS" -> I.Shield
-        "PCAP dissect" -> I.ViewList
+        "PCAP dissect" -> Icons.AutoMirrored.Filled.ViewList
         "RF Fingerprint" -> I.Fingerprint
         "RF Timeline" -> I.History
         "Geo signals" -> I.PinDrop
@@ -1331,21 +1469,20 @@ private fun capModuleName(cap: String?): String = when (cap) {
 @Composable
 private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    var tab by remember { mutableStateOf(HOME) }     // HOME = dashboard, else tool id
-    var category by remember { mutableStateOf(-1) }  // -1 = all, 0..4 = one category
+    var tab by remember { mutableIntStateOf(HOME) }     // HOME = dashboard, else tool id
+    var category by remember { mutableIntStateOf(-1) }  // -1 = all, 0..4 = one category
     val context = LocalContext.current
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val commandLog by vm.commandLog.collectAsState()
-    val appUpdate by vm.appUpdate.collectAsState()
-    val firmware by vm.firmware.collectAsState()
+    val appUpdate by vm.releaseUpdates.collectAsState()
     // Check for a newer app / firmware release once on launch, so the Updates tile can flag it
     // without the user opening the Updates page first. The firmware comparison also reacts to the
     // device connecting later (device.fw becomes known then).
     LaunchedEffect(Unit) { vm.checkUpdates(BuildConfig.VERSION_NAME) }
-    val fwUpdateAvailable = AppUpdater.firmwareUpdateNeeded(device?.fw.orEmpty(), firmware.latestTag,
+    val fwUpdateAvailable = AppUpdater.firmwareUpdateNeeded(device?.fw.orEmpty(), appUpdate.latest,
         device?.features?.verifiedFiles == true,
-        firmware.firmwareUrl != null && AppUpdater.supportsInAppFirmware(device?.board.orEmpty()))
+        appUpdate.firmwareUrl != null && AppUpdater.supportsInAppFirmware(device?.board.orEmpty()))
     val updateAvailable = appUpdate.newer || fwUpdateAvailable
     val updateLabel = when {
         appUpdate.newer && fwUpdateAvailable -> "App + firmware update"
@@ -1389,6 +1526,7 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
                 HomeDashboard(
                     category = category,
                     caps = device?.caps,
+                    evidence = device?.evidence,
                     connected = status == "Connected",
                     updateAvailable = updateAvailable,
                     updateLabel = updateLabel,
@@ -1407,7 +1545,7 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
                 // disabled page instead of the tool. NRF24 (tab 13) gates itself with its own
                 // message. When disconnected / caps unknown, nothing is hidden.
                 if (caps != null && tab != 13 && !capsAllow(caps, cap)) {
-                    CapabilityDisabled(capMessage(cap))
+                    CapabilityDisabled(capMessage(cap), CapabilityEvidence.unavailableReason(cap, device?.evidence))
                 } else when (tab) {
                     0 -> BruciaScreen(vm, onConnect, onGoCrack = { tab = 7 })
                     1 -> IrScreen(vm, onConnect)
@@ -1696,6 +1834,7 @@ private fun CommandLogRow(e: CommandLogEntry) {
 private fun HomeDashboard(
     category: Int,
     caps: DeviceCaps?,
+    evidence: CapabilityEvidence? = null,
     connected: Boolean,
     updateAvailable: Boolean = false,
     updateLabel: String = "",
@@ -1761,7 +1900,8 @@ private fun HomeDashboard(
                 } else {
                     matches.forEach { tool ->
                         val available = caps == null || capsAllow(caps, tool.cap)
-                        ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen)
+                        ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen,
+                            unavailableReason = CapabilityEvidence.shortReason(tool.cap, evidence))
                     }
                 }
             } else {
@@ -1778,7 +1918,7 @@ private fun HomeDashboard(
                         add { m -> CategoryButton(cat, anyAvail, modifier = m, badge = catBadge) { onSelectCategory(idx) } }
                     }
                     add { m -> GridCell(Icons.Filled.Palette, "Theme", "App + device colors & LED", connected, m) { onOpen(36) } }
-                    add { m -> GridCell(Icons.Filled.MenuBook, "Wiki", "Guides & docs", true, m) { openUrl(context, WIKI_URL) } }
+                    add { m -> GridCell(Icons.AutoMirrored.Filled.MenuBook, "Wiki", "Guides & docs", true, m) { openUrl(context, WIKI_URL) } }
                     add { m -> GridCell(Icons.Filled.Favorite, "Support", "Sponsor / donate", true, m) { showSupport = true } }
                 }
                 cells.chunked(2).forEach { row ->
@@ -1839,7 +1979,8 @@ private fun HomeDashboard(
             cat.features.forEach { tool ->
                 // Unknown caps (disconnected) -> everything shown normally.
                 val available = caps == null || capsAllow(caps, tool.cap)
-                ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen)
+                ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen,
+                            unavailableReason = CapabilityEvidence.shortReason(tool.cap, evidence))
             }
             Spacer(Modifier.height(10.dp))
         }
@@ -1999,7 +2140,7 @@ private fun GridCell(
 }
 
 @Composable
-private fun ToolCard(tool: app.brucia.features.FeatureDescriptor, available: Boolean, badge: Boolean = false, badgeText: String = "", onOpen: (Int) -> Unit) {
+private fun ToolCard(tool: app.brucia.features.FeatureDescriptor, available: Boolean, badge: Boolean = false, badgeText: String = "", onOpen: (Int) -> Unit, unavailableReason: String? = null) {
     val cs = MaterialTheme.colorScheme
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpen(tool.tabId) },
@@ -2035,7 +2176,7 @@ private fun ToolCard(tool: app.brucia.features.FeatureDescriptor, available: Boo
                 // Instead of hiding a module-gated tool, show it greyed with what it needs.
                 if (!available && tool.cap != null) {
                     Text(
-                        "Needs ${capModuleName(tool.cap)} - not detected on this device",
+                        "Needs ${capModuleName(tool.cap)} - " + (unavailableReason ?: "not detected on this device"),
                         style = MaterialTheme.typography.labelSmall, color = cs.error,
                         modifier = Modifier.padding(top = 2.dp),
                     )
@@ -2047,7 +2188,7 @@ private fun ToolCard(tool: app.brucia.features.FeatureDescriptor, available: Boo
 
 /** Shown in place of a tool page when the connected device lacks the required module. */
 @Composable
-private fun CapabilityDisabled(message: String) {
+private fun CapabilityDisabled(message: String, evidenceReason: String? = null) {
     val cs = MaterialTheme.colorScheme
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -2057,6 +2198,11 @@ private fun CapabilityDisabled(message: String) {
         Text("Module not available", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = cs.onSurface)
         Spacer(Modifier.height(12.dp))
         Text(message, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+        // CAPS d.evidence: why the firmware reports it unavailable (probed absent, busy, no pins...).
+        if (evidenceReason != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(evidenceReason, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        }
         Spacer(Modifier.height(8.dp))
         Text(
             "Attach the required module and reconnect to enable this tool.",
@@ -2166,9 +2312,9 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     var path by remember { mutableStateOf("/") }
-    var entries by remember { mutableStateOf<List<app.brucia.files.FileEntry>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    fun refresh() { if (connected) { loading = true; vm.listDir(path) { entries = it; loading = false } } }
+    val entries by vm.deviceEntries.collectAsState()
+    val loading by vm.deviceListing.collectAsState()
+    fun refresh() { if (connected) vm.listDir(path) }
     LaunchedEffect(path, connected) { refresh() }
 
     // Per-file action sheet, the in-app editor overlay, and the new-file/folder/template dialog.
@@ -2306,7 +2452,7 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     }
                     Spacer(Modifier.height(6.dp))
                     OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
-                        vm.deleteDeviceFile(full) { refresh() }
+                        vm.deleteDeviceFile(full)
                         selected = null
                         Toast.makeText(context, "Deleting ${sel.name}...", Toast.LENGTH_SHORT).show()
                     }) { Text("Delete") }
@@ -2341,7 +2487,7 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     OutlinedButton(enabled = connected && newName.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
                         val p = path.trimEnd('/') + "/" + newName.trim()
                         showNew = false
-                        vm.makeDeviceDir(p) { refresh() }
+                        vm.makeDeviceDir(p)
                         Toast.makeText(context, "Creating folder...", Toast.LENGTH_SHORT).show()
                     }) { Text("Create folder on device") }
                     Spacer(Modifier.height(12.dp))
@@ -2372,7 +2518,7 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 /**
  * In-app editor (monospace, editable) for text/JS/HTML/etc. HTML additionally gets a View mode that
  * renders the current text in a sandboxed WebView (network loads blocked, no file/content access).
- * Save targets: the phone (SAF), the device (push via fs_write), or an external app (Open with).
+ * Save targets: the phone (SAF), the device (transactional upload), or an external app (Open with).
  */
 @Composable
 private fun FileEditorScreen(vm: WardriveViewModel, state: EditorState, currentPath: String, onClose: () -> Unit) {
@@ -3084,7 +3230,7 @@ private fun IrScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var selCategory by remember { mutableStateOf<String?>(null) }
     var selBrand by remember { mutableStateOf<String?>(null) }
     // 0 = Remotes (on-screen telecomandini), 1 = Catalog (raw button list), 2 = Raw / device actions.
-    var irTab by remember { mutableStateOf(0) }
+    var irTab by remember { mutableIntStateOf(0) }
     // The device whose on-screen remote is open; null shows the picker (quick TVs + browse).
     var selectedRemote by remember { mutableStateOf<CatalogDevice?>(null) }
     var remoteBrowse by remember { mutableStateOf(false) }
@@ -3419,7 +3565,7 @@ private fun IrRemote(
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     var flashKey by remember(title) { mutableStateOf<RemoteKey?>(null) }
-    var flashTick by remember(title) { mutableStateOf(0) }
+    var flashTick by remember(title) { mutableIntStateOf(0) }
     var lastName by remember(title) { mutableStateOf("") }
     LaunchedEffect(flashTick) { if (flashTick > 0) { delay(650); flashKey = null } }
 
@@ -3734,7 +3880,7 @@ private fun SubGhzBruteforceCard(vm: WardriveViewModel, connected: Boolean, freq
     val cs = MaterialTheme.colorScheme
     val active by vm.subBruteActive.collectAsState()
     val status by vm.subBruteStatus.collectAsState()
-    var proto by remember { mutableStateOf(0) }
+    var proto by remember { mutableIntStateOf(0) }
     var secs by remember { mutableStateOf("20") }
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(14.dp)) {
@@ -3801,11 +3947,14 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val signals by vm.subghz.collectAsState()
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
-    var listening by remember { mutableStateOf(false) }
-    var freqHz by remember { mutableStateOf(433_920_000L) }
+    // Follows the real SUB outcome: an ERR (e.g. 503 receiver init failed) or timeout turns it off.
+    val listening by vm.subghzListening.collectAsState()
+    val listenError by vm.subghzRawError.collectAsState()
+    var freqHz by remember { mutableLongStateOf(433_920_000L) }
     var craftHex by remember { mutableStateOf("") }
     val savedRf by vm.savedRf.collectAsState()
     val wave by vm.rfWave.collectAsState()
+    val waveCompleteness by vm.rfWaveCompleteness.collectAsState()
     val capture by vm.rfCapture.collectAsState()
     val context = LocalContext.current
     val freqs = listOf(315_000_000L to "315", 433_920_000L to "433.92", 868_350_000L to "868.35", 915_000_000L to "915")
@@ -3858,8 +4007,11 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             Switch(
                 checked = listening,
                 enabled = connected,
-                onCheckedChange = { listening = it; vm.setSubghz(it) },
+                onCheckedChange = { vm.setSubghz(it) },
             )
+        }
+        if (listenError.isNotEmpty() && !listening) {
+            Text("Listen failed: $listenError", color = cs.error, style = MaterialTheme.typography.bodySmall)
         }
         Spacer(Modifier.height(12.dp))
         SpectrumSection(vm, connected)
@@ -3879,6 +4031,12 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                             else "${capture.samples} samples captured",
                             style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                         )
+                        if (capture.atBufferLimit > 0) {
+                            Text(
+                                "${capture.atBufferLimit} filled the device buffer (possibly truncated)",
+                                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                            )
+                        }
                     }
                     Button(
                         enabled = connected || capture.capturing,
@@ -3887,7 +4045,6 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                                 vm.stopRfCapture()
                             } else {
                                 vm.startRfCapture()
-                                listening = true
                             }
                         }
                     ) { Text(if (capture.capturing) "Stop" else "Start") }
@@ -3929,8 +4086,8 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
         // De Bruijn brute force: open every fixed N-bit OOK code in minimal time.
-        var dbBits by remember { mutableStateOf(12) }
-        var dbTe by remember { mutableStateOf(400) }
+        var dbBits by remember { mutableIntStateOf(12) }
+        var dbTe by remember { mutableIntStateOf(400) }
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text("De Bruijn brute force", fontWeight = FontWeight.SemiBold, color = cs.primary)
@@ -3998,7 +4155,11 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
         if (wave.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
-            Text("Waveform (${wave.size} edges)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            Text(
+                "Waveform (${wave.size} edges)" +
+                    if (waveCompleteness == app.brucia.subghz.RawCompleteness.UNKNOWN_AT_LIMIT) " - possibly truncated (device buffer full)" else "",
+                color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
+            )
             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
                 Waveform(wave, Modifier.fillMaxWidth().height(90.dp).padding(10.dp))
             }
@@ -4082,6 +4243,7 @@ private fun SpectrumSection(vm: WardriveViewModel, connected: Boolean) {
     val latest by vm.spectrum.collectAsState()
     val history by vm.spectrumHistory.collectAsState()
     val active by vm.spectrumActive.collectAsState()
+    val spectrumError by vm.spectrumError.collectAsState()
     Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -4096,6 +4258,10 @@ private fun SpectrumSection(vm: WardriveViewModel, connected: Boolean) {
                     enabled = connected || active,
                     onClick = { if (active) vm.stopSpectrum() else vm.startSpectrum() },
                 ) { Text(if (active) "Stop" else "Start") }
+            }
+            if (spectrumError.isNotEmpty() && !active) {
+                Spacer(Modifier.height(6.dp))
+                Text("Spectrum failed: $spectrumError", color = cs.error, style = MaterialTheme.typography.bodySmall)
             }
             val cur = latest
             if (history.isEmpty()) {
@@ -4279,7 +4445,7 @@ private fun ConsoleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             Spacer(Modifier.height(8.dp))
         }
         // Command palette: every device CLI group, so all the device's choices are here.
-        var group by remember { mutableStateOf(0) }
+        var group by remember { mutableIntStateOf(0) }
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -4675,6 +4841,7 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val ibuttonBusy by vm.ibuttonBusy.collectAsState()
     val clockStatus by vm.clockStatus.collectAsState()
     val speakerStatus by vm.speakerStatus.collectAsState()
+    val speakerFile by vm.speakerFilePlaying.collectAsState()
     val micStatus by vm.micStatus.collectAsState()
     val espnowStatus by vm.espnowStatus.collectAsState()
     var hex by remember { mutableStateOf("") }
@@ -4830,6 +4997,12 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                             onClick = { vm.speakerPlay(playPath.trim()) },
                         ) { Text("Play file") }
                     }
+                    if (speakerFile.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(onClick = { vm.speakerStopFile() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Stop ($speakerFile)")
+                        }
+                    }
                     if (speakerStatus.isNotBlank()) {
                         Spacer(Modifier.height(8.dp))
                         Text(speakerStatus, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant)
@@ -4970,7 +5143,7 @@ private fun ResponderScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val rStatus by vm.responderStatus.collectAsState()
     val connected = status == "Connected"
     val durations = listOf(30, 60, 120, 300)
-    var secs by remember { mutableStateOf(60) }
+    var secs by remember { mutableIntStateOf(60) }
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Image(painter = painterResource(R.drawable.ic_flame), colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(cs.primary), contentDescription = null, modifier = Modifier.size(26.dp))
@@ -5028,7 +5201,7 @@ private fun KarmaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val kStatus by vm.karmaStatus.collectAsState()
     val connected = status == "Connected"
     val durations = listOf(30, 60, 120, 300)
-    var secs by remember { mutableStateOf(60) }
+    var secs by remember { mutableIntStateOf(60) }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
@@ -5090,7 +5263,7 @@ private fun BrucegotchiScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val gStatus by vm.brucegotchiStatus.collectAsState()
     val connected = status == "Connected"
     val durations = listOf(30, 60, 120, 300)
-    var secs by remember { mutableStateOf(60) }
+    var secs by remember { mutableIntStateOf(60) }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
@@ -5319,7 +5492,7 @@ private fun IrRemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     var showAdd by remember { mutableStateOf(false) }
     var label by remember { mutableStateOf("") }
-    var deleteIdx by remember { mutableStateOf(-1) }
+    var deleteIdx by remember { mutableIntStateOf(-1) }
 
     if (showAdd) {
         androidx.compose.material3.AlertDialog(
@@ -5622,6 +5795,9 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         onClick = { keyImportLauncher.launch(arrayOf("*/*")) }
                     ) { Text("Import keys") }
                 }
+                if (mifare.running) {
+                    TextButton(onClick = { vm.stopMifareKeyCheck() }) { Text("Stop batches") }
+                }
                 if (mifareUserKeys.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -5650,9 +5826,18 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                             modifier = Modifier.padding(top = 2.dp),
                         )
                     }
-                } else if (!mifare.running && mifare.totalBatches > 0) {
+                } else if (mifare.completed) {
                     Spacer(Modifier.height(6.dp))
-                    Text("No sector keys recovered from the dictionary.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text(
+                        if (mifare.exhaustive) "No sector keys found (all sectors tested)."
+                        else "No sector keys recovered; the scan was not exhaustive.",
+                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant
+                    )
+                }
+                if (mifare.uid.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("Card UID: ${mifare.uid}", style = MaterialTheme.typography.labelSmall,
+                        color = cs.onSurfaceVariant, fontFamily = FontFamily.Monospace)
                 }
             }
         }
@@ -5890,7 +6075,7 @@ private fun BadUsbScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val context = LocalContext.current
     val scripts = remember { DuckyLibrary.load(context) }
     val clipboard = LocalClipboardManager.current
-    var expanded by remember { mutableStateOf(-1) }
+    var expanded by remember { mutableIntStateOf(-1) }
     val transportKind by vm.transportKind.collectAsState()
     val status by vm.status.collectAsState()
     val connected = status == "Connected"
@@ -6831,7 +7016,7 @@ private fun LoRaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text("Receive", fontWeight = FontWeight.SemiBold, color = cs.primary)
-                    Text("Listen for incoming LoRa packets for the chosen duration.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text("Listen for 1–120 seconds. Stop cancels the app wait; the device finishes its listen window.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = recvSecsText,
@@ -6845,10 +7030,10 @@ private fun LoRaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     val recvSecs = recvSecsText.toIntOrNull()
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            enabled = (connected || receiving) && recvSecs != null && recvSecs > 0,
+                            enabled = receiving || (connected && recvSecs != null && recvSecs in 1..120),
                             modifier = Modifier.weight(1f),
                             onClick = { if (receiving) vm.stopLoraRecv() else vm.loraRecv(recvSecs ?: 20) },
-                        ) { Text(if (receiving) "Stop" else "Start receive") }
+                        ) { Text(if (receiving) "Stop waiting" else "Start receive") }
                         OutlinedButton(
                             enabled = packets.isNotEmpty(),
                             modifier = Modifier.weight(1f),
@@ -7023,6 +7208,8 @@ private fun MacroScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         if (running) {
             Button(onClick = { vm.stopMacro() }, modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop macro") }
+            Text("Stops the sequence; a command already sent may continue on the device.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
 
         // --- Builder ---
@@ -7037,11 +7224,11 @@ private fun MacroScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     OutlinedTextField(value = cmd, onValueChange = { cmd = it }, singleLine = true,
                         label = { Text("Command (e.g. wifi_connect ...)") }, modifier = Modifier.weight(2f))
                     OutlinedTextField(value = delayMs, onValueChange = { delayMs = it.filter { c -> c.isDigit() } }, singleLine = true,
-                        label = { Text("Wait ms") }, modifier = Modifier.weight(1f))
+                        label = { Text("Wait ms (0–60000)") }, modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(enabled = cmd.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
-                    steps = steps + app.brucia.automation.MacroStep(cmd.trim(), delayMs.toIntOrNull() ?: 500)
+                    steps = steps + app.brucia.automation.MacroStep(cmd.trim(), (delayMs.toIntOrNull() ?: 500).coerceIn(0, 60_000))
                     cmd = ""
                 }) { Text("Add step") }
                 if (steps.isNotEmpty()) {
@@ -7467,7 +7654,7 @@ private fun ThemeLedCard(vm: WardriveViewModel, connected: Boolean) {
             }
 
             // LED brightness (initialised from the device's real value via CAPS)
-            var ledBright by remember(devLedBright) { mutableStateOf((if (devLedBright >= 0) devLedBright else 50).toFloat()) }
+            var ledBright by remember(devLedBright) { mutableFloatStateOf((if (devLedBright >= 0) devLedBright else 50).toFloat()) }
             Text("LED brightness: ${ledBright.toInt()}%", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
             Slider(
                 value = ledBright, onValueChange = { ledBright = it },
@@ -7477,7 +7664,7 @@ private fun ThemeLedCard(vm: WardriveViewModel, connected: Boolean) {
 
             // LED animation picker
             var effectMenu by remember { mutableStateOf(false) }
-            var effectIdx by remember(devLedEffect) { mutableStateOf(devLedEffect.coerceIn(0, LED_EFFECTS.size - 1)) }
+            var effectIdx by remember(devLedEffect) { mutableIntStateOf(devLedEffect.coerceIn(0, LED_EFFECTS.size - 1)) }
             Text("LED animation", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
             Box {
                 OutlinedButton(enabled = connected, onClick = { effectMenu = true }, modifier = Modifier.fillMaxWidth()) {
@@ -7581,7 +7768,7 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
                     Switch(checked = ledOn, enabled = connected, onCheckedChange = { ledOn = it; vm.setDeviceLed(it) })
                 }
                 Spacer(Modifier.height(10.dp))
-                var scrBright by remember(device?.screenBright) { mutableStateOf((device?.screenBright?.takeIf { it >= 0 } ?: 100).toFloat()) }
+                var scrBright by remember(device?.screenBright) { mutableFloatStateOf((device?.screenBright?.takeIf { it >= 0 } ?: 100).toFloat()) }
                 Text("Screen brightness: ${scrBright.toInt()}%", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 Slider(
                     value = scrBright, onValueChange = { scrBright = it },
@@ -7596,6 +7783,10 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
         Spacer(Modifier.height(12.dp))
 
         DeviceCard(device)
+        Spacer(Modifier.height(12.dp))
+        CapabilityEvidenceCard(device)
+        Spacer(Modifier.height(12.dp))
+        DiagnosticsCard(vm, device)
         Spacer(Modifier.height(12.dp))
         Button(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
             Text(if (connected) "Reconnect over USB" else "Connect over USB")
@@ -7705,7 +7896,7 @@ private fun CrackScreen(vm: WardriveViewModel) {
         if (uri != null) { vm.importPcap(uri); Toast.makeText(context, "Parsing handshake...", Toast.LENGTH_SHORT).show() }
     }
     val hs by vm.hsFlow.collectAsState()
-    var captureList by remember { mutableStateOf("") }
+    val captureList by vm.captureList.collectAsState()
     var manualExpanded by remember { mutableStateOf(false) }
 
     // Single scroll container for the whole screen: header, controls and the wordlist
@@ -7844,7 +8035,7 @@ private fun CrackScreen(vm: WardriveViewModel) {
                             ) { Text("Pull") }
                             OutlinedButton(
                                 modifier = Modifier.weight(1f),
-                                onClick = { vm.runWithResult("storage list /BrucePCAP/handshakes") { _, out -> captureList = out } },
+                                onClick = { vm.listCaptures() },
                             ) { Text("List captures") }
                         }
                         if (captureList.isNotBlank()) {
@@ -7998,21 +8189,20 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
     val context = LocalContext.current
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
-    val appUpdate by vm.appUpdate.collectAsState()
-    val firmware by vm.firmware.collectAsState()
+    val appUpdate by vm.releaseUpdates.collectAsState()
     val flash by vm.flash.collectAsState()
     val flashLog by vm.flashLog.collectAsState()
     val connected = status == "Connected"
     val currentApp = BuildConfig.VERSION_NAME
 
-    val boards by vm.boards.collectAsState()
-    val selectedBoard by vm.selectedBoard.collectAsState()
+    val download by vm.appDownload.collectAsState()
+    val boards = appUpdate.boards
+    val selectedBoard = appUpdate.selectedBoard
     var boardMenu by remember { mutableStateOf(false) }
 
     // Check once on first open so the cards show versions without a manual tap.
     LaunchedEffect(Unit) {
         if (appUpdate.latest.isEmpty() && !appUpdate.checking) vm.checkUpdates(currentApp)
-        vm.loadBoards()
     }
 
     Column(
@@ -8059,7 +8249,7 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
-                    enabled = !appUpdate.checking,
+                    enabled = !appUpdate.checking && !download.downloading && flash.phase !in listOf("download", "flash"),
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { vm.checkUpdates(currentApp) },
                 ) { Text(if (appUpdate.checking) "Checking..." else "Check for app update") }
@@ -8067,7 +8257,7 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                 if (appUpdate.newer && appUpdate.apkUrl != null) {
                     Spacer(Modifier.height(8.dp))
                     Button(
-                        enabled = !appUpdate.downloading,
+                        enabled = !download.downloading,
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             // One tap: installs if allowed, else opens the one-time grant and
@@ -8077,12 +8267,16 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                             }
                             vm.requestAppInstall(context)
                         },
-                    ) { Text(if (appUpdate.downloading) "Downloading..." else "Download & install ${appUpdate.latest}") }
+                    ) { Text(if (download.downloading) "Downloading..." else "Download & install ${appUpdate.latest}") }
+                    if (!appUpdate.apkIntegrity.verified) {
+                        Text("Unverified: this release lists no SHA-256 digest for the APK.",
+                            style = MaterialTheme.typography.labelSmall, color = cs.error, modifier = Modifier.padding(top = 4.dp))
+                    }
                 }
 
-                if (appUpdate.downloading) {
+                if (download.downloading) {
                     Spacer(Modifier.height(6.dp))
-                    val frac = if (appUpdate.total > 0) (appUpdate.downloaded.toFloat() / appUpdate.total).coerceIn(0f, 1f) else 0f
+                    val frac = if (download.total > 0) (download.downloaded.toFloat() / download.total).coerceIn(0f, 1f) else 0f
                     androidx.compose.material3.LinearProgressIndicator(
                         progress = { frac }, modifier = Modifier.fillMaxWidth(), color = cs.primary, trackColor = cs.surfaceVariant,
                     )
@@ -8091,6 +8285,7 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                 Spacer(Modifier.height(6.dp))
                 val appStatus: Pair<String, Color>? = when {
                     appUpdate.error != null -> "Error: ${appUpdate.error}" to cs.error
+                    download.error != null -> "Error: ${download.error}" to cs.error
                     appUpdate.checking -> null
                     appUpdate.latest.isEmpty() -> null
                     appUpdate.newer -> "Update available." to cs.primary
@@ -8106,9 +8301,9 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
         // --- Device firmware card -------------------------------------------
         val flashing = flash.phase == "download" || flash.phase == "flash"
         // A firmware update is available when we know the installed fw and the latest tag is newer.
-        val fwNewer = AppUpdater.firmwareUpdateNeeded(device?.fw.orEmpty(), firmware.latestTag,
+        val fwNewer = AppUpdater.firmwareUpdateNeeded(device?.fw.orEmpty(), appUpdate.latest,
             device?.features?.verifiedFiles == true,
-            firmware.firmwareUrl != null && AppUpdater.supportsInAppFirmware(device?.board.orEmpty()))
+            appUpdate.firmwareUrl != null && AppUpdater.supportsInAppFirmware(device?.board.orEmpty()))
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = cs.surface),
@@ -8127,14 +8322,14 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 )
                 Text(
-                    "Latest: " + (firmware.latestTag.ifEmpty { "-" }),
+                    "Latest: " + (appUpdate.latest.ifEmpty { "-" }),
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 )
                 // Same release notes as the app (one release holds both the APK and the firmware bin),
                 // shown here too so the user sees what a firmware flash will bring.
                 if (fwNewer && appUpdate.notes.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
-                    ReleaseNotes(firmware.latestTag, appUpdate.notes, cs)
+                    ReleaseNotes(appUpdate.latest, appUpdate.notes, cs)
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -8151,7 +8346,7 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                 // Board picker: default auto (connected T-Embed) or a specific per-board image.
                 Text("Board image", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
                 Box {
-                    OutlinedButton(enabled = !flashing, onClick = { boardMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(enabled = !flashing && !appUpdate.checking && boards.isNotEmpty(), onClick = { boardMenu = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(selectedBoard?.label ?: "Auto (connected device)")
                     }
                     androidx.compose.material3.DropdownMenu(expanded = boardMenu, onDismissRequest = { boardMenu = false }) {
@@ -8164,12 +8359,18 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                     }
                 }
                 if (selectedBoard != null) {
-                    Text("Make sure the connected device IS a ${selectedBoard!!.label} - flashing the wrong image is recoverable (BOOT+RESET) but avoid it.",
+                    Text(if (appUpdate.flashUrl == null)
+                        "This board requires the web flasher and its matching release image. In-app flashing supports T-Embed CC1101."
+                    else "Make sure the connected device IS a ${selectedBoard.label} before flashing.",
+                        style = MaterialTheme.typography.labelSmall, color = cs.error, modifier = Modifier.padding(top = 4.dp))
+                }
+                if (appUpdate.flashUrl != null && !appUpdate.flashIntegrity.verified) {
+                    Text("Unverified: this release lists no SHA-256 digest for the firmware image.",
                         style = MaterialTheme.typography.labelSmall, color = cs.error, modifier = Modifier.padding(top = 4.dp))
                 }
                 Spacer(Modifier.height(8.dp))
                 Button(
-                    enabled = !flashing,
+                    enabled = !flashing && appUpdate.flashUrl != null,
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { vm.resetFlash(); onFlash() },
                     colors = ButtonDefaults.buttonColors(containerColor = cs.error),

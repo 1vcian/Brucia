@@ -485,8 +485,8 @@ void RFScan::save_signal(bool asRaw) {
     asRaw = asRaw || received.protocol == "RAW";
     Serial.println(asRaw ? "rfSaveSignal RAW true" : "rfSaveSignal RAW false");
     decimalToHexString(received.key, hexString);
-    rfSaveSignal(found_freq, received, asRaw, hexString, autoSave);
-    lastSavedKey = received.key;
+    // Only a successful save suppresses auto-saving the same key again.
+    if (rfSaveSignal(found_freq, received, asRaw, hexString, autoSave)) lastSavedKey = received.key;
 }
 
 void RFScan::reset_signals() {
@@ -731,40 +731,51 @@ bool rfSaveSignal(float frequency, RfCodes codes, bool raw, char *key, bool auto
     if (autoSave) filepath += "/autoSaved";
     File file = createNewFile(fs, filepath, filename);
 
+    // Report the real outcome: a missing file or a short write is a failed save.
+    bool saved = false;
+    String savedPath = "";
     if (file) {
-        file.println(subfile_out);
-        if (!autoSave) displaySuccess(file.path());
+        savedPath = file.path();
+        saved = file.print(subfile_out) == subfile_out.length();
+        saved = file.println() > 0 && saved;
+        file.close();
+    }
+    if (saved) {
+        if (!autoSave) displaySuccess(savedPath);
     } else {
         displayError("Error saving file", true);
     }
-
-    file.close();
-    return true;
+    return saved;
 }
 
-String rf_scan(float start_freq, float stop_freq, int max_loops) {
+String rf_scan(float start_freq, float stop_freq, int max_loops, bool *started) {
     // derived from https://github.com/mcore1976/cc1101-tool/blob/main/cc1101-tool-esp32.ino#L480
+    if (started) *started = false;
 
     if (bruceConfigPins.rfModule != CC1101_SPI_MODULE) {
         displayError("rf scanning is available with CC1101 only", true);
         return ""; // only CC1101 is supported for this
     }
     if (!initRfModule("rx", start_freq)) return "";
+    if (started) *started = true;
 
     ELECHOUSE_cc1101.setRxBW(256);
 
     float settingf1 = start_freq;
     float settingf2 = stop_freq;
-    float freq = 0;
+    float freq = start_freq; // was 0: the first pass swept 0..stop instead of start..stop
     long compare_freq = 0;
     float mark_freq;
     int rssi;
     int mark_rssi = -100;
     String out = "";
 
-    while (max_loops || !check(EscPress)) {
+    // max_loops > 0 bounds the number of steps; <= 0 (the default) runs until Esc.
+    // Esc is honoured on every step in both modes (it used to be checked only once).
+    const bool bounded = max_loops > 0;
+    while (!check(EscPress)) {
+        if (bounded && max_loops-- <= 0) break;
         vTaskDelay(1 / portTICK_PERIOD_MS);
-        max_loops -= 1;
 
         setMHZ(freq);
 
@@ -821,13 +832,22 @@ String rfReceiveSignal(float frequency, int max_loops, bool raw, bool headless) 
         tft.println("Waiting for a " + String(frequency) + " MHz " + "signal.");
     }
 
-    // init native RMT receive
-    if (!initRfModule("rx", frequency)) return "";
+    // init native RMT receive. Headless callers (CLI/JS) get a message so an init failure is
+    // distinguishable from "no signal" (serialDevice is captured by the companion CLI route).
+    if (!initRfModule("rx", frequency)) {
+        if (headless) serialDevice->println("RF receiver init failed");
+        return "";
+    }
     RfRxSession rx;
     if (!rx.begin()) {
         deinitRfModule();
+        if (headless) serialDevice->println("RF receiver init failed");
         return "";
     }
+    // max_loops > 0: give up after that many seconds plus one final poll; <= 0 (the default)
+    // waits until Esc. The final poll used to reuse -1 as its marker, so the default timed out
+    // right after the first poll.
+    bool finalPoll = false;
 
     while (!check(EscPress)) {
         std::vector<int> durations;
@@ -898,21 +918,19 @@ String rfReceiveSignal(float frequency, int max_loops, bool raw, bool headless) 
             deinitRfModule();
             return subfile_out;
         }
-        if (max_loops > 0) {
-            // headless mode, quit if nothing received after max_loops
-            vTaskDelay(1000 / portTICK_PERIOD_MS); // wait first, THEN check
-            max_loops -= 1;
-            if (max_loops == 0) {
-                // Use sentinel -1: loop runs one more iteration to catch signals
-                // that arrived during vTaskDelay before giving up
-                max_loops = -1;
-            }
-        } else if (max_loops == -1) {
+        if (finalPoll) {
             // Final check already done in this iteration - truly timed out
             Serial.println("timeout");
             rx.end();
             deinitRfModule();
             return "";
+        }
+        if (max_loops > 0) {
+            // headless mode, quit if nothing received after max_loops
+            vTaskDelay(1000 / portTICK_PERIOD_MS); // wait first, THEN check
+            max_loops -= 1;
+            // Poll one more iteration to catch signals that arrived during vTaskDelay.
+            if (max_loops == 0) finalPoll = true;
         }
     }
 

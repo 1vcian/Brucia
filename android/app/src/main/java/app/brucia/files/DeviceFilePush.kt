@@ -1,7 +1,8 @@
 package app.brucia.files
 
 /**
- * Pure logic for pushing a file to the device with the firmware's write grammar:
+ * Path/chunk bounds and legacy write helpers. Managed transfers use SessionFileLink's
+ * transactional protocol; command() retains the legacy firmware grammar:
  *   fs_write <path> <base64>         -> truncate + write (first chunk)
  *   fs_write_append <path> <base64>  -> append (subsequent chunks)
  *
@@ -9,12 +10,25 @@ package app.brucia.files
  * companion max frame (~8192 bytes). A raw chunk of [MAX_RAW_CHUNK] bytes base64-encodes to about
  * 4 KB of text, which with the JSON envelope + path is comfortably below that limit.
  *
- * This object is deliberately Android-free (it does not base64-encode here) so the chunking can be
- * unit-tested on the JVM; the ViewModel supplies the encoder (android.util.Base64).
+ * This object is Android-free so path/chunk rules can be tested on the JVM.
  */
 object DeviceFilePush {
     /** Raw bytes per chunk. 3072 * 4/3 = 4096 base64 chars. */
     const val MAX_RAW_CHUNK = 3072
+
+    /** Canonical destination for the transactional protocol, shared with firmware path rules. */
+    fun uploadPath(path: String): String {
+        require(pathError(path) == null) { pathError(path).orEmpty() }
+        val absolute = if (path.startsWith('/')) path else "/$path"
+        require(absolute.toByteArray(Charsets.UTF_8).size <= 192 &&
+            !absolute.lowercase(java.util.Locale.ROOT).startsWith("/.brucia-upload.") &&
+            absolute.none { it.code < 32 || it.code == 127 || it in "\\:*?\"<>|" } &&
+            absolute.substring(1).split('/').all {
+                it.isNotEmpty() && it != "." && it != ".." && !it.startsWith(' ') &&
+                    !it.endsWith(' ') && !it.endsWith('.')
+            }) { "Unsupported upload path or reserved transaction filename" }
+        return absolute
+    }
 
     /**
      * Split [bytes] into raw chunks of at most [maxRawChunk] bytes. An empty input yields a single

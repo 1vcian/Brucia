@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -31,15 +32,37 @@ object AudioExport {
      */
     fun saveAll(context: Context, pcm: ByteArray, sampleRate: Int): Result {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val dir = File(context.getExternalFilesDir(null), "recordings/rec_$stamp").apply { mkdirs() }
-        val shorts = toShorts(pcm)
+        return saveInto(File(context.getExternalFilesDir(null), "recordings"), stamp, pcm, sampleRate) { dir, shorts ->
+            listOf(
+                File(dir, "waveform.png").also { writePng(it, renderWaveform(shorts)) },
+                File(dir, "spectrum.png").also { writePng(it, renderSpectrum(shorts, sampleRate)) },
+                File(dir, "spectrogram.png").also { writePng(it, renderSpectrogram(shorts, sampleRate)) },
+            )
+        }
+    }
 
-        val files = mutableListOf<File>()
-        File(dir, "recording.wav").also { writeWav(it, pcm, sampleRate); files += it }
-        File(dir, "waveform.png").also { writePng(it, renderWaveform(shorts)); files += it }
-        File(dir, "spectrum.png").also { writePng(it, renderSpectrum(shorts, sampleRate)); files += it }
-        File(dir, "spectrogram.png").also { writePng(it, renderSpectrogram(shorts, sampleRate)); files += it }
-        return Result(dir, files)
+    /**
+     * Write the WAV and the rendered images for [pcm] into a new folder under [root]. The folder is
+     * created exclusively (`rec_<stamp>`, then `rec_<stamp>_1`, ...) so a save in the same second never
+     * overwrites an earlier recording; on failure the partial folder is removed and the error rethrown.
+     */
+    internal fun saveInto(
+        root: File, stamp: String, pcm: ByteArray, sampleRate: Int,
+        writeImages: (dir: File, shorts: ShortArray) -> List<File>,
+    ): Result {
+        root.mkdirs()
+        val dir = (0 until 100).asSequence()
+            .map { File(root, if (it == 0) "rec_$stamp" else "rec_${stamp}_$it") }
+            .firstOrNull { it.mkdir() } ?: throw IOException("no free recording folder in $root")
+        try {
+            val files = mutableListOf<File>()
+            File(dir, "recording.wav").also { writeWav(it, pcm, sampleRate); files += it }
+            files += writeImages(dir, toShorts(pcm))
+            return Result(dir, files)
+        } catch (t: Throwable) {
+            dir.deleteRecursively()
+            throw t
+        }
     }
 
     // --- WAV ---------------------------------------------------------------------------------------

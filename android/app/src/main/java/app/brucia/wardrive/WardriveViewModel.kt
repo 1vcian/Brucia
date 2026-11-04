@@ -11,9 +11,25 @@ import androidx.lifecycle.viewModelScope
 import app.brucia.data.ApEntity
 import app.brucia.data.BruciaDb
 import app.brucia.files.DeviceFileReader
+import app.brucia.files.FileReadResult
+import app.brucia.files.FileTransferLink
+import app.brucia.files.FileTransferService
+import app.brucia.files.DeviceFileBrowser
+import app.brucia.files.SessionFileLink
+import java.io.IOException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import app.brucia.ble.BleDevice
+import app.brucia.automation.MacroRunner
+import app.brucia.nfc.MifareKeyCheckService
+import app.brucia.session.CommandTasks
+import app.brucia.protocol.CommandCapabilities
+import app.brucia.protocol.LinkCounters
+import app.brucia.protocol.LinkCountersSnapshot
+import app.brucia.session.StreamSubscriptions
+import app.brucia.session.ServiceLifecycle
+import app.brucia.session.ServiceLifecycle.Entry
+import app.brucia.session.CommandSession
 import app.brucia.nfc.NfcSecurity
 import app.brucia.mitm.MitmLog
 import app.brucia.report.ReportBuilder
@@ -43,7 +59,6 @@ import app.brucia.wordlist.WordlistCatalog
 import app.brucia.wordlist.WordlistInfo
 import app.brucia.wordlist.WordlistStore
 import app.brucia.data.SavedItem
-import app.brucia.device.CliParse
 import app.brucia.BruciaLog
 import app.brucia.audio.MicRecordService
 import app.brucia.ble.BadBleService
@@ -51,7 +66,12 @@ import app.brucia.ble.GattService as GattExplorer
 import app.brucia.ble.BleHidService
 import app.brucia.ble.BleMediaService
 import app.brucia.audio.SpeakerService
+import app.brucia.audio.PcmStreamService
+import app.brucia.audio.PcmStreamSpec
+import app.brucia.audio.PcmStreamSource
+import app.brucia.audio.SessionPcmLink
 import app.brucia.device.ClockService
+import app.brucia.device.DiagnosticsService
 import app.brucia.device.DeviceAppearanceService
 import app.brucia.device.EspNowService
 import app.brucia.device.ScriptService
@@ -63,12 +83,14 @@ import app.brucia.monitor.JamDetectService
 import app.brucia.monitor.WidsService
 import app.brucia.net.EthernetService
 import app.brucia.nfc.NfcToolsService
+import app.brucia.nfc.NfcTagService
 import app.brucia.protocol.CompanionClient
 import app.brucia.protocol.Kind
 import app.brucia.session.BurstLoop
 import app.brucia.session.BurstLoopRegistry
 import app.brucia.session.CommandRunner
 import app.brucia.subghz.SubGhzBruteforceService
+import app.brucia.subghz.RfReceiveService
 import app.brucia.session.JsonCommandRunner
 import app.brucia.wifi.BrucegotchiService
 import app.brucia.wifi.EvilPortalService
@@ -77,14 +99,23 @@ import app.brucia.wifi.ResponderService
 import app.brucia.wifi.WifiJoinService
 import app.brucia.wifi.WifiMacService
 import app.brucia.ir.IrButton
-import app.brucia.ir.IrParser
 import app.brucia.subghz.DecodedSignal
 import app.brucia.subghz.OokSamples
 import app.brucia.subghz.SubFile
 import app.brucia.subghz.SubGhzDecoder
+import app.brucia.subghz.RawCompleteness
+import app.brucia.subghz.SubGhzRawEvent
+import app.brucia.subghz.SubGhzReceiveState
 import app.brucia.subghz.SubSignal
 import app.brucia.transport.Transport
+import app.brucia.transport.FlashPortOwner
+import app.brucia.transport.PortLease
+import app.brucia.transport.launchFlashOwned
+import app.brucia.update.AppDownloadService
 import app.brucia.update.AppUpdater
+import app.brucia.update.DownloadIO
+import app.brucia.update.ReleaseCatalog
+import app.brucia.update.ReleaseUpdateService
 import app.brucia.update.EspFlasher
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -96,6 +127,7 @@ import app.brucia.audio.PcmSource
 import app.brucia.audio.Dtmf
 import app.brucia.audio.Sstv
 import app.brucia.service.ConnectionService
+import app.brucia.service.ConnectionServiceCommand
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -117,6 +149,12 @@ import org.json.JSONObject
 private fun companionNowMs(): Long = System.nanoTime() / 1_000_000L
 
 private const val MAX_RF_CAPTURE_ROWS = 5000
+// Bootloader reset + re-enumeration (~12 s) plus the USB permission dialog (60 s) plus margin.
+private const val FLASH_HANDOFF_TIMEOUT_MS = 90_000L
+// The companion open (openDevice + port open) is synchronous; the claim only bounds a lost abort.
+private const val COMPANION_OPEN_TIMEOUT_MS = 10_000L
+// `diag` only reads RAM counters; a busy device answers ERR 409 at once.
+private const val DIAG_TIMEOUT_MS = 5_000L
 private const val MAX_MONITOR_FRAMES = 4000
 
 /** Rolling history depth for the Sub-GHz spectrum waterfall (rows = sweeps over time). */
@@ -265,39 +303,6 @@ data class MonitorFrame(
     val info: Dot11Info,
 )
 
-/** One recovered MIFARE Classic sector key (type "A"/"B"). */
-data class MifareFound(val sector: Int, val type: String, val key: String)
-
-/** Progress + results of the batched MIFARE key-dictionary attack. */
-data class MifareAttackState(
-    val running: Boolean = false,
-    val batch: Int = 0,
-    val totalBatches: Int = 0,
-    val found: List<MifareFound> = emptyList(),
-    val message: String = "",
-)
-
-/** App OTA self-update status (installed vs latest GitHub release + download progress). */
-data class AppUpdateState(
-    val checking: Boolean = false,
-    val current: String = "",
-    val latest: String = "",
-    val apkUrl: String? = null,
-    val newer: Boolean = false,
-    val notes: String = "", // GitHub release body (Markdown): what changed in [latest]
-    val downloading: Boolean = false,
-    val downloaded: Long = 0,
-    val total: Long = 0,
-    val error: String? = null,
-)
-
-/** Latest device-firmware release info (tag + resolved merged-image URL). */
-data class FirmwareState(
-    val latestTag: String = "",
-    val firmwareUrl: String? = null,
-    val error: String? = null,
-)
-
 /**
  * Device firmware flash progress. [phase] is idle / download / flash / done / error;
  * [written]/[total] track bytes for a progress bar.
@@ -306,13 +311,6 @@ data class FlashState(
     val phase: String = "idle",
     val written: Int = 0,
     val total: Int = 0,
-    val message: String = "",
-)
-
-/** SSTV / speaker transmit progress for the Audio tools (SSTV TX, DTMF). */
-data class SstvTxState(
-    val active: Boolean = false,
-    val progress: Float = 0f,
     val message: String = "",
 )
 
@@ -327,6 +325,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val _device = MutableStateFlow<DeviceInfo?>(null)
     val device: StateFlow<DeviceInfo?> = _device.asStateFlow()
 
+    // Recovery diagnostics: app link counters across every link since the app started, and the
+    // last device `diag` result (fetched only on Refresh, kept after disconnect for exports).
+    private val linkCounters = LinkCounters()
+    private val _appDiag = MutableStateFlow(linkCounters.snapshot())
+    val appDiag: StateFlow<LinkCountersSnapshot> = _appDiag.asStateFlow()
+    private val _deviceDiag = MutableStateFlow<DeviceDiagState>(DeviceDiagState.NoDevice)
+    val deviceDiag: StateFlow<DeviceDiagState> = _deviceDiag.asStateFlow()
+
     private val _transportKind = MutableStateFlow("none")
     val transportKind: StateFlow<String> = _transportKind.asStateFlow()
 
@@ -338,6 +344,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _rfWave = MutableStateFlow(IntArray(0))
     val rfWave: StateFlow<IntArray> = _rfWave.asStateFlow()
+    // Completeness metadata of the burst shown in [rfWave]; NO_INFO for samples, imports and old firmware.
+    private val _rfWaveCompleteness = MutableStateFlow(RawCompleteness.NO_INFO)
+    val rfWaveCompleteness: StateFlow<RawCompleteness> = _rfWaveCompleteness.asStateFlow()
+
+    // Sub-GHz receive streams ("Listen" = subghz.raw, spectrum): state follows the SUB outcome.
+    private val subghzRx = SubGhzReceiveState()
+    val subghzListening: StateFlow<Boolean> = subghzRx.listening
+    val subghzRawError: StateFlow<String> = subghzRx.rawError
+    val spectrumError: StateFlow<String> = subghzRx.spectrumError
 
     // Raw Sub-GHz capture-to-CSV: while capturing is on, each subghz.raw event is appended
     // as a row. Capped to avoid OOM on long captures.
@@ -366,8 +381,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val spectrum: StateFlow<SpectrumSweep?> = _spectrum.asStateFlow()
     private val _spectrumHistory = MutableStateFlow<List<SpectrumSweep>>(emptyList())
     val spectrumHistory: StateFlow<List<SpectrumSweep>> = _spectrumHistory.asStateFlow()
-    private val _spectrumActive = MutableStateFlow(false)
-    val spectrumActive: StateFlow<Boolean> = _spectrumActive.asStateFlow()
+    val spectrumActive: StateFlow<Boolean> get() = subghzRx.spectrumActive
     // Per-point accumulator for the {freq, rssi} EVENT shape; flushed into a sweep on wrap.
     private val spectrumPts = LinkedHashMap<Long, Int>()
     private var lastSpectrumFreq = Long.MIN_VALUE
@@ -405,8 +419,19 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val beaconActive: StateFlow<Boolean> get() = beaconLoop.active
 
     // Batched MIFARE key-dictionary attack state + optional user-imported keys.
-    private val _mifare = MutableStateFlow(MifareAttackState())
-    val mifare: StateFlow<MifareAttackState> = _mifare.asStateFlow()
+    private val mifareKeyCheck by lazy {
+        MifareKeyCheckService(viewModelScope, connect = {
+            val captured = session
+            if (captured == null) null else JsonCommandRunner { cmd, timeout ->
+                withContext(Dispatchers.IO) { sendAwaitJson(cmd, timeout, captured) }
+            }
+        },
+        // Only send the in-flight stop frame when the firmware advertises it polls one mid-batch.
+        stopSupported = { _device.value?.features?.mifareKeycheckStop == true },
+        // Direct, unlogged stop channel (same sender the responder/karma long ops use).
+        stopSender = directStop)
+    }
+    val mifare get() = mifareKeyCheck.status
     private val _mifareUserKeys = MutableStateFlow<List<String>>(emptyList())
     val mifareUserKeys: StateFlow<List<String>> = _mifareUserKeys.asStateFlow()
 
@@ -425,12 +450,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         savedDao.observe("rf").stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val savedIr: StateFlow<List<SavedItem>> =
         savedDao.observe("ir").stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-    private val _lastNfc = MutableStateFlow<String?>(null)
-    val lastNfc: StateFlow<String?> = _lastNfc.asStateFlow()
-    private val _lastRf = MutableStateFlow<String?>(null)
-    val lastRf: StateFlow<String?> = _lastRf.asStateFlow()
-
 
     private val _wigleStatus = MutableStateFlow<WigleUploadStatus>(WigleUploadStatus.Idle)
     val wigleStatus: StateFlow<WigleUploadStatus> = _wigleStatus.asStateFlow()
@@ -479,11 +498,17 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // Per-pull byte buffers keyed by the fs_read request id.
     private val fileReader = DeviceFileReader()
     private val fileTransferMutex = Mutex()
-    private val streamWriteMutex = Mutex()
-    // Device streams currently subscribed (wifi.ap / subghz.raw / ble.scan), so we can
-    // unsubscribe them on disconnect and stop the device radios.
-    private val pendingStreamIds = java.util.concurrent.ConcurrentHashMap<String, Int>()
-    private val activeStreams = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val subscriptions by lazy {
+        StreamSubscriptions(viewModelScope, { session }, { _device.value?.caps },
+            onState = ::updateStreamState,
+            onChanged = ::refreshConnectionNotification,
+            onError = { stream, message ->
+                if (stream == "mic.pcm") _micPcmStatus.value = message
+                subghzRx.onError(stream, message)
+            },
+            onStart = { stream, on -> logCmdStart("SUB $stream ${if (on) "on" else "off"}") },
+            onFinish = ::logCmdDone)
+    }
 
     /** Access points, newest first, backed by Room (survives app restarts). */
     val aps: StateFlow<List<ApObservation>> =
@@ -521,17 +546,43 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun connect(t: Transport) {
-        disconnect()
+    // The companion link's hold on the USB device: its usbOwner token and the lease that closes [transport].
+    private var companionToken: Long? = null
+    private var companionLease: PortLease? = null
+
+    /**
+     * Claim the USB device for a companion open (manual Connect or attach auto-connect); pass the
+     * token to [connect], or to [abortCompanionLink] if the open fails. An existing link is dropped
+     * first (manual reconnect). Null while a flash or another companion open holds the device.
+     */
+    fun beginCompanionLink(): Long? {
+        if (companionToken != null) disconnect()
+        return usbOwner.beginCompanion(COMPANION_OPEN_TIMEOUT_MS)
+    }
+
+    /** The open for [token] failed before [connect]: give the device back. */
+    fun abortCompanionLink(token: Long) { usbOwner.finish(token) }
+
+    /**
+     * Run companion mode on [t], opened under [token] from [beginCompanionLink]. False (and [t]
+     * already closed) when the token no longer owns the USB device, e.g. a flash took it.
+     */
+    fun connect(token: Long, t: Transport): Boolean {
+        if (transport != null) disconnect()
+        val lease = PortLease { t.close() }
+        if (usbOwner.adopt(token, lease) != FlashPortOwner.Adopt.ADOPTED) {
+            app.brucia.BruciaLog.w("VM", "companion transport refused: the USB device has another owner")
+            return false
+        }
+        companionToken = token
+        companionLease = lease
         transport = t
         _transportKind.value = t.kind
-        val c = CompanionClient(t)
+        val c = CompanionClient(t, linkCounters)
+        linkCounters.noteLink()
         client = c
         session = app.brucia.session.CommandSession(c, t, preflight = { command ->
-            if (command.startsWith("rfid125_read"))
-                check(_device.value?.caps?.lfRfid == true) { "No confirmed 125 kHz reader" }
-            if (command.startsWith("ibutton_"))
-                check(_device.value?.caps?.ibutton == true) { "No confirmed iButton interface" }
+            CommandCapabilities.check(command, _device.value?.caps)
         }, onCallbackError = { e -> app.brucia.BruciaLog.w("VM", "disconnect callback", e) })
         lastPongAt = companionNowMs()
         // Stay "Connecting..." until the first CAPS/DeviceInfo handshake arrives.
@@ -539,16 +590,17 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         startCompanionLoops()
         // Foreground service keeps the process alive + holds a wake lock for the link while the
         // screen is off. Started here (link opened) and stopped in disconnect() - the single pair.
-        try { ConnectionService.start(getApplication(), "Connecting...", "") } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "service start (connecting)", e) }
+        try { ConnectionService.start(getApplication(), ConnectionServiceCommand.OWNER_COMPANION, "Connecting...", "") } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "service start (connecting)", e) }
+        return true
     }
 
     /** Comma-joined active device streams for the service notification. */
-    private fun streamsText(): String = synchronized(activeStreams) { activeStreams.sorted().joinToString(", ") }
+    private fun streamsText(): String = subscriptions.activeStreams().sorted().joinToString(", ")
 
     /** Refresh the foreground-service notification with the current status + streams. */
     private fun refreshConnectionNotification() {
         if (transport?.isOpen != true) return
-        try { ConnectionService.update(getApplication(), _status.value, streamsText()) } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "service update", e) }
+        try { ConnectionService.update(getApplication(), ConnectionServiceCommand.OWNER_COMPANION, _status.value, streamsText()) } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "service update", e) }
     }
 
     /**
@@ -763,26 +815,24 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Empty the command log. */
     fun clearCommandLog() { _commandLog.value = emptyList() }
 
-    /** Bounded command completion; callbacks return on the main dispatcher. */
-    private fun dispatchCmd(cmd: String, cb: ((Boolean, String) -> Unit)? = null) {
-        val s = session ?: run { cb?.invoke(false, "Not connected."); return }
-        val logId = logCmdStart(cmd)
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = s.await(cmd, 650_000)
-            logCmdDone(logId, result.first, result.second)
-            withContext(Dispatchers.Main) { cb?.invoke(result.first, result.second) }
+    private val callbackCommands by lazy { CommandTasks(viewModelScope) }
+
+    /**
+     * Fire-and-forget console / transmit / screen-control commands: no reply is consumed here (the
+     * output reaches the console through the ACK route and the command log). Bound to the original
+     * link and cancellable as a group; request/response features use the services instead.
+     */
+    private fun dispatchCmd(cmd: String) {
+        val captured = session ?: return
+        val runner = CommandRunner { command, timeout ->
+            withContext(Dispatchers.IO) { sendAwait(command, timeout, captured) }
         }
+        callbackCommands.run(runner, cmd, 650_000)
     }
 
-    /** Like [dispatchCmd] but routes the full ACK data object to the callback. */
-    private fun dispatchCmdJson(cmd: String, cb: (Boolean, JSONObject?) -> Unit) {
-        val s = session ?: run { cb(false, null); return }
-        val logId = logCmdStart(cmd)
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = s.awaitJson(cmd, 650_000)
-            logCmdDone(logId, result.first, result.second?.toString() ?: "")
-            withContext(Dispatchers.Main) { cb(result.first, result.second) }
-        }
+    /** Echo a command line into the console, as the legacy result adapters did. */
+    private fun echoConsole(cmd: String) {
+        _console.value = (_console.value + "> $cmd").takeLast(500)
     }
 
     fun setDeviceScreen(on: Boolean) = dispatchCmd("scr ${if (on) 1 else 0}")
@@ -790,8 +840,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Send one command and suspend until its ACK (or a timeout). Used by the spam burst loops. */
     // Default ACK wait must exceed the burst duration: bounded ops (spam/deauth/jammer) only ACK
     // AFTER running for SPAM_BURST_SECS, so a shorter timeout would always report "no response".
-    private suspend fun sendAwait(cmd: String, timeoutMs: Long = (SPAM_BURST_SECS + 4) * 1000L): Pair<Boolean, String> {
-        val s = session ?: return false to "Not connected."
+    private suspend fun sendAwait(cmd: String, timeoutMs: Long = (SPAM_BURST_SECS + 4) * 1000L, expectedSession: CommandSession? = session): Pair<Boolean, String> {
+        val s = expectedSession ?: return false to "Not connected."
+        if (session !== s) return false to "Connection closed or changed."
         val logId = logCmdStart(cmd)
         try {
             val res = s.await(cmd, timeoutMs)
@@ -804,9 +855,35 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Refresh the Diagnostics section: snapshot the app link counters and, when the firmware
+     * advertises `features.diag`, ask the device once for its `diag` counters. Nothing is sent
+     * automatically; older firmware is reported as not supported.
+     */
+    fun refreshDiagnostics() {
+        _appDiag.value = linkCounters.snapshot()
+        val info = _device.value ?: return
+        if (!info.features.diag) { _deviceDiag.value = DeviceDiagState.Unsupported; return }
+        val s = session ?: return
+        if (_deviceDiag.value is DeviceDiagState.Loading) return
+        _deviceDiag.value = DeviceDiagState.Loading
+        viewModelScope.launch {
+            val (ok, d) = sendAwaitJson("diag", DIAG_TIMEOUT_MS, s)
+            val diag = if (ok) DeviceDiagnostics.fromAck(d) else null
+            val at = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+            _deviceDiag.value = when {
+                diag != null -> DeviceDiagState.Ready(diag, at)
+                ok -> DeviceDiagState.Failed("malformed diag reply")
+                else -> DeviceDiagState.Failed(d?.optString("msg")?.takeIf { it.isNotBlank() } ?: "no response")
+            }
+            _appDiag.value = linkCounters.snapshot()
+        }
+    }
+
     /** [sendAwait] for commands whose ACK data object matters (eth_status, lora_recv). */
-    private suspend fun sendAwaitJson(cmd: String, timeoutMs: Long): Pair<Boolean, JSONObject?> {
-        val s = session ?: return false to JSONObject().put("msg", "Not connected.")
+    private suspend fun sendAwaitJson(cmd: String, timeoutMs: Long, expectedSession: CommandSession? = session): Pair<Boolean, JSONObject?> {
+        val s = expectedSession
+        if (s == null || session !== s) return false to JSONObject().put("msg", "Connection closed or changed.")
         val logId = logCmdStart(cmd)
         try {
             val res = s.awaitJson(cmd, timeoutMs)
@@ -845,16 +922,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Apple ProximityPair popups; delegates to [startBleSpam] ("ios"). */
     fun bleSpam(copies: Int = DEFAULT_SPAM_COPIES) = startBleSpam("ios", copies)
 
-    // --- File manager (device SD/LittleFS via the storage CLI) ---
-    fun listDir(path: String, cb: (List<app.brucia.files.FileEntry>) -> Unit) {
-        runWithResult("storage list $path") { _, out -> cb(app.brucia.files.FileList.parse(out)) }
-    }
-    fun deleteDeviceFile(path: String, cb: () -> Unit) {
-        runWithResult("storage remove $path") { _, _ -> cb() }
-    }
-    fun makeDeviceDir(path: String, cb: () -> Unit) {
-        runWithResult("storage mkdir $path") { _, _ -> cb() }
-    }
+    // --- File manager (device SD/LittleFS via the storage CLI; state in DeviceFileBrowser) ---
+    fun listDir(path: String) { echoConsole("storage list $path"); fileBrowser.list(path) }
+    /** Remove [path]; the directory last listed is listed again when the device answers. */
+    fun deleteDeviceFile(path: String) { echoConsole("storage remove $path"); fileBrowser.remove(path) }
+    /** Create [path]; the directory last listed is listed again when the device answers. */
+    fun makeDeviceDir(path: String) { echoConsole("storage mkdir $path"); fileBrowser.mkdir(path) }
+    /** Crack tab "List captures": text listing of the handshake directory on [captureList]. */
+    fun listCaptures() { echoConsole("storage list ${DeviceFileBrowser.CAPTURE_DIR}"); fileBrowser.listCaptures() }
 
     private suspend fun handle(msg: JSONObject) {
         when (msg.optInt("t")) {
@@ -874,24 +949,13 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             }
             Kind.CAPS -> {
                 val d = msg.optJSONObject("d") ?: return
-                val modsArr = d.optJSONArray("modules")
-                val mods = buildList {
-                    if (modsArr != null) for (i in 0 until modsArr.length()) add(modsArr.optString(i))
-                }
-                _device.value = DeviceInfo(
-                    board = d.optString("board", "device"),
-                    chip = d.optString("chip", ""),
-                    fw = d.optString("fw", ""),
-                    modules = mods,
-                    battery = d.optInt("battery", -1),
-                    caps = DeviceCaps.fromJson(d.optJSONObject("caps")),
-                    features = DeviceFeatures.fromJson(d.optJSONObject("features")),
-                    themeRgb565 = d.optInt("theme", 0),
-                    ledRgb = d.optInt("led", 0),
-                    ledBright = d.optInt("ledBright", -1),
-                    ledEffect = d.optInt("ledEffect", 0),
-                    screenBright = d.optInt("bright", -1),
-                )
+                val info = DeviceInfo.fromCaps(d)
+                _device.value = info
+                // Record the exact firmware artifact so an exported log can be tied to it.
+                val provenance = info.provenanceLines().joinToString("; ")
+                app.brucia.BruciaLog.deviceProvenance = provenance
+                app.brucia.BruciaLog.i("Caps", provenance)
+                _deviceDiag.value = Diagnostics.afterCaps(info, _deviceDiag.value)
                 // Handshake complete: only now is the link truly "Connected".
                 lastPongAt = companionNowMs()
                 _status.value = "Connected"
@@ -916,11 +980,13 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     if (b64.isEmpty()) return
                     val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (_: Exception) { return }
                     if (bytes.size % 2 != 0) return
-                    if (_recording.value) {
-                        recordingBuffer.append(bytes)
-                        _recordingReady.value = recordingBuffer.hasData
-                        _recording.value = recordingBuffer.active
-                        if (!_recording.value) _micPcmStatus.value = "Recording limit reached; save the captured audio"
+                    // Offered unconditionally: the buffer decides under its own lock whether it is
+                    // recording and publishes recordingState itself, so a Stop/Cancel on Main can
+                    // never be overwritten here. Optional seq/dropped feed the gap accounting.
+                    val seq = if (d.has("seq")) d.optLong("seq", -1L).takeIf { it >= 0 } else null
+                    val dropped = if (d.has("dropped")) d.optLong("dropped", -1L).takeIf { it >= 0 } else null
+                    if (recordingBuffer.append(bytes, seq, dropped) == RecordingBuffer.Append.LIMIT_REACHED) {
+                        _micPcmStatus.value = "Recording limit reached; save the captured audio"
                     }
                     val shorts = ShortArray(bytes.size / 2)
                     var j = 0
@@ -932,14 +998,18 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     _micPcm.value = shorts
                     return
                 }
+                if (ev == "speaker.play") {
+                    // Terminal event of a non-blocking speaker_play (features.speaker_play_async).
+                    d.optJSONObject("data")?.let { speaker.onPlayEvent(it) }
+                    return
+                }
                 if (ev == "subghz.raw") {
-                    val data = d.optJSONObject("data") ?: return
-                    val arr: JSONArray = data.optJSONArray("timings") ?: return
-                    val timings = IntArray(arr.length()) { arr.optInt(it) }
+                    val raw = SubGhzRawEvent.parse(d.optJSONObject("data") ?: return) ?: return
+                    val timings = raw.timings
                     _rfWave.value = timings
+                    _rfWaveCompleteness.value = raw.completeness
                     if (_rfCapture.value.capturing) {
-                        val freqHz = data.optLong("freq", 0L)
-                        appendRfCaptureRow(RfCaptureRow(System.currentTimeMillis(), freqHz, timings))
+                        appendRfCaptureRow(RfCaptureRow(System.currentTimeMillis(), raw.freqHz, timings, raw.symbols, raw.maxSymbols))
                     }
                     val decoded = SubGhzDecoder.decode(timings)
                     if (decoded.isNotEmpty()) _subghz.value = (decoded + _subghz.value).take(50)
@@ -1178,15 +1248,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         _deauthTarget.value = ""
     }
 
-    /**
-     * Phone-driven handshake capture of a target AP: the device deauths + sniffs the
-     * 4-way handshake to /BrucePCAP/handshakes/ (then pull it in the Crack tab and crack).
-     */
-    fun captureHandshake(bssid: String, channel: Int, ssid: String, seconds: Int = 30) {
-        _console.value = (_console.value + "> capture handshake $bssid ch$channel ${seconds}s").takeLast(500)
-        dispatchCmd("wifi_handshake $bssid $channel $seconds $ssid")
-    }
-
     private val captureWorkflow by lazy {
         CaptureWorkflow(viewModelScope, blockedReason = {
             if (session != null && _device.value?.features?.verifiedFiles != true)
@@ -1194,6 +1255,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }, connect = {
             val captured = session
             if (captured == null) null else object : CaptureLink {
+                // The device advertises features.capture_descriptor: import exactly the file it names
+                // and verify it after transfer, instead of diffing directory listings.
+                override val descriptorSupported = _device.value?.features?.captureDescriptor == true
+                override suspend fun capture(cmd: String, timeoutMs: Long): Pair<Boolean, org.json.JSONObject?> =
+                    withContext(Dispatchers.IO) {
+                        if (session !== captured) throw java.io.IOException("Connection changed.")
+                        sendAwaitJson(cmd, timeoutMs, captured)
+                    }
                 override val commands = CommandRunner { cmd, timeout ->
                     withContext(Dispatchers.IO) {
                         if (session !== captured) throw java.io.IOException("Connection changed.")
@@ -1261,18 +1330,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         _console.value = emptyList()
     }
 
-    /** IR learn: capture a remote via `ir rx`; parse the .ir output into buttons. */
-    fun learnIr() {
-        dispatchCmd("ir rx") { _, out ->
-            val parsed = IrParser.parse(out)
-            if (parsed.isNotEmpty()) {
-                _irLearned.value = parsed + _irLearned.value
-                viewModelScope.launch(Dispatchers.IO) {
-                    val now = System.currentTimeMillis()
-                    parsed.forEach { b ->
-                        savedDao.insert(SavedItem(type = "ir", name = b.name, subtitle = b.protocol, payload = b.toCli(), timeMillis = now))
-                    }
-                }
+    /** IR learn: capture a remote via the CLI `ir rx`; IrReceiveService parses the .ir output. */
+    fun learnIr() = irRx.learn()
+
+    private fun onIrLearned(parsed: List<IrButton>) {
+        _irLearned.value = parsed + _irLearned.value
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            parsed.forEach { b ->
+                savedDao.insert(SavedItem(type = "ir", name = b.name, subtitle = b.protocol, payload = b.toCli(), timeMillis = now))
             }
         }
     }
@@ -1413,11 +1479,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     //     on-board interpreter cannot. Persisted like the IR remote and custom songs.
     private val _macros = MutableStateFlow<List<app.brucia.automation.Macro>>(emptyList())
     val macros: StateFlow<List<app.brucia.automation.Macro>> = _macros.asStateFlow()
-    private val _macroStatus = MutableStateFlow("")
-    val macroStatus: StateFlow<String> = _macroStatus.asStateFlow()
-    private val _macroRunning = MutableStateFlow(false)
-    val macroRunning: StateFlow<Boolean> = _macroRunning.asStateFlow()
-    private var macroJob: Job? = null
+    private val macroRunner by lazy {
+        MacroRunner(viewModelScope, connect = {
+            val captured = session
+            if (captured == null) null else CommandRunner { cmd, timeout ->
+                withContext(Dispatchers.IO) { sendAwait(cmd, timeout, captured) }
+            }
+        })
+    }
+    val macroStatus get() = macroRunner.status
+    val macroRunning get() = macroRunner.running
     private val macroPrefs by lazy {
         getApplication<Application>().getSharedPreferences("macros", android.content.Context.MODE_PRIVATE)
     }
@@ -1442,37 +1513,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         saveMacros()
     }
 
-    /** Run a macro: each step's command in order, pausing [delayMs] after each. Cancellable. */
-    fun runMacro(macro: app.brucia.automation.Macro) {
-        if (client == null) { _macroStatus.value = "Connect the device over USB first."; return }
-        if (_macroRunning.value) return
-        // Set the guard SYNCHRONOUSLY (before launching) so a fast double-tap can't start two
-        // concurrent macros whose command frames would interleave and corrupt the USB link.
-        _macroRunning.value = true
-        macroJob = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                macro.steps.forEachIndexed { i, step ->
-                    ensureActive()
-                    _macroStatus.value = "Step ${i + 1}/${macro.steps.size}: ${step.cmd}"
-                    val (ok, out) = sendAwait(step.cmd)
-                    _macroStatus.value = "Step ${i + 1}/${macro.steps.size}: ${step.cmd} -> ${if (ok) out.ifBlank { "ok" } else "failed: $out"}"
-                    if (step.delayMs > 0) delay(step.delayMs.toLong())
-                }
-                _macroStatus.value = "Macro \"${macro.name}\" finished."
-            } catch (_: Exception) {
-                _macroStatus.value = "Macro \"${macro.name}\" stopped."
-            } finally {
-                _macroRunning.value = false
-            }
-        }
-    }
-
-    fun stopMacro() {
-        macroJob?.cancel()
-        macroJob = null
-        _macroRunning.value = false
-        _macroStatus.value = "Macro stopped."
-    }
+    fun runMacro(macro: app.brucia.automation.Macro) = macroRunner.start(macro)
+    fun stopMacro() = macroRunner.stop()
 
     // --- Saved Evil Portal HTML templates authored in-app (name + html), persisted. The ESP serves
     //     the captive page; the phone is the editor/preview the device could never offer.
@@ -1704,33 +1746,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         _geoStatus.value = "Replayed \"${g.name}\"."
     }
 
-    /** Send a command and route its captured output to a one-shot callback. */
-    fun runWithResult(cmd: String, cb: (Boolean, String) -> Unit) {
-        _console.value = (_console.value + "> $cmd").takeLast(500)
-        dispatchCmd(cmd, cb)
-    }
-
-    // --- NFC / RFID ---
-    fun nfcRead() = runWithResult("rfid read") { _, out ->
-        _lastNfc.value = out
-        val uid = CliParse.field(out, "UID")
-        if (!uid.isNullOrEmpty()) {
-            val type = CliParse.field(out, "Type") ?: ""
-            viewModelScope.launch(Dispatchers.IO) {
-                savedDao.insert(
-                    SavedItem(type = "nfc", name = uid, subtitle = type, payload = out, timeMillis = System.currentTimeMillis())
-                )
-            }
-        }
-    }
+    // --- NFC / RFID (read/info/ndef owned by NfcTagService; the rest are console actions) ---
+    fun nfcRead() { echoConsole(NfcTagService.READ); nfcTag.read() }
 
     fun nfcEmulate() = sendConsole("rfid emulate")
     fun nfcClone() = sendConsole("rfid clone")
     fun nfcWrite() = sendConsole("rfid write")
     fun nfcErase() = sendConsole("rfid erase")
-    fun nfcInfo() = runWithResult("rfid info") { _, out -> _lastNfc.value = out }
+    fun nfcInfo() { echoConsole(NfcTagService.INFO); nfcTag.info() }
     fun nfcSave() = sendConsole("rfid save brucia_${System.currentTimeMillis()}")
-    fun nfcNdef() = runWithResult("rfid ndef") { _, out -> _lastNfc.value = out }
+    fun nfcNdef() { echoConsole(NfcTagService.NDEF); nfcTag.ndef() }
 
     // --- Advanced NFC (fixed contract; firmware built in parallel) ---
 
@@ -1772,71 +1797,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearMifareUserKeys() { _mifareUserKeys.value = emptyList() }
-    fun resetMifareAttack() { _mifare.value = MifareAttackState() }
+    fun resetMifareAttack() = mifareKeyCheck.reset()
+    fun stopMifareKeyCheck() = mifareKeyCheck.stop()
 
-    /**
-     * Run the MIFARE key dictionary against the presented card: send the bundled default
-     * keys plus any user-imported keys to the device in batches of ~48 via
-     * `mifare_keycheck <csv>`, accumulating the found[{sector,type,key}] from each ACK.
-     */
-    fun runMifareKeyCheck() {
-        if (client == null) {
-            _mifare.value = MifareAttackState(message = "Connect the device over USB first.")
-            return
-        }
-        val dict = (NfcSecurity.loadKeyDictionary(getApplication()) + _mifareUserKeys.value).distinct()
-        if (dict.isEmpty()) {
-            _mifare.value = MifareAttackState(message = "No keys in dictionary.")
-            return
-        }
-        val batches = dict.chunked(48)
-        _mifare.value = MifareAttackState(running = true, batch = 0, totalBatches = batches.size, message = "Starting (${dict.size} keys)...")
-        runMifareBatch(batches, 0, LinkedHashMap())
-    }
-
-    private fun runMifareBatch(batches: List<List<String>>, index: Int, acc: LinkedHashMap<String, MifareFound>) {
-        if (index >= batches.size) {
-            _mifare.value = _mifare.value.copy(
-                running = false,
-                found = acc.values.toList(),
-                message = if (acc.isEmpty()) "No keys recovered." else "Done - ${acc.size} key(s) recovered.",
-            )
-            return
-        }
-        _mifare.value = _mifare.value.copy(running = true, batch = index + 1, message = "Testing batch ${index + 1}/${batches.size}...")
-        dispatchCmdJson("mifare_keycheck ${batches[index].joinToString(",")}") { _, d ->
-            val arr = d?.optJSONArray("found")
-            if (arr != null) {
-                for (i in 0 until arr.length()) {
-                    val o = arr.optJSONObject(i) ?: continue
-                    val sector = o.optInt("sector", -1)
-                    val type = o.optString("type")
-                    val key = o.optString("key")
-                    acc["$sector-$type"] = MifareFound(sector, type, key)
-                }
-            }
-            _mifare.value = _mifare.value.copy(found = acc.values.toList())
-            runMifareBatch(batches, index + 1, acc)
-        }
-    }
+    /** Existing bundled and imported dictionary, snapshotted by the batch service. */
+    fun runMifareKeyCheck() = mifareKeyCheck.start(
+        NfcSecurity.loadKeyDictionary(getApplication()) + _mifareUserKeys.value
+    )
 
     // --- Sub-GHz capture / replay via the CLI (device decodes; phone stores) ---
-    fun rfCapture(freqHz: Long = 433_920_000L) = runWithResult("rf rx $freqHz") { _, out ->
-        _lastRf.value = out
-        val replay = CliParse.rfReplayCommand(out)
-        val key = CliParse.field(out, "Key") ?: CliParse.field(out, "key") ?: "signal"
-        viewModelScope.launch(Dispatchers.IO) {
-            savedDao.insert(
-                SavedItem(
-                    type = "rf",
-                    name = key,
-                    subtitle = CliParse.field(out, "Protocol") ?: "",
-                    payload = replay ?: out,
-                    timeMillis = System.currentTimeMillis(),
-                )
-            )
-        }
-    }
+    fun rfCapture(freqHz: Long = 433_920_000L) { echoConsole("rf rx $freqHz"); rfReceive.capture(freqHz) }
 
     fun replaySaved(item: SavedItem) {
         if (item.payload.startsWith("rf tx")) sendCommand(item.payload) else sendConsole(item.payload)
@@ -1852,56 +1822,27 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             "wifi.sta" -> _sniffing.value = on
             "wifi.probe" -> _probing.value = on
             "wifi.monitor" -> _monitoring.value = on
-            "subghz.spectrum" -> _spectrumActive.value = on
-            "subghz.raw" -> if (!on) stopRfCapture()
+            "subghz.spectrum" -> subghzRx.onState(stream, on)
+            "subghz.raw" -> {
+                subghzRx.onState(stream, on)
+                if (!on) stopRfCapture()
+            }
             "mic.pcm" -> {
                 _micPcmActive.value = on
-                if (!on) pauseRecording()
+                if (on) recordingBuffer.streamRestarted()
+                if (!on) {
+                    pauseRecording()
+                    dtmfJob?.cancel()
+                    dtmfJob = null
+                    _dtmfListening.value = false
+                }
             }
         }
     }
 
-    /** Gate every entry point, including composite screens, then correlate the SUB result. */
-    private fun setStream(stream: String, on: Boolean, channel: Int? = null, bssid: String? = null): Boolean {
-        val s = session
-        if (s == null || (on && _device.value?.caps?.allowsStream(stream) != true)) {
-            updateStreamState(stream, false)
-            return false
-        }
-        // Publish the request before scheduling IO. A fast failure must not be
-        // overwritten later by an optimistic running=true assignment in a caller.
-        if (on) {
-            app.brucia.protocol.StreamPolicy.exclusivePeers(stream).forEach { peer ->
-                pendingStreamIds.remove(peer)
-                activeStreams.remove(peer)
-                updateStreamState(peer, false)
-            }
-        }
-        updateStreamState(stream, on)
-        val id = s.nextId()
-        pendingStreamIds[stream] = id
-        if (on) activeStreams.add(stream) else activeStreams.remove(stream)
-        refreshConnectionNotification()
-        viewModelScope.launch(Dispatchers.IO) {
-            streamWriteMutex.withLock {
-                if (session !== s || pendingStreamIds[stream] != id) return@withLock
-                val logId = logCmdStart("SUB $stream ${if (on) "on" else "off"}")
-                s.expect(id) { ok, out ->
-                    logCmdDone(logId, ok, out)
-                    if (pendingStreamIds.remove(stream, id) && !ok) {
-                        activeStreams.remove(stream)
-                        updateStreamState(stream, false)
-                        if (stream == "mic.pcm") _micPcmStatus.value = out.ifBlank { "Microphone stream failed" }
-                        refreshConnectionNotification()
-                    }
-                }
-                s.subscribe(stream, on, channel, bssid, id)
-            }
-            delay(8000)
-            s.fail(id, "No stream acknowledgement from the device")
-        }
-        return true
-    }
+    /** Shared SUB owner covers individual and composite screens. */
+    private fun setStream(stream: String, on: Boolean, channel: Int? = null, bssid: String? = null): Boolean =
+        subscriptions.set(stream, on, channel, bssid)
 
     // --- "Monitor my network" (raw 802.11 frames via the "wifi.monitor" stream) ---
     /**
@@ -1959,14 +1900,20 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setSubghz(on: Boolean) {
-        setStream("subghz.raw", on)
+        setSubghzStream("subghz.raw", on)
+    }
+
+    /** Sub-GHz receive SUBs record the request first so a rejected start is reported, not a stop. */
+    private fun setSubghzStream(stream: String, on: Boolean) {
+        subghzRx.request(stream, on)
+        setStream(stream, on)
     }
 
     /** Start recording subghz.raw events to an in-memory buffer, ensuring the stream is on. */
     fun startRfCapture() {
         synchronized(rfCaptureRows) { rfCaptureRows.clear() }
         _rfCapture.value = RfCaptureState(true, 0)
-        setStream("subghz.raw", true)
+        setSubghzStream("subghz.raw", true)
     }
 
     /** Stop recording. Keeps the captured rows so they can still be exported. */
@@ -1980,7 +1927,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             rfCaptureRows.add(row)
             rfCaptureRows.size
         }
-        _rfCapture.value = _rfCapture.value.copy(samples = count)
+        val atLimit = SubGhzRawEvent.completenessOf(row.symbols, row.maxSymbols) == RawCompleteness.UNKNOWN_AT_LIMIT
+        val cur = _rfCapture.value
+        _rfCapture.value = cur.copy(samples = count, atBufferLimit = cur.atBufferLimit + if (atLimit) 1 else 0)
     }
 
     /**
@@ -2070,14 +2019,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         lastSpectrumFreq = Long.MIN_VALUE
         _spectrum.value = null
         _spectrumHistory.value = emptyList()
-        setStream("subghz.spectrum", true)
+        setSubghzStream("subghz.spectrum", true)
     }
 
     /** Stop the spectrum stream; flush any half-collected per-point sweep so it is not lost. */
     fun stopSpectrum() {
         if (spectrumPts.isNotEmpty()) flushSpectrumPoints()
-        setStream("subghz.spectrum", false)
-        _spectrumActive.value = false
+        setSubghzStream("subghz.spectrum", false)
+        subghzRx.onState("subghz.spectrum", false)
     }
 
     fun clearSpectrum() {
@@ -2414,116 +2363,46 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** MAC-flooding over Ethernet: eth_mac_flood [secs]. Authorized use only. */
     fun ethMacFlood(secs: Int = 10) = ethernet.macFlood(secs)
 
-    // --- FM audio transmitter --------------------------------------------------
-    // Streams 16 kHz mono 16-bit PCM to the device as base64 fm_audio_data chunks, paced to
-    // real time. The device's OWN mic is a special case: fm_audio_begin <freq> mic, no PCM.
-    private val _fmStatus = MutableStateFlow("")
-    val fmStatus: StateFlow<String> = _fmStatus.asStateFlow()
-    private val _fmStreaming = MutableStateFlow(false)
-    val fmStreaming: StateFlow<Boolean> = _fmStreaming.asStateFlow()
-    private val _fmLevel = MutableStateFlow(0f)
-    val fmLevel: StateFlow<Float> = _fmLevel.asStateFlow()
-    private val _fmElapsedMs = MutableStateFlow(0L)
-    val fmElapsedMs: StateFlow<Long> = _fmElapsedMs.asStateFlow()
-    private var fmJob: Job? = null
+    // --- FM audio transmitter: Android source factories, lifecycle in PcmStreamService ---
+    private fun pcmStreamService() = PcmStreamService(viewModelScope, connect = { spec ->
+        val captured = session ?: throw IOException("Connect the device over USB first.")
+        val caps = _device.value?.caps
+        if (spec.fmKHz != null && caps?.fm != true) throw IOException("No confirmed FM module.")
+        if (spec.fmKHz == null && caps?.speaker != true) throw IOException("No confirmed speaker.")
+        if (spec.deviceMic && caps?.mic != true) throw IOException("No confirmed device microphone.")
+        SessionPcmLink(captured, spec, { session === captured })
+    })
+    private val fmStream by lazy { pcmStreamService() }
+    val fmStatus: StateFlow<String> by lazy { fmStream.status.map { it.message }.stateIn(viewModelScope, SharingStarted.Eagerly, "") }
+    val fmStreaming: StateFlow<Boolean> by lazy { fmStream.status.map { it.active }.stateIn(viewModelScope, SharingStarted.Eagerly, false) }
+    val fmLevel: StateFlow<Float> by lazy { fmStream.status.map { it.level }.stateIn(viewModelScope, SharingStarted.Eagerly, 0f) }
+    val fmElapsedMs: StateFlow<Long> by lazy { fmStream.status.map { it.elapsedMs }.stateIn(viewModelScope, SharingStarted.Eagerly, 0L) }
 
-    /** Stream a generated test tone to the FM transmitter. */
-    fun fmStartTone(freqKHz: Int, toneHz: Double = 440.0) =
-        fmStart(freqKHz, "phone") { PcmSource.toneReader(toneHz) }
+    private fun startFm(freqKHz: Int, prepare: suspend (() -> Unit) -> PcmStreamSource) =
+        fmStream.start(PcmStreamSpec(fmKHz = freqKHz), "Preparing FM at $freqKHz kHz...",
+            "Transmitting at $freqKHz kHz...", prepare)
 
-    /** Decode an audio file to 16 kHz mono PCM and stream it to the FM transmitter. */
-    fun fmStartFile(uri: Uri, freqKHz: Int) = fmStart(freqKHz, "phone") {
-        val pcm = PcmSource.decodeFile(getApplication(), uri)
-        if (pcm.isEmpty()) throw IllegalStateException("Could not decode this audio file.")
-        PcmSource.arrayReader(pcm)
+    fun fmStartTone(freqKHz: Int, toneHz: Double = 440.0) = startFm(freqKHz) {
+        PcmStreamSource(PcmSource.toneReader(toneHz))
     }
 
-    /** Capture the PHONE mic and stream it to the FM transmitter (needs RECORD_AUDIO). */
-    fun fmStartPhoneMic(freqKHz: Int) = fmStart(freqKHz, "phone") {
-        val mic = PcmSource.MicReader()
-        if (!mic.start()) throw IllegalStateException("Microphone unavailable (permission denied?).")
-        mic
+    fun fmStartFile(uri: Uri, freqKHz: Int) = startFm(freqKHz) { check ->
+        val pcm = PcmSource.decodeFile(getApplication(), uri, check)
+        if (pcm.isEmpty()) throw IOException("Could not decode this audio file (limit: 16 MiB decoded PCM).")
+        PcmStreamSource(PcmSource.arrayReader(pcm), pcm.size.toLong())
     }
 
-    /** Transmit from the DEVICE's own mic - no phone PCM, the firmware captures and modulates. */
-    fun fmStartDeviceMic(freqKHz: Int) = fmStart(freqKHz, "mic", null)
-
-    /** Stop any active FM transmission (fm_audio_stop). */
-    fun fmStop() {
-        if (fmJob == null && !_fmStreaming.value) return
-        _fmStreaming.value = false
-        fmJob?.cancel()
-        fmJob = null
-        // Ensure the device hears stop even for the device-mic mode (which has no streaming job).
-        client?.let { c -> viewModelScope.launch(Dispatchers.IO) { c.cmd("fm_audio_stop") } }
-        _fmLevel.value = 0f
-        _fmStatus.value = "Stopped."
+    fun fmStartPhoneMic(freqKHz: Int) = startFm(freqKHz) {
+        val mic = PcmSource.MicReader(failOnReadError = true)
+        if (!mic.start()) { mic.close(); throw IOException("Microphone unavailable (permission denied?).") }
+        PcmStreamSource(mic)
     }
 
-    /** Suspend until the begin ACK arrives (or a short timeout), returning ok + message. */
-    private suspend fun fmBegin(cmd: String): Pair<Boolean, String> {
-        val s = session ?: return false to "Not connected."
-        return s.await(cmd, 4000)
-    }
-
-    /**
-     * Core FM flow: send fm_audio_begin, then (for phone sources) stream PCM chunks paced to
-     * real time, and fm_audio_stop at the end. [makeReader] is null for the device-mic mode.
-     */
-    private fun fmStart(freqKHz: Int, mode: String, makeReader: (() -> PcmSource.PcmReader)?) {
-        val c = client ?: run { _fmStatus.value = "Connect the device over USB first."; return }
-        if (_fmStreaming.value) return
-        _fmStreaming.value = true
-        _fmLevel.value = 0f
-        _fmElapsedMs.value = 0L
-        _fmStatus.value = "Starting FM at $freqKHz kHz..."
-        fmJob = viewModelScope.launch(Dispatchers.IO) {
-            val (ok, msg) = fmBegin("fm_audio_begin $freqKHz $mode")
-            if (!ok) {
-                _fmStatus.value = msg.ifBlank { "FM transmitter not available." }
-                _fmStreaming.value = false
-                return@launch
-            }
-            if (makeReader == null) {
-                _fmStatus.value = "Transmitting from the device mic at $freqKHz kHz."
-                return@launch
-            }
-            val reader = try {
-                makeReader()
-            } catch (e: Exception) {
-                c.cmd("fm_audio_stop")
-                _fmStatus.value = e.message ?: "Audio source failed."
-                _fmStreaming.value = false
-                return@launch
-            }
-            _fmStatus.value = "Transmitting at $freqKHz kHz..."
-            val buf = ShortArray(1024) // 1024 samples -> 2048 bytes (~2 KB) per fm_audio_data chunk
-            val startMs = System.currentTimeMillis()
-            var sentSamples = 0L
-            try {
-                while (isActive && _fmStreaming.value) {
-                    val n = reader.read(buf)
-                    if (n < 0) break
-                    if (n == 0) { delay(5); continue }
-                    val bytes = PcmSource.shortsToLittleEndian(buf, n)
-                    c.cmd("fm_audio_data " + Base64.encodeToString(bytes, Base64.NO_WRAP))
-                    _fmLevel.value = PcmSource.rmsLevel(buf, n)
-                    sentSamples += n
-                    _fmElapsedMs.value = sentSamples * 1000 / PcmSource.SAMPLE_RATE
-                    // Pace to the real 16 kHz playback rate so we do not outrun the device buffer.
-                    val sleep = (sentSamples * 1000 / PcmSource.SAMPLE_RATE) - (System.currentTimeMillis() - startMs)
-                    if (sleep > 0) delay(sleep)
-                }
-            } finally {
-                reader.close()
-                c.cmd("fm_audio_stop")
-                _fmLevel.value = 0f
-                val finished = _fmStreaming.value // reader hit the end rather than user stop
-                _fmStreaming.value = false
-                _fmStatus.value = if (finished) "Finished." else "Stopped."
-            }
-        }
-    }
+    fun fmStartDeviceMic(freqKHz: Int) = fmStream.start(
+        PcmStreamSpec(fmKHz = freqKHz, deviceMic = true), "Starting FM at $freqKHz kHz...",
+        "Transmitting from the device mic at $freqKHz kHz.",
+    )
+    fun fmStop() = fmStream.stop()
 
     /**
      * Start continuous, abortable Wi-Fi beacon spam (authorized testing only): the device
@@ -2555,35 +2434,29 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         if (wids.active.value) wids.stop() // WIDS is a monitor loop, not a BurstLoop
     }
 
-    /**
-     * Stop everything currently running (burst loops, evil portal, speaker/RF streams) and mark any
-     * still-running command-log entries as stopped. Invoked from the Cmds viewer's Stop button.
-     */
+    /** Stop local work; firmware stop requests keep their real ACK/result in the command log. */
     fun stopAllRunning() {
-        stopAllBurstLoops(silent = false)
-        try { stopEvilPortal() } catch (e: Exception) { app.brucia.BruciaLog.d("VM", "stopEvilPortal cleanup: ${e.message}") }
-        sstvTransmitStop()
-        try { stopRfCapture() } catch (e: Exception) { app.brucia.BruciaLog.d("VM", "stopRfCapture cleanup: ${e.message}") }
-        _commandLog.update { list ->
-            list.map {
-                if (it.status == CmdStatus.RUNNING) {
-                    it.copy(status = CmdStatus.FAILED, result = "stopped", doneAtMs = System.currentTimeMillis())
-                } else it
-            }
-        }
+        deviceLifecycle.stopAll()
+        dictionaryTest.cancel()
+        stopTimeline()
+        stopDtmfDecode()
+        stopPhoneMic()
+        pauseRecording()
+        stopRfCapture()
+        // Use the normal SUB ownership path: stale pending starts cannot re-enable a stream.
+        subscriptions.stopAll()
     }
 
     // --- Device panel (info / diagnostics / power) ---
-    private val _deviceOut = MutableStateFlow("")
-    val deviceOut: StateFlow<String> = _deviceOut.asStateFlow()
-
-    fun deviceCmd(cmd: String) = runWithResult(cmd) { _, out -> _deviceOut.value = out }
+    /** Diagnostics (info/free/uptime/i2c) owned by DiagnosticsService; output on [deviceOut]. */
+    fun deviceCmd(cmd: String) { echoConsole(cmd); diagnostics.run(cmd) }
     fun powerReboot() = sendConsole("reboot")
     fun powerSleep() = sendConsole("sleep")
 
     /** Decode the bundled synthetic sample (works without hardware, for demo/test). */
     fun decodeSample() {
         _rfWave.value = OokSamples.princeton24
+        _rfWaveCompleteness.value = RawCompleteness.NO_INFO
         val decoded = SubGhzDecoder.decode(OokSamples.princeton24)
         _subghz.value = (decoded + _subghz.value).take(50)
     }
@@ -2611,6 +2484,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     // Also decode RAW captures on the phone so the summary is richer.
                     if (sig.isRaw) {
                         _rfWave.value = sig.rawAbs()
+                        _rfWaveCompleteness.value = RawCompleteness.NO_INFO
                         val decoded = SubGhzDecoder.decode(sig.rawAbs())
                         if (decoded.isNotEmpty()) _subghz.value = (decoded + _subghz.value).take(50)
                     }
@@ -2661,111 +2535,128 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Updates (app OTA + device firmware flash) ---------------------------
-    private val _appUpdate = MutableStateFlow(AppUpdateState())
-    val appUpdate: StateFlow<AppUpdateState> = _appUpdate.asStateFlow()
-
-    private val _firmware = MutableStateFlow(FirmwareState())
-    val firmware: StateFlow<FirmwareState> = _firmware.asStateFlow()
-
-    // --- Multi-board flash: list per-board firmware images + let the user pick which to flash. ---
-    private val _boards = MutableStateFlow<List<AppUpdater.BoardFw>>(emptyList())
-    val boards: StateFlow<List<AppUpdater.BoardFw>> = _boards.asStateFlow()
-    private val _selectedBoard = MutableStateFlow<AppUpdater.BoardFw?>(null)
-    val selectedBoard: StateFlow<AppUpdater.BoardFw?> = _selectedBoard.asStateFlow()
-    fun loadBoards() {
-        if (_boards.value.isNotEmpty()) return
-        viewModelScope.launch(Dispatchers.IO) {
-            val list = try { AppUpdater.fetchBoards() } catch (_: Exception) { emptyList() }
-            withContext(Dispatchers.Main) { _boards.value = list }
-        }
+    private val releaseService by lazy {
+        ReleaseUpdateService(viewModelScope, fetch = { AppUpdater.fetchSnapshot() })
     }
-    /** null = auto (connected board / default); else flash this specific per-board image. */
-    fun selectBoard(b: AppUpdater.BoardFw?) { _selectedBoard.value = b }
+    val releaseUpdates get() = releaseService.state
+    private val appDownloads by lazy {
+        AppDownloadService(viewModelScope, download = { url, integrity, progress, cancelled ->
+            AppUpdater.download(getApplication(), url, integrity, progress, cancelled)
+        }, install = { apk -> withContext(Dispatchers.Main) { AppUpdater.install(getApplication(), apk) } })
+    }
+    val appDownload get() = appDownloads.state
+
+    /** null = Auto; explicit selections must belong to the current snapshot. */
+    fun selectBoard(b: ReleaseCatalog.Board?) {
+        if (!isFlashing()) releaseService.select(b)
+    }
 
     private val _flash = MutableStateFlow(FlashState())
     val flash: StateFlow<FlashState> = _flash.asStateFlow()
 
-    /**
-     * Query the GitHub latest release once and populate both the app-update and the
-     * firmware state. [currentApp] is BuildConfig.VERSION_NAME.
-     */
+    /** One response supplies version, notes, APK and every board image. */
     fun checkUpdates(currentApp: String) {
-        if (_appUpdate.value.checking) return
-        _appUpdate.value = _appUpdate.value.copy(checking = true, current = currentApp, error = null)
-        _firmware.value = _firmware.value.copy(error = null)
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val r = AppUpdater.fetchLatest()
-                _appUpdate.value = AppUpdateState(
-                    current = currentApp,
-                    latest = r.tag,
-                    apkUrl = r.apkUrl,
-                    newer = AppUpdater.isNewer(currentApp, r.tag),
-                    notes = r.notes,
-                )
-                _firmware.value = FirmwareState(
-                    latestTag = r.tag,
-                    firmwareUrl = r.firmwareUrl?.takeIf { it.isNotEmpty() },
-                )
-            } catch (e: Exception) {
-                val msg = e.message ?: "Check failed"
-                _appUpdate.value = _appUpdate.value.copy(checking = false, error = msg)
-                _firmware.value = _firmware.value.copy(error = msg)
-            }
-        }
+        if (appDownload.value.downloading || isFlashing() || releaseUpdates.value.checking) return
+        pendingAppInstall = null
+        appDownloads.reset()
+        releaseService.refresh(currentApp)
     }
 
     /** Download the latest APK and hand it to the system installer. */
     // "Install unknown apps" is a one-time per-app grant. The first tap used to only open the grant
     // screen and require a second tap; now we remember the intent and auto-resume on return.
-    @Volatile private var pendingAppInstall = false
+    @Volatile private var pendingAppInstall: String? = null
 
     /** Entry point for the "Download & install" button: install now, or request the grant then auto-resume. */
     fun requestAppInstall(ctx: android.content.Context) {
-        if (AppUpdater.canInstall(ctx)) { pendingAppInstall = false; downloadAndInstallApp(ctx) }
-        else { pendingAppInstall = true; AppUpdater.openInstallSettings(ctx) }
+        val url = releaseUpdates.value.apkUrl ?: return
+        if (AppUpdater.canInstall(ctx)) { pendingAppInstall = null; downloadAndInstallApp() }
+        else { pendingAppInstall = url; AppUpdater.openInstallSettings(ctx) }
     }
 
     /** Called from the Activity onResume: if the user just granted install permission, proceed. */
     fun resumeAppInstallIfPending(ctx: android.content.Context) {
-        if (pendingAppInstall && AppUpdater.canInstall(ctx)) { pendingAppInstall = false; downloadAndInstallApp(ctx) }
+        val requested = pendingAppInstall ?: return
+        if (requested != releaseUpdates.value.apkUrl) { pendingAppInstall = null; return }
+        if (AppUpdater.canInstall(ctx)) { pendingAppInstall = null; downloadAndInstallApp() }
     }
 
-    fun downloadAndInstallApp(ctx: android.content.Context) {
-        val appContext = ctx.applicationContext
-        val url = _appUpdate.value.apkUrl ?: return
-        if (_appUpdate.value.downloading) return
-        _appUpdate.value = _appUpdate.value.copy(downloading = true, error = null)
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val apk = AppUpdater.download(
-                    appContext, url,
-                    onProgress = { d, t -> _appUpdate.value = _appUpdate.value.copy(downloaded = d, total = t) },
-                )
-                _appUpdate.value = _appUpdate.value.copy(downloading = false)
-                withContext(Dispatchers.Main) { AppUpdater.install(appContext, apk) }
-            } catch (e: Exception) {
-                _appUpdate.value = _appUpdate.value.copy(downloading = false, error = e.message ?: "Download failed")
-            }
-        }
+    /** Single flight: a second request while a download runs is refused. */
+    fun downloadAndInstallApp() {
+        val release = releaseUpdates.value
+        val url = release.apkUrl ?: return
+        // URL and integrity come from one snapshot and stay fixed for this download.
+        appDownloads.start(url, release.apkIntegrity)
     }
 
     /**
      * Download the merged firmware and flash it over USB via [EspFlasher]. [serial]
      * is an already-opened port (provided by the Activity, which also took over the
-     * port from companion mode); [closePort] releases it when done.
+     * port from companion mode); [port] is adopted by the flash owner and released exactly once.
      */
     /** Set an explicit flash error from the Activity (e.g. bootloader re-enumeration failed). */
     fun flashError(msg: String) { _flash.value = FlashState(phase = "error", message = msg); flashLog("ERROR: $msg") }
-    /** Report that the flasher is rebooting the device into the ROM download mode. */
-    fun flashEnteringBootloader() { _flash.value = FlashState(phase = "download", message = "Rebooting into bootloader..."); flashLog("--- flash start: rebooting into bootloader ---") }
+
+    // Single owner of the USB device: the companion link or one flash operation, by token. Ports are
+    // adopted by token and released exactly once; stale or duplicate handoffs are closed on arrival.
+    // Every end of a flash operation (finish, abort, expiry, cancel, onCleared) releases the
+    // foreground service + wake lock the flash took in [flashEnteringBootloader].
+    private val usbOwner = FlashPortOwner(onEnded = { token, kind ->
+        if (kind == FlashPortOwner.Kind.FLASH) {
+            try { ConnectionService.stop(getApplication(), ConnectionServiceCommand.flashOwner(token)) } catch (e: Exception) { BruciaLog.d("VM", "flash service stop: ${e.message}") }
+        }
+    })
 
     /**
-     * True while a flash is in progress. The flasher calls [disconnect] first (so status reads
-     * "Disconnected"), and a native-USB ESP32-S3 re-enumerates mid-flash; the USB-attach
-     * auto-connect must NOT grab the port during this window or it steals it from the flasher.
+     * Report that the flasher is rebooting the device into the ROM download mode. Returns the
+     * operation token the Activity must pass to [flashFirmware] / [flashAbort], or null if refused.
+     * The ROM port must be handed over within [FLASH_HANDOFF_TIMEOUT_MS] or the operation ends.
      */
-    fun isFlashing(): Boolean = _flash.value.phase.let { it == "download" || it == "flash" }
+    fun flashEnteringBootloader(): Long? {
+        if (isFlashing()) return null
+        if (releaseUpdates.value.flashUrl == null) {
+            flashError("No matching firmware asset in the current release. Check for updates and select T-Embed CC1101 or Auto.")
+            return null
+        }
+        // Drop companion mode first so it unsubscribes while the link is still up and releases the
+        // device; then the flash owns the device and keeps the phone awake until its operation ends.
+        disconnectLink(stopService = false)
+        val token = usbOwner.begin(FLASH_HANDOFF_TIMEOUT_MS)
+        if (token == null) {
+            try { ConnectionService.stop(getApplication(), ConnectionServiceCommand.OWNER_COMPANION) } catch (e: Exception) { app.brucia.BruciaLog.d("VM", "service stop: ${e.message}") }
+            return null
+        }
+        val serviceOwner = ConnectionServiceCommand.flashOwner(token)
+        // Replaces the link's notification (if any) and keeps its wake lock: no release in between.
+        try { ConnectionService.start(getApplication(), serviceOwner, "Updating firmware", "") } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "flash service start", e) }
+        // An end that raced the start must not leave the flash notification and wake lock behind.
+        if (usbOwner.flashToken != token) try { ConnectionService.stop(getApplication(), serviceOwner) } catch (e: Exception) { app.brucia.BruciaLog.d("VM", "flash service stop: ${e.message}") }
+        // While this phase is active refresh and selection are locked, including USB re-enumeration.
+        _flash.value = FlashState(phase = "download", message = "Rebooting into bootloader...")
+        flashLog("--- flash start: rebooting into bootloader ---")
+        viewModelScope.launch {
+            // Margin: this timer and the owner's deadline read different clocks; firing early would
+            // leave the operation (and the flash's wake lock) waiting with no timer left.
+            delay(FLASH_HANDOFF_TIMEOUT_MS + 1_000L)
+            if (usbOwner.expireHandoff(token)) {
+                flashError("Bootloader handoff timed out (no USB permission or device). Unplug/replug and try again.")
+            }
+        }
+        return token
+    }
+
+    /** End flash operation [token] with an error. Ignored (logged) when [token] is no longer active. */
+    fun flashAbort(token: Long, msg: String) {
+        if (usbOwner.finish(token)) flashError(msg) else flashLog("Ignored stale flash result: $msg")
+    }
+
+    /**
+     * True while a flash is in progress. The flash drops companion mode first (so status reads
+     * "Disconnected"), and a native-USB ESP32-S3 re-enumerates mid-flash; the USB-attach
+     * auto-connect must NOT grab the port during this window ([usbOwner] also refuses it).
+     */
+    fun isFlashing(): Boolean =
+        usbOwner.flashToken != null || _flash.value.phase.let { it == "download" || it == "flash" }
 
     // Persistent flash log: every flash step (incl. the MD5 verdict) is appended here with a
     // timestamp and KEPT, so the result stays readable even after companion reconnects and clears
@@ -2778,8 +2669,21 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun clearFlashLog() { _flashLog.value = emptyList() }
 
-    fun flashFirmware(serial: EspFlasher.SerialIo, closePort: () -> Unit, skipBoardCheck: Boolean = false, doReset: Boolean = true) {
-        if (_flash.value.phase == "flash") { closePort(); return }
+    fun flashFirmware(
+        token: Long,
+        serial: EspFlasher.SerialIo,
+        port: PortLease,
+        skipBoardCheck: Boolean = false,
+        doReset: Boolean = true,
+    ) {
+        // Operation identity, not phase: the legitimate handoff arrives while the phase is "download".
+        when (usbOwner.adopt(token, port)) {
+            FlashPortOwner.Adopt.ADOPTED -> Unit
+            FlashPortOwner.Adopt.EXPIRED -> {
+                flashError("Bootloader handoff timed out. Unplug/replug and try again."); return
+            }
+            else -> { flashLog("Ignored a stale or duplicate flash port handoff"); return }
+        }
         // Safety: the in-app flasher and the bundled firmware image are specific to the LilyGo
         // T-Embed CC1101 (ESP32-S3, native USB). Flashing it onto a different board would write the
         // wrong image (recoverable via the web flasher / BOOT+RESET, but still a bad outcome), so
@@ -2795,23 +2699,35 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 phase = "error",
                 message = "In-app firmware update supports only the LilyGo T-Embed CC1101. For \"$shown\", flash the matching per-board firmware from Releases using the web flasher.",
             )
-            closePort(); return
+            usbOwner.finish(token); return
         }
-        val selected = _selectedBoard.value
+        val snapshot = releaseUpdates.value
+        val selected = snapshot.selectedBoard
         if (selected != null && selected.env != "lilygo-t-embed-cc1101") {
             _flash.value = FlashState(phase = "error", message = "Selected image does not match the supported T-Embed CC1101 target")
-            closePort(); return
+            usbOwner.finish(token); return
         }
-        viewModelScope.launch(Dispatchers.IO) {
+        val url = snapshot.flashUrl
+        val integrity = snapshot.flashIntegrity
+        if (url == null) {
+            flashError("No matching firmware asset in the current release")
+            usbOwner.finish(token); return
+        }
+        _flash.value = FlashState(phase = "download", message = "Downloading firmware...")
+        // The port is released by the owner when this job completes, including a job cancelled
+        // before its body starts (a finally inside the body would never run then).
+        viewModelScope.launchFlashOwned(usbOwner, token, Dispatchers.IO, onAbandoned = {
+            flashError("Flash cancelled before it started")
+        }) {
+            // This operation still holds the USB device (abort/owner shutdown end it underneath this job).
+            val ours = { usbOwner.flashToken == token }
+            val owned = { ours() && isActive }
             try {
-                val url = selected?.url // user-picked per-board image
-                    ?: _firmware.value.firmwareUrl?.takeIf { it.isNotEmpty() }
-                    ?: throw java.io.IOException("No matching firmware asset in the selected release")
-                _flash.value = FlashState(phase = "download", message = "Downloading firmware...")
                 flashLog("Downloading firmware from ${url.substringAfterLast('/')}")
-                val bytes = AppUpdater.downloadBytes(url, onProgress = { d, t ->
+                val bytes = DownloadIO.owned(owned, onProgress = { d, t ->
                     _flash.value = _flash.value.copy(written = d.toInt(), total = t.toInt(), message = "Downloading...")
-                })
+                }) { progress, cancelled -> AppUpdater.downloadBytes(url, integrity, progress, cancelled) }
+                flashLog("Image ${integrity.label}" + if (integrity.size == null) "; release lists no size" else "")
                 app.brucia.update.FirmwareImage.validateTEmbed(bytes)
                 _flash.value = FlashState(phase = "flash", total = bytes.size, message = "Flashing (do not unplug)...")
                 flashLog("Downloaded ${bytes.size} bytes; entering flash write")
@@ -2832,11 +2748,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 _flash.value = FlashState(phase = if (verify == EspFlasher.Verify.MISMATCH) "error" else "done",
                     message = "Firmware flashed - $verifyMsg. The device is rebooting into its menu - open \"Brucia App\" on the device to reconnect, then check Device info shows the new firmware.")
                 flashLog("RESULT: $verifyMsg (wrote ${bytes.size} bytes @0x0, flash=${flashSize / (1024 * 1024)}MB)")
+            } catch (_: InterruptedException) {
+                // Download stopped because the operation ended; whoever ended it published the result.
+                if (ours()) _flash.value = FlashState(phase = "error", message = "Firmware download cancelled. Nothing was flashed.")
+                flashLog("Firmware download stopped: flash operation ended; nothing was flashed")
+            } catch (e: app.brucia.update.IntegrityException) {
+                if (ours()) _flash.value = FlashState(phase = "error", message = "${e.message}. Nothing was flashed.")
+                flashLog("INTEGRITY FAILURE: ${e.message}; nothing was flashed")
             } catch (e: Exception) {
-                _flash.value = FlashState(phase = "error", message = e.message ?: "Flash failed")
+                if (ours()) _flash.value = FlashState(phase = "error", message = e.message ?: "Flash failed")
                 flashLog("EXCEPTION: ${e.message ?: "Flash failed"}")
-            } finally {
-                closePort()
             }
         }
     }
@@ -2844,30 +2765,35 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Report that no USB device was available to flash. */
     fun flashNoDevice() { _flash.value = FlashState(phase = "error", message = "No USB device found") }
 
-    fun resetFlash() { _flash.value = FlashState() }
+    /** Clear a finished flash result; never hides an operation that still owns the USB handoff. */
+    fun resetFlash() { if (usbOwner.flashToken == null) _flash.value = FlashState() }
 
-    fun disconnect() {
-        captureWorkflow.stop("Disconnected")
-        if (macroJob?.isActive == true || _macroRunning.value) stopMacro()
+    fun disconnect() = disconnectLink(stopService = true)
+
+    /**
+     * Tear the companion link down. [stopService] false only when a flash takes the device over
+     * right after: the flash then replaces the link's notification and wake lock without a gap.
+     */
+    private fun disconnectLink(stopService: Boolean) {
+        deviceLifecycle.disconnect()
+        // Remote mode owns independent readers; never let them consume a replacement transport.
+        remoteWatchdogJob?.cancel(); remoteWatchdogJob = null
+        remoteJob?.cancel(); remoteJob = null
+        remote = null
+        stopTimeline()
         dtmfJob?.cancel()
         dtmfJob = null
         _dtmfListening.value = false
-        fmJob?.cancel()
-        fmJob = null
-        _fmStreaming.value = false
-        _fmLevel.value = 0f
         // Stop any running short-burst loops first so nothing keeps looping / sending after the link drops.
         stopAllBurstLoops(silent = true)
-        // Turn off any active device streams before dropping the link, so the device stops
-        // its BLE radio / RMT RX instead of scanning forever after we go away.
+        // Include streams with missing ACKs: a timeout does not prove hardware stopped.
+        val cleanupStreams = subscriptions.detach()
         val c = client
         if (c != null && transport?.isOpen == true) {
-            synchronized(activeStreams) {
-                activeStreams.forEach { try { c.sub(it, false) } catch (e: Exception) { app.brucia.BruciaLog.d("VM", "stream unsubscribe: ${e.message}") } }
+            cleanupStreams.forEach { stream ->
+                try { c.sub(stream, false) } catch (e: Exception) { BruciaLog.d("VM", "stream unsubscribe: ${e.message}") }
             }
         }
-        activeStreams.clear()
-        pendingStreamIds.clear()
         fileReader.disconnect()
         readJob?.cancel()
         readJob = null
@@ -2876,7 +2802,12 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         val closing = session
         session = null
         client = null
-        transport?.close()
+        // Release the device through the owner: the lease closes the transport exactly once (it may
+        // already be closed if a flash preempted the link).
+        companionToken?.let { usbOwner.finish(it) }
+        companionToken = null
+        companionLease?.close()
+        companionLease = null
         transport = null
         closing?.close("Disconnected")
         _status.value = "Disconnected"
@@ -2886,17 +2817,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         _sniffing.value = false
         _probing.value = false
         _monitoring.value = false
-        _spectrumActive.value = false
+        subghzRx.reset()
         pauseRecording()
         _stations.value = emptyMap()
         stopRfCapture()
         // Audio suite: stop any capture/decode/playback and release the wake lock (no leak).
-        sstvTxJob?.cancel(); sstvTxJob = null
         stopPhoneMic()
         _micPcmActive.value = false
-        _sstvTx.value = _sstvTx.value.copy(active = false)
-        // Stop the foreground service and release its wake lock (covers every disconnect path).
-        try { ConnectionService.stop(getApplication()) } catch (e: Exception) { app.brucia.BruciaLog.d("VM", "service stop: ${e.message}") }
+        // Stop the link's foreground service and wake lock (every disconnect path). While a flash
+        // holds the device the service belongs to the flash and only the flash's end stops it.
+        if (stopService && usbOwner.flashToken == null) try { ConnectionService.stop(getApplication(), ConnectionServiceCommand.OWNER_COMPANION) } catch (e: Exception) { app.brucia.BruciaLog.d("VM", "service stop: ${e.message}") }
     }
 
     /** Machine-readable JSON of the session. */
@@ -2904,7 +2834,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Aggregate the session into a Markdown security report. */
     fun buildReport(): String {
-        val nfc = _lastNfc.value
+        val nfc = nfcTag.last.value
         val findings = if (nfc != null) NfcSecurity.analyze(nfc) else emptyList()
         return ReportBuilder.markdown(aps.value, nfc, findings, ble.value.size, crack.value.result)
     }
@@ -2916,6 +2846,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             fw = dev?.fw,
             board = dev?.board,
             modules = dev?.modules ?: emptyList(),
+            provenance = dev?.provenanceLines() ?: emptyList(),
+            diagnostics = Diagnostics.exportLines(linkCounters.snapshot(), _deviceDiag.value),
             aps = aps.value,
             stations = stations.value,
             probes = probes.value,
@@ -2988,141 +2920,130 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var loadedHandshake: Handshake? = null
     @Volatile private var loadedPmkid: PmkidTarget? = null
 
-    /** All downloads share a bounded, serialized reader with timeout and size validation. */
-    private suspend fun readDeviceFile(path: String, expectedSession: app.brucia.session.CommandSession? = session): app.brucia.files.FileReadResult {
+    private val fileTransfers by lazy { FileTransferService(viewModelScope, { fileLink() }) }
+
+    /** Capture the session and verified-files prerequisite synchronously at request time. */
+    private fun fileLink(expectedSession: CommandSession? = session): FileTransferLink {
+        val captured = expectedSession ?: throw IOException("Not connected.")
+        if (session !== captured || captured.isClosed) throw IOException("Connection changed.")
         if (_device.value?.features?.verifiedFiles != true)
-            return app.brucia.files.FileReadResult(error = "Update device firmware to enable verified file transfers")
-        app.brucia.files.DeviceFilePush.pathError(path)?.let { return app.brucia.files.FileReadResult(error = it) }
-        val s = expectedSession ?: return app.brucia.files.FileReadResult(error = "Not connected.")
-        if (session !== s) return app.brucia.files.FileReadResult(error = "Connection changed.")
-        val id = s.nextId()
-        return fileTransferMutex.withLock {
-        if (session !== s) return@withLock app.brucia.files.FileReadResult(error = "Connection changed.")
-        try {
-            fileReader.read(id) {
-                s.expectJson(id) { ok, data ->
-                    fileReader.reply(id, ok, data?.optLong("size", -1) ?: -1,
-                        data?.optString("msg")?.ifBlank { data.optString("out") } ?: "",
-                        data?.optLong("crc32", -1) ?: -1)
-                }
-                s.transmit("fs_read $path", id)
-            }
-        } finally {
-            s.release(id)
-        }
-        }
+            throw IOException("Update device firmware to enable verified file transfers")
+        return SessionFileLink(captured, fileReader, fileTransferMutex, { session === captured },
+            transactionalUploads = _device.value?.features?.transactionalUploads == true)
     }
 
-    /** Pull and optionally import a capture. Completion is delivered on the main thread. */
-    fun pullFile(path: String, ssidHint: String = "", onDone: ((Boolean) -> Unit)? = null) {
-        viewModelScope.launch {
-            val loaded = withContext(Dispatchers.IO) {
-                val result = readDeviceFile(path)
-                val bytes = result.bytes
-                if (bytes == null) {
-                    _handshakeInfo.value = result.error
-                    return@withContext false
-                }
-                val name = path.substringAfterLast('/').ifEmpty { "pulled.bin" }
-                if (name == "." || name == "..") {
-                    _handshakeInfo.value = "Invalid file name"
-                    return@withContext false
-                }
-                val dir = java.io.File(getApplication<Application>().filesDir, "pulled").apply { mkdirs() }
-                try {
-                    java.io.File(dir, name).writeBytes(bytes)
-                } catch (e: Exception) {
-                    _handshakeInfo.value = "Save failed: ${e.message}"
-                    return@withContext false
-                }
-                if (name.endsWith(".pcap", true) || name.endsWith(".cap", true)) {
-                    val hs = HandshakeParser.parse(bytes)
-                    val pm = if (hs == null) HandshakeParser.parsePmkid(bytes, ssidHint.ifEmpty { null }) else null
-                    when {
-                        hs != null -> {
-                            loadedHandshake = hs; loadedPmkid = null
-                            _handshakeInfo.value = "${hs.ssid} (WPA${hs.keyVersion}) [pulled]"
-                            true
-                        }
-                        pm != null -> {
-                            loadedPmkid = pm; loadedHandshake = null
-                            _handshakeInfo.value = "${pm.ssid} (PMKID) [pulled]"
-                            true
-                        }
-                        else -> { _handshakeInfo.value = "pulled ${bytes.size} B, no handshake"; false }
+    /** CaptureWorkflow owns its job; it uses the same verified wire adapter and mutex. */
+    private suspend fun readDeviceFile(path: String, expectedSession: CommandSession? = session): FileReadResult =
+        try { FileReadResult(bytes = fileLink(expectedSession).read(path)) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { FileReadResult(error = e.message ?: "File download failed") }
+
+    private data class PulledCapture(
+        val file: java.io.File, val message: String,
+        val handshake: Handshake? = null, val pmkid: PmkidTarget? = null,
+    )
+
+    /** The latest manual import owns the target. Older/cancelled pulls cannot overwrite it. */
+    fun pullFile(path: String, ssidHint: String = "", onDone: ((Boolean) -> Unit)? = null): Job =
+        fileTransfers.submit("capture-import", onDiscard = { it: PulledCapture -> it.file.delete() }, work = {
+            val bytes = read(path)
+            val name = path.substringAfterLast('/').ifEmpty { "pulled.bin" }
+            if (name == "." || name == "..") throw IOException("Invalid file name")
+            val capture = name.endsWith(".pcap", true) || name.endsWith(".cap", true)
+            val hs = if (capture) HandshakeParser.parse(bytes) else null
+            val pm = if (capture && hs == null) HandshakeParser.parsePmkid(bytes, ssidHint.ifEmpty { null }) else null
+            checkActive()
+            val dir = java.io.File(getApplication<Application>().filesDir, "pulled").apply { mkdirs() }
+            val file = java.io.File.createTempFile("pull-", if (capture) ".pcap" else ".bin", dir)
+            try {
+                file.outputStream().use { output ->
+                    var offset = 0
+                    while (offset < bytes.size) {
+                        checkActive()
+                        val count = minOf(64 * 1024, bytes.size - offset)
+                        output.write(bytes, offset, count)
+                        offset += count
                     }
-                } else {
-                    _handshakeInfo.value = "pulled ${bytes.size} B: $name"
-                    false
+                }
+                checkActive()
+                val message = when {
+                    hs != null -> "${hs.ssid} (WPA${hs.keyVersion}) [pulled]"
+                    pm != null -> "${pm.ssid} (PMKID) [pulled]"
+                    capture -> "pulled ${bytes.size} B, no handshake"
+                    else -> "pulled ${bytes.size} B: $name"
+                }
+                PulledCapture(file, message, hs, pm)
+            } catch (e: Exception) { file.delete(); throw e }
+        }) { result ->
+            val pulled = result.getOrNull()
+            if (pulled != null) {
+                if (pulled.handshake != null || pulled.pmkid != null) {
+                    loadedHandshake = pulled.handshake
+                    loadedPmkid = pulled.pmkid
+                }
+                _handshakeInfo.value = pulled.message
+            } else _handshakeInfo.value = result.exceptionOrNull()?.message ?: "File download failed"
+            onDone?.invoke(pulled?.let { it.handshake != null || it.pmkid != null } == true)
+        }
+
+    /** Read/verify before opening the document. Provider writes cannot be rolled back on cancellation. */
+    fun pullFileToUri(path: String, uri: Uri, onDone: (Boolean, String) -> Unit): Job =
+        fileTransfers.submit("export:$uri", work = {
+            val bytes = read(path)
+            checkActive()
+            val output = getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
+                ?: throw IOException("Cannot open destination")
+            output.use {
+                var offset = 0
+                while (offset < bytes.size) {
+                    checkActive()
+                    val count = minOf(64 * 1024, bytes.size - offset)
+                    it.write(bytes, offset, count)
+                    offset += count
                 }
             }
-            onDone?.invoke(loaded)
-        }
+            "Saved ${bytes.size} B"
+        }) { result -> onDone(result.isSuccess, result.getOrElse { "Save failed: ${it.message}" }) }
+
+    fun pullFileBytes(path: String, onBytes: (ByteArray?) -> Unit): Job =
+        fileTransfers.submit("file-preview", work = { read(path) }) { onBytes(it.getOrNull()) }
+
+    /** Bounded snapshot: the caller cannot change bytes while the upload waits in the queue. */
+    private fun uploadSnapshot(bytes: ByteArray): ByteArray {
+        if (bytes.size > SessionFileLink.MAX_BYTES) throw IOException("File exceeds 16 MiB transfer limit")
+        return bytes.copyOf()
     }
 
-    /** Download first; a failed transfer never opens/truncates the destination document. */
-    fun pullFileToUri(path: String, uri: Uri, onDone: (Boolean, String) -> Unit) {
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val read = readDeviceFile(path)
-                val bytes = read.bytes ?: return@withContext false to read.error
-                try {
-                    val output = getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
-                        ?: throw java.io.IOException("Cannot open destination")
-                    output.use { it.write(bytes) }
-                    true to "Saved ${bytes.size} B"
-                } catch (e: Exception) { false to "Save failed: ${e.message}" }
-            }
-            onDone(result.first, result.second)
+    /** Staged upload; success requires the matching commit size/CRC acknowledgement. */
+    fun pushFile(path: String, bytes: ByteArray, onDone: (Boolean, String) -> Unit): Job {
+        val snapshot = runCatching { uploadSnapshot(bytes) }
+        val logId = logCmdStart("upload $path (${bytes.size} B)")
+        val job = fileTransfers.submit("upload:$path", work = { write(path, snapshot.getOrThrow()) }) { result ->
+            val message = if (result.isSuccess) "Saved ${bytes.size} B to $path"
+                else result.exceptionOrNull()?.message ?: "File upload failed"
+            logCmdDone(logId, result.isSuccess, message)
+            onDone(result.isSuccess, message)
         }
+        job.invokeOnCompletion { cause ->
+            if (cause is kotlinx.coroutines.CancellationException) logCmdDone(logId, false, "Transfer cancelled; if commit was already sent, verify the destination before retrying.")
+        }
+        return job
     }
 
-    fun pullFileBytes(path: String, onBytes: (ByteArray?) -> Unit) {
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { readDeviceFile(path) }
-            onBytes(result.bytes)
-        }
-    }
-
-    /** Await one command's ACK without logging the full command text (used for base64 file chunks). */
-    private suspend fun sendNoLog(cmd: String, s: app.brucia.session.CommandSession, expectedSize: Int, timeoutMs: Long = 8000): Pair<Boolean, String> {
-        if (session !== s) return false to "Connection changed; upload stopped."
-        val result = s.awaitJson(cmd, timeoutMs)
-        val data = result.second
-        val ok = result.first && data?.optLong("size", -1) == expectedSize.toLong()
-        return ok to if (ok) "" else data?.optString("msg")?.ifBlank { "File write size mismatch" } ?: "File write failed"
-    }
-
-    /**
-     * Write [bytes] to the device at [path] using the firmware write grammar: the first chunk
-     * truncates (fs_write), later chunks append (fs_write_append). Large files are streamed in
-     * [DeviceFilePush.MAX_RAW_CHUNK]-byte chunks so each base64 frame stays under the companion max
-     * frame. One summary line is logged (not each base64 chunk). [onDone] reports on the main thread.
-     */
-    fun pushFile(path: String, bytes: ByteArray, onDone: (Boolean, String) -> Unit) {
-        if (_device.value?.features?.verifiedFiles != true) {
-            onDone(false, "Update device firmware to enable verified file transfers"); return
-        }
-        val s = session
-        if (s == null) { onDone(false, "Not connected."); return }
-        app.brucia.files.DeviceFilePush.pathError(path)?.let { onDone(false, it); return }
-        if (bytes.size > 16 * 1024 * 1024) { onDone(false, "File exceeds 16 MiB transfer limit"); return }
-        val chunks = app.brucia.files.DeviceFilePush.chunk(bytes)
-        val logId = logCmdStart("fs_write $path (${bytes.size} B, ${chunks.size} chunk${if (chunks.size == 1) "" else "s"})")
-        viewModelScope.launch(Dispatchers.IO) {
-            fileTransferMutex.withLock {
-                var ok = true
-                var last = ""
-                for ((i, ch) in chunks.withIndex()) {
-                    val b64 = Base64.encodeToString(ch, Base64.NO_WRAP)
-                    val (cok, out) = sendNoLog(app.brucia.files.DeviceFilePush.command(path, i, b64), s, ch.size)
-                    last = out
-                    if (!cok) { ok = false; break }
-                }
-                logCmdDone(logId, ok, if (ok) "wrote ${bytes.size} B" else last)
-                val msg = if (ok) "Saved ${bytes.size} B to $path" else last.ifBlank { "Write failed (needs firmware fs_write)" }
-                withContext(Dispatchers.Main) { onDone(ok, msg) }
-            }
+    private suspend fun pushTemplateFile(path: String, bytes: ByteArray): Pair<Boolean, String> {
+        val logId = logCmdStart("upload $path (${bytes.size} B)")
+        try {
+            val snapshot = uploadSnapshot(bytes)
+            fileTransfers.await("upload:$path") { write(path, snapshot) }
+            logCmdDone(logId, true, "Saved ${bytes.size} B to $path")
+            return true to "Saved ${bytes.size} B"
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            logCmdDone(logId, false, "Transfer cancelled; if commit was already sent, verify the destination before retrying.")
+            throw e
+        } catch (e: Exception) {
+            val message = e.message ?: "File upload failed"
+            logCmdDone(logId, false, message)
+            return false to message
         }
     }
 
@@ -3251,10 +3172,54 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // Feature services talk to the device through this seam; it adds the command log and keeps
     // blocking USB writes off the main thread (viewModelScope dispatches on Main).
     private val commandRunner = CommandRunner { cmd, timeoutMs ->
-        withContext(Dispatchers.IO) { sendAwait(cmd, timeoutMs) }
+        val captured = session
+        withContext(Dispatchers.IO) { sendAwait(cmd, timeoutMs, captured) }
     }
     private val jsonRunner = JsonCommandRunner { cmd, timeoutMs ->
-        withContext(Dispatchers.IO) { sendAwaitJson(cmd, timeoutMs) }
+        val captured = session
+        withContext(Dispatchers.IO) { sendAwaitJson(cmd, timeoutMs, captured) }
+    }
+
+    // Central reviewable inventory; lazy only to respect service property initialization order.
+    private val deviceLifecycle by lazy {
+        ServiceLifecycle(listOf(
+            Entry("callbacks", { callbackCommands.cancel() }),
+            Entry("file-browser", { fileBrowser.stop() }),
+            Entry("nfc-tag", { nfcTag.stop() }),
+            Entry("rf-receive", { rfReceive.stop() }),
+            Entry("diagnostics", { diagnostics.stop() }),
+            Entry("files", { fileTransfers.cancelAll() }),
+            Entry("fm-stream", { fmStream.stop() }, { fmStream.stop("Disconnected") }),
+            Entry("sstv-stream", { sstvStream.stop() }, { sstvStream.stop("Disconnected") }),
+            Entry("bursts", { stopAllBurstLoops(silent = false) }, { stopAllBurstLoops(silent = true) }),
+            Entry("macro", { macroRunner.stop() }, { macroRunner.stop("Disconnected") }),
+            Entry("mifare", { mifareKeyCheck.stop() }, { mifareKeyCheck.stop("Disconnected") }),
+            Entry("capture", { captureWorkflow.stop() }, { captureWorkflow.stop("Disconnected") }),
+            Entry("subghz", { subBrute.stop() }),
+            Entry("jam-detect", { jamDetector.stop() }),
+            Entry("lora", { lora.stop() }),
+            Entry("ethernet", { ethernet.stop() }),
+            Entry("nfc", { nfcTools.stopAll() }),
+            Entry("ir-receive", { irRx.stopReceive(); irRx.stopCapture(); irRx.stopLearn() }),
+            Entry("tvbgone", { tvbGone.stop() }),
+            Entry("ble-hid", { bleHid.stop(); bleHid.end() }, { bleHid.stop() }),
+            Entry("badble", { badBle.stop() }),
+            Entry("ble-media", { bleMediaService.stop() }),
+            Entry("gatt", { gatt.stop() }),
+            Entry("portal", { evilPortal.stop() }, { evilPortal.abandon() }),
+            Entry("ibutton", { ibutton.stop() }),
+            Entry("clock", { clock.stop() }),
+            Entry("script", { script.stop() }),
+            Entry("espnow", { espNow.stop() }),
+            Entry("speaker", { speaker.stop(); speaker.stopSong() }, { speaker.disconnect() }),
+            Entry("mic-record", { micRecorder.stop() }),
+            Entry("appearance", { appearance.stop() }),
+            Entry("wifi-mac", { wifiMacService.stop() }),
+            Entry("wifi-join", { wifiJoinService.stop() }),
+            Entry("responder", { responder.stop() }, { responder.abandon() }),
+            Entry("karma", { karma.stop() }, { karma.abandon() }),
+            Entry("brucegotchi", { brucegotchi.stop() }, { brucegotchi.abandon() }),
+        )) { name, error -> BruciaLog.w("Cleanup", name, error) }
     }
 
     // Abortable short-burst loops. Every loop registers with [burstLoops] when first built, so
@@ -3276,6 +3241,30 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val ethStatus: StateFlow<EthStatus?> = ethernet.status
     val ethMessage: StateFlow<String> = ethernet.message
 
+    // Basic tag actions (rfid read/info/ndef) share the last-result line; a read with a UID is saved.
+    private val nfcTag = NfcTagService(viewModelScope, commandRunner, isConnected = { session != null }) { uid, type, out ->
+        viewModelScope.launch(Dispatchers.IO) {
+            savedDao.insert(SavedItem(type = "nfc", name = uid, subtitle = type, payload = out, timeMillis = System.currentTimeMillis()))
+        }
+    }
+    val lastNfc: StateFlow<String?> = nfcTag.last
+
+    // One-shot Sub-GHz capture (rf rx); a decoded capture is saved for replay.
+    private val rfReceive = RfReceiveService(viewModelScope, commandRunner, isConnected = { session != null }) { c ->
+        viewModelScope.launch(Dispatchers.IO) {
+            savedDao.insert(SavedItem(type = "rf", name = c.name, subtitle = c.protocol, payload = c.payload, timeMillis = System.currentTimeMillis()))
+        }
+    }
+    val lastRf: StateFlow<String?> = rfReceive.last
+
+    // Device panel diagnostics and the device file manager.
+    private val diagnostics = DiagnosticsService(viewModelScope, commandRunner, isConnected = { session != null })
+    val deviceOut: StateFlow<String> = diagnostics.output
+    private val fileBrowser = DeviceFileBrowser(viewModelScope, commandRunner, isConnected = { session != null })
+    val deviceEntries: StateFlow<List<app.brucia.files.FileEntry>> = fileBrowser.entries
+    val deviceListing: StateFlow<Boolean> = fileBrowser.loading
+    val captureList: StateFlow<String> = fileBrowser.captureList
+
     // Advanced NFC lines (NDEF push, EMV, UID write, advanced tiles), independent of each other.
     // nfcNdefStatus is shared by the NFC screen's push card and the Spam hub's NFC tile.
     private val nfcTools = NfcToolsService(viewModelScope, commandRunner, isConnected = { session != null })
@@ -3285,7 +3274,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val nfcAdvStatus: StateFlow<String> = nfcTools.advStatus
 
     // IR receive/capture and TV-B-Gone (declared after commandRunner: property init order).
-    private val irRx = IrReceiveService(viewModelScope, commandRunner, isConnected = { session != null }) { key ->
+    private val irRx = IrReceiveService(viewModelScope, commandRunner, isConnected = { session != null }, onLearned = ::onIrLearned) { key ->
         _remoteKeys.value = _remoteKeys.value + key
         saveRemoteKeys()
     }
@@ -3313,9 +3302,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // Evil Portal: a device-side session; captured creds arrive as EVENT evil.cred (_evilCreds).
     private val evilPortal = EvilPortalService(
         viewModelScope, commandRunner, isConnected = { session != null },
-        pushTemplate = { path, bytes ->
-            kotlinx.coroutines.suspendCancellableCoroutine { c -> pushFile(path, bytes) { ok, msg -> if (c.isActive) c.resumeWith(Result.success(ok to msg)) } }
-        },
+        pushTemplate = { path, bytes -> pushTemplateFile(path, bytes) },
         onStart = { _evilCreds.value = emptyList() },
     )
     val evilActive: StateFlow<Boolean> = evilPortal.active
@@ -3339,7 +3326,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val espnowStatus: StateFlow<String> = espNow.status
 
     // --- Audio (speaker / mic) + ESP-NOW (fixed contract; firmware built in parallel) ---
-    private val speaker = SpeakerService(viewModelScope, commandRunner, isConnected = { session != null })
+    private val speaker = SpeakerService(
+        viewModelScope, commandRunner, isConnected = { session != null }, json = jsonRunner,
+        asyncPlay = { _device.value?.features?.speakerPlayAsync == true },
+    )
     val speakerStatus: StateFlow<String> = speaker.status
 
     private val micRecorder = MicRecordService(viewModelScope, commandRunner, isConnected = { session != null })
@@ -3418,6 +3408,12 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Play an audio file on the device speaker: speaker_play <path>. Result on [speakerStatus]. */
     fun speakerPlay(path: String) = speaker.playFile(path)
 
+    /** File the device is playing (firmware with features.speaker_play_async), "" when none. */
+    val speakerFilePlaying: StateFlow<String> = speaker.filePlaying
+
+    /** Stop the file started by [speakerPlay]; the outcome lands on [speakerStatus]. */
+    fun speakerStopFile() = speaker.stopFile()
+
     /** Record from the device mic for [secs] seconds: mic_record <secs>. Saved path on [micStatus]. */
     fun micRecord(secs: Int) = micRecorder.record(secs)
 
@@ -3435,8 +3431,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // Long, bounded, early-stoppable ops. The stop frame goes straight to the device (polled by
     // the firmware mid-run, never ACKed), so it is neither logged nor awaited.
     private val directStop = CommandRunner { cmd, _ ->
+        val captured = client
         withContext(Dispatchers.IO) {
-            try { client?.cmd(cmd) } catch (e: Exception) { BruciaLog.d("Op", "$cmd: ${e.message}") }
+            try { if (client === captured) captured?.cmd(cmd) } catch (e: Exception) { BruciaLog.d("Op", "$cmd: ${e.message}") }
         }
         true to ""
     }
@@ -3500,13 +3497,11 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val micPcmActive: StateFlow<Boolean> = _micPcmActive.asStateFlow()
 
     // --- Recording: capture the raw mic.pcm to a buffer, then export WAV + per-type PNGs on stop ---
-    private val _recording = MutableStateFlow(false)
-    val recording: StateFlow<Boolean> = _recording.asStateFlow()
     private val recordingBuffer = RecordingBuffer()
+    /** Recording/unsaved-data/limit/integrity state, published by the buffer under its own lock. */
+    val recordingState: StateFlow<RecordingBuffer.State> = recordingBuffer.state
     private val _recordingExporting = MutableStateFlow(false)
     val recordingExporting: StateFlow<Boolean> = _recordingExporting.asStateFlow()
-    private val _recordingReady = MutableStateFlow(false)
-    val recordingReady: StateFlow<Boolean> = _recordingReady.asStateFlow()
 
     /** Start capturing the device mic to memory. Ensures the mic stream is live first. */
     fun startRecording() {
@@ -3515,19 +3510,22 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         if (_device.value?.caps?.mic != true) { _micPcmStatus.value = "No confirmed device microphone"; return }
         if (recordingBuffer.hasData) { _micPcmStatus.value = "Save or discard the previous recording first"; return }
         if (!_micPcmActive.value) startMicPcm()
-        _recording.value = recordingBuffer.start()
+        if (!_micPcmActive.value) return
+        recordingBuffer.start()
     }
 
     /**
      * Stop capturing and export the recording off the main thread: a standard WAV plus one PNG per
      * visualization type (waveform, spectrum, spectrogram). [onDone] gets the written files (empty on
-     * failure / no audio) back on the main thread for the share sheet.
+     * failure / no audio) and the recording's stream continuity back on the main thread.
      */
-    fun stopRecordingAndExport(context: android.content.Context, onDone: (List<java.io.File>) -> Unit) {
-        if (_recordingExporting.value) { onDone(emptyList()); return }
-        pauseRecording()
+    fun stopRecordingAndExport(
+        context: android.content.Context,
+        onDone: (List<java.io.File>, RecordingBuffer.Integrity) -> Unit,
+    ) {
+        if (_recordingExporting.value) { onDone(emptyList(), RecordingBuffer.Integrity()); return }
         val snapshot = recordingBuffer.snapshot()
-        if (snapshot.bytes.size < 2) { onDone(emptyList()); return }
+        if (snapshot.bytes.size < 2) { onDone(emptyList(), snapshot.integrity); return }
         _recordingExporting.value = true
         val appContext = context.applicationContext
         viewModelScope.launch(Dispatchers.Default) {
@@ -3537,26 +3535,17 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             if (files.isNotEmpty()) recordingBuffer.commit(snapshot)
             withContext(Dispatchers.Main) {
                 _recordingExporting.value = false
-                _recordingReady.value = recordingBuffer.hasData
                 if (files.isEmpty()) _micPcmStatus.value = "Export failed; captured audio retained for retry"
-                onDone(files)
+                onDone(files, snapshot.integrity)
             }
         }
     }
 
     /** Preserve samples when leaving the screen or losing the transport. */
-    fun pauseRecording() {
-        recordingBuffer.stop()
-        _recording.value = false
-        _recordingReady.value = recordingBuffer.hasData
-    }
+    fun pauseRecording() = recordingBuffer.stop()
 
     /** Drop an in-progress recording without exporting (e.g. leaving the Audio screen). */
-    fun cancelRecording() {
-        _recording.value = false
-        recordingBuffer.cancel()
-        _recordingReady.value = false
-    }
+    fun cancelRecording() = recordingBuffer.cancel()
 
     /** Status line shared by the Audio tools (mic/record). */
     private val _micPcmStatus = MutableStateFlow("")
@@ -3613,82 +3602,19 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         phoneMicJob = null
     }
 
-    // --- Speaker PCM playback (modelled on fm_audio_*; routed to the I2S speaker) ---
+    // --- SSTV encoding and speaker PCM share one owned run, including preparation ---
+    private val sstvStream by lazy { pcmStreamService() }
+    val sstvTx get() = sstvStream.status
 
-    /** Open the device speaker for streamed PCM at [sr] Hz. */
-    fun spkrPcmBegin(sr: Int = PcmSource.SAMPLE_RATE, cb: ((Boolean, String) -> Unit)? = null) =
-        dispatchCmd("spkr_pcm_begin $sr", cb)
-
-    /** Enqueue one PCM chunk (S16LE mono) to the device speaker (base64, <=2048 samples/frame). */
-    fun spkrPcmData(bytes: ByteArray) =
-        dispatchCmd("spkr_pcm_data " + Base64.encodeToString(bytes, Base64.NO_WRAP))
-
-    /** Enqueue one PCM chunk given as shorts. */
-    fun spkrPcmData(samples: ShortArray, count: Int = samples.size) =
-        spkrPcmData(PcmSource.shortsToLittleEndian(samples, count))
-
-    /** Flush and close the device speaker. */
-    fun spkrPcmStop(cb: ((Boolean, String) -> Unit)? = null) = dispatchCmd("spkr_pcm_stop", cb)
-
-    /**
-     * Stream a full PCM clip to the device speaker in <=2048-sample frames, paced to real time
-     * so the device I2S buffer never overruns. Drives [sstvTx] progress. Shared by SSTV TX and
-     * DTMF/tone synthesis.
-     */
-    private fun streamPcmToSpeaker(pcm: ShortArray, label: String) {
-        val c = client ?: run { _sstvTx.value = SstvTxState(message = "Connect the device over USB first."); return }
-        if (_sstvTx.value.active) return
-        if (_device.value?.caps?.speaker == false) { _sstvTx.value = SstvTxState(message = "This device has no speaker."); return }
-        _sstvTx.value = SstvTxState(active = true, progress = 0f, message = "$label...")
-        sstvTxJob = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                spkrPcmBegin()
-                val frame = 2048 // <=2048 samples => raw <=4096 bytes => base64 <COMPANION_MAX_FRAME
-                val total = pcm.size
-                var pos = 0
-                val startMs = System.currentTimeMillis()
-                while (pos < total && isActive && _sstvTx.value.active) {
-                    val n = minOf(frame, total - pos)
-                    val chunk = pcm.copyOfRange(pos, pos + n)
-                    c.cmd("spkr_pcm_data " + Base64.encodeToString(PcmSource.shortsToLittleEndian(chunk, n), Base64.NO_WRAP))
-                    pos += n
-                    _sstvTx.value = _sstvTx.value.copy(progress = pos.toFloat() / total)
-                    // Pace to 16 kHz playback.
-                    val sleep = (pos.toLong() * 1000 / PcmSource.SAMPLE_RATE) - (System.currentTimeMillis() - startMs)
-                    if (sleep > 0) delay(sleep)
-                }
-            } catch (_: Exception) {
-            } finally {
-                try { client?.cmd("spkr_pcm_stop") } catch (e: Exception) { app.brucia.BruciaLog.d("VM", "spkr_pcm_stop: ${e.message}") }
-                val finished = _sstvTx.value.active
-                _sstvTx.value = SstvTxState(active = false, progress = if (finished) 1f else _sstvTx.value.progress,
-                    message = if (finished) "Finished." else "Stopped.")
-            }
-        }
-    }
-
-    private var sstvTxJob: Job? = null
-    private val _sstvTx = MutableStateFlow(SstvTxState())
-    val sstvTx: StateFlow<SstvTxState> = _sstvTx.asStateFlow()
-
-    /** Encode [img] to SSTV audio ([mode]) on the phone and stream it to the device speaker. */
     fun sstvTransmit(img: Sstv.Image, mode: Sstv.Mode) {
-        viewModelScope.launch(Dispatchers.IO) {
-            _sstvTx.value = SstvTxState(active = false, message = "Encoding ${mode.name}...")
-            val pcm = try { Sstv.encode(img, mode) } catch (e: Exception) {
-                _sstvTx.value = SstvTxState(message = "Encode failed: ${e.message}"); return@launch
-            }
-            streamPcmToSpeaker(pcm, "Transmitting ${mode.name}")
+        val snapshot = Sstv.Image(img.width, img.height, img.pixels.copyOf())
+        sstvStream.start(PcmStreamSpec(), "Encoding ${mode.name}...", "Transmitting ${mode.name}...") { check ->
+            val pcm = Sstv.encode(snapshot, mode, check)
+            PcmStreamSource(PcmSource.arrayReader(pcm), pcm.size.toLong())
         }
     }
 
-    /** Stop an in-progress speaker stream (SSTV TX / DTMF). */
-    fun sstvTransmitStop() {
-        _sstvTx.value = _sstvTx.value.copy(active = false)
-        sstvTxJob?.cancel()
-        sstvTxJob = null
-        client?.let { c -> viewModelScope.launch(Dispatchers.IO) { try { c.cmd("spkr_pcm_stop") } catch (e: Exception) { app.brucia.BruciaLog.d("VM", "spkr_pcm_stop: ${e.message}") } } }
-    }
+    fun sstvTransmitStop() = sstvStream.stop()
 
     /**
      * Play a DTMF digit natively on the device speaker (speaker_dtmf). The firmware synthesizes the
@@ -3715,9 +3641,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      * Decodes an EXTERNAL DTMF source held near the mic - not the device's own keypad.
      */
     fun startDtmfDecode() {
-        startMicPcm()
-        _dtmfListening.value = true
         if (dtmfJob != null) return
+        startMicPcm()
+        if (!_micPcmActive.value) return
+        _dtmfListening.value = true
         dtmfHeldDigit = null
         dtmfSilenceChunks = 0
         dtmfJob = viewModelScope.launch {
@@ -3753,9 +3680,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         dictionaryTest.cancel()
         fused.removeLocationUpdates(locationCallback)
-        sstvTxJob?.cancel()
         stopPhoneMic()
+        // Link first (it still unsubscribes over its open transport), then the owner: ends a flash,
+        // closes any held port and refuses every later handoff.
         disconnect()
+        usbOwner.close()
+        if (BruciaLog.diagnostics === diagnosticsExport) BruciaLog.diagnostics = null
+    }
+
+    private val diagnosticsExport: () -> List<String> = {
+        Diagnostics.exportLines(linkCounters.snapshot(), _deviceDiag.value)
     }
 
     // IMPORTANT: this init block is deliberately the LAST thing in the class. It calls the load*()
@@ -3773,5 +3707,6 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         loadSavedPortals() // restore the user's saved captive-portal templates
         loadFingerprints() // restore saved RF place-fingerprints
         loadGeoSignals() // restore geofenced signals
+        BruciaLog.diagnostics = diagnosticsExport // log export header (local only)
     }
 }

@@ -10,7 +10,9 @@
 #define __RFID_INTERFACE_H__
 
 #include <globals.h>
+#include <functional>
 #include <vector>
+#include "mifare_keycheck_core.h"
 
 class RFIDInterface {
 public:
@@ -123,7 +125,21 @@ public:
     // one MifareKeyHit per success to `out`. Returns true if a tag was present (even
     // with no matches), false if there's no tag or the driver can't do MIFARE Classic
     // auth (the default below). The phone owns the dictionary; the device only tests.
-    virtual bool mifareKeyCheck(const uint8_t (*keyList)[6], size_t count, std::vector<MifareKeyHit> &out) {
+    // When `info` is non-null, the driver fills it with the batch's explicit completeness
+    // (tag UID read at batch start, total/tested sectors, auth count, and why it stopped)
+    // so the companion can report a truthful complete-vs-partial result. Additive: callers
+    // that only want the hits pass nullptr and keep the old behavior.
+    // `shouldStop`, when set, is polled once per candidate-key attempt; returning true ends the
+    // batch early (MIFARE_KC_CANCELLED, hits so far). The companion wires it to a phone stop frame.
+    virtual bool mifareKeyCheck(
+        const uint8_t (*keyList)[6], size_t count, std::vector<MifareKeyHit> &out,
+        MifareKeyCheckResult *info = nullptr, std::function<bool()> shouldStop = {}
+    ) {
+        (void)keyList;
+        (void)count;
+        (void)out;
+        (void)info;
+        (void)shouldStop;
         return false;
     }
 

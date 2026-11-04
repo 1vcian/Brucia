@@ -90,7 +90,9 @@ void display_signal_data(RfCodes received, bool headless = false);
 
 bool rfSaveSignal(float frequency, RfCodes codes, bool raw, char *key, bool autoSave = false);
 
-String rf_scan(float start_freq, float stop_freq, int max_loops = -1);
+// Returns the comma-terminated MHz list of signals found ("" when none). `started`, when given, is
+// set to whether the CC1101 receiver came up, so callers can tell "nothing found" from a failure.
+String rf_scan(float start_freq, float stop_freq, int max_loops = -1, bool *started = nullptr);
 String rfReceiveSignal(float frequency = 0, int max_loops = -1, bool raw = false, bool headless = false);
 
 #endif

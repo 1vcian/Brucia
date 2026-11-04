@@ -529,7 +529,13 @@ rmt_channel_handle_t setup_rf_rx() {
     rx_channel_cfg.flags.io_loop_back = false; // do not loop back output to input
 
     rmt_channel_handle_t rx_channel = NULL;
-    ESP_ERROR_CHECK(rmt_new_rx_channel(&rx_channel_cfg, &rx_channel));
+    // No free RMT channel (e.g. another receiver still holds one) must not abort the firmware:
+    // every caller already treats NULL as "receiver unavailable".
+    esp_err_t err = rmt_new_rx_channel(&rx_channel_cfg, &rx_channel);
+    if (err != ESP_OK) {
+        Serial.printf("RF RX: RMT channel unavailable (%s)\n", esp_err_to_name(err));
+        return NULL;
+    }
     return rx_channel;
 }
 

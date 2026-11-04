@@ -644,7 +644,9 @@ void capture_handshake(const String &tssid, const String &mac, uint8_t channel) 
 // sniffer + deauth path as capture_handshake, minus the screen/buttons. Writes the pcap
 // to /BrucePCAP/handshakes/ so the phone can pull and crack it. Returns when the 4-way
 // handshake is usable or after `seconds`.
-bool capture_handshake_bounded(const String &tssid, const String &mac, uint8_t channel, uint32_t seconds) {
+bool capture_handshake_bounded(
+    const String &tssid, const String &mac, uint8_t channel, uint32_t seconds, CaptureRunInfo *info
+) {
     hsTracker = HandshakeTracker();
     uint8_t bssid_array[6];
     if (sscanf(
@@ -680,6 +682,10 @@ bool capture_handshake_bounded(const String &tssid, const String &mac, uint8_t c
     if (!sniffer_prepare_storage(fs, !isLittleFS)) return false;
 
     ch = channel;
+    // Track which handshake file the writer actually creates/grows this run for THIS target AP, so the
+    // descriptor reports the real file (named from the SSID resolved in the frames), never a stale
+    // pre-existing one, and never another AP's file the sniffer happened to touch on the channel.
+    snifferBeginCaptureTracking(bssid_array);
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(sniffer);
     esp_wifi_set_channel(channel, (wifi_second_chan_t)NULL);
@@ -697,8 +703,12 @@ bool capture_handshake_bounded(const String &tssid, const String &mac, uint8_t c
     burst();
     uint32_t lastDeauth = millis();
     bool ok = false;
+    bool aborted = false;
     while (millis() - start < seconds * 1000UL) {
-        if (check(EscPress)) break; // let the device button abort the bounded capture early
+        if (check(EscPress)) {
+            aborted = true;
+            break; // let the device button abort the bounded capture early
+        }
         if (handshakeUsable(hsTracker)) {
             ok = true;
             break;
@@ -715,6 +725,29 @@ bool capture_handshake_bounded(const String &tssid, const String &mac, uint8_t c
     esp_wifi_set_promiscuous_rx_cb(NULL);
     esp_wifi_stop();
     delay(100);
+    if (info) {
+        info->usable = ok;
+        info->aborted = aborted;
+        info->budgetElapsed = !ok && !aborted; // the while exited because the time budget elapsed
+        String wpath;
+        uint32_t wframes = 0, prior = 0;
+        bool created = false;
+        if (snifferLastCapture(wpath, wframes, created, prior)) {
+            // Authoritative: the writer actually created/grew this file this run.
+            info->path = wpath;
+            info->frames = wframes; // measured pcap records appended (beacon + M1..M4), not an assumption
+            info->framesKnown = true;
+            info->written = true;
+            info->created = created;
+            info->priorSize = prior;
+        } else {
+            // Nothing written this run (ok can still be false, or a usable 4-way wrote nothing new).
+            info->path = snifferHandshakePath(bssid_array, tssid.c_str()); // best-effort name only
+            info->written = false;
+            info->framesKnown = false;
+        }
+    }
+    snifferEndCaptureTracking();
     return ok;
 }
 
@@ -747,7 +780,9 @@ static void pmkid_sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     pmkidFrames++;
 }
 
-bool capture_pmkid_bounded(const String &mac, uint8_t channel, uint32_t seconds, String &outPath) {
+bool capture_pmkid_bounded(
+    const String &mac, uint8_t channel, uint32_t seconds, String &outPath, CaptureRunInfo *info
+) {
     uint8_t bssid_array[6];
     if (sscanf(
             mac.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &bssid_array[0], &bssid_array[1],
@@ -781,6 +816,7 @@ bool capture_pmkid_bounded(const String &mac, uint8_t channel, uint32_t seconds,
         bssid_array[0], bssid_array[1], bssid_array[2], bssid_array[3], bssid_array[4], bssid_array[5]
     );
     outPath = String(fname);
+    if (info) info->path = outPath;
 
     pmkidPcap = fs->open(fname, FILE_WRITE); // truncate/overwrite any previous attempt
     if (!pmkidPcap) return false;
@@ -814,9 +850,17 @@ bool capture_pmkid_bounded(const String &mac, uint8_t channel, uint32_t seconds,
     uint32_t start = millis();
     burst();
     uint32_t lastDeauth = millis();
+    bool aborted = false;
+    bool sawM1 = false;
     while (millis() - start < seconds * 1000UL) {
-        if (check(EscPress)) break; // device button aborts early
-        if (pmkidSawM1) break;      // captured an M1 (PMKID candidate) - done
+        if (check(EscPress)) {
+            aborted = true;
+            break; // device button aborts early
+        }
+        if (pmkidSawM1) {
+            sawM1 = true;
+            break; // captured an M1 (PMKID candidate) - done
+        }
         if (millis() - lastDeauth >= 6000) {
             burst();
             lastDeauth = millis();
@@ -831,7 +875,19 @@ bool capture_pmkid_bounded(const String &mac, uint8_t channel, uint32_t seconds,
     delay(100);
     pmkidPcap.flush();
     pmkidPcap.close();
-    return pmkidFrames > 0;
+    bool usable = pmkidFrames > 0;
+    if (info) {
+        info->usable = usable;
+        info->frames = pmkidFrames;    // measured: every EAPOL frame the cb wrote this run
+        info->framesKnown = true;
+        info->written = usable;        // the run truncates+writes its own file; usable == >=1 frame saved
+        info->created = true;          // FILE_WRITE opens a fresh file each run (no accumulation)
+        info->priorSize = 0;
+        info->aborted = aborted && !usable;
+        // The loop also exits on the first M1; only a plain budget expiry (no M1, no abort) is a timeout.
+        info->budgetElapsed = !usable && !aborted && !sawM1;
+    }
+    return usable;
 }
 #endif
 

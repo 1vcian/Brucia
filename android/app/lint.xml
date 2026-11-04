@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Per-site, not per-category: only the bundled third-party bcpkix jar is ignored.
+         The finding is BouncyCastle's own trust-any helper for its EST client
+         (org.bouncycastle.est.jcajce.JcaJceUtils), which Brucia never calls: bcpkix is used
+         only to build MITM certificates in mitm/MitmCertFactory.kt. App sources stay checked. -->
+    <issue id="TrustAllX509TrustManager">
+        <ignore path="**/bcpkix-jdk18on-*.jar" />
+    </issue>
+</lint>

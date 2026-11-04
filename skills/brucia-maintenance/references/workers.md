@@ -1,10 +1,50 @@
 # Scoped worker preparation
 
-Stato: **0.1.2 pubblicata; W11 lotto 7 (T11j monitor + T11k Evil Portal/GATT) completato e revisionato (esiti in backlog)**; altri pacchetti preparati, non avviati.
-L'avvio richiede la successiva istruzione dell'utente. Questo indice rimane al
-coordinatore; al worker si consegna soltanto il pacchetto del task selezionato.
+Stato aggiornato 2026-11-04: quattro worker Claude locali avviati dai pacchetti
+S08a, S09, S11a e S06-S10a; consegne ancora da revisionare. L'accesso esplicitamente
+consentito ha verificato autenticazione Claude (`loggedIn:true`) e Docker 27.5.1.
+L'utente ha poi richiesto **Claude Code già installato direttamente sul Mac, senza
+Linux/Docker**: questa istruzione sostituisce per questo lotto il requisito di
+isolamento container/rete descritto sotto. La modalità locale usa copie allowlist,
+`--safe-mode`, strumenti espliciti e `--permission-mode dontAsk`, senza flag di bypass;
+non offre isolamento OS del filesystem o della rete. Configurazione host `opus`,
+limite CLI 5 USD stimati per worker; modello effettivo registrato nei log JSON locali.
+S02/S07 restano bloccati dai rispettivi prerequisiti. Il coordinatore rivede ogni
+consegna prima dell'integrazione. Nessun nuovo login o consenso all'orchestrazione
+è richiesto. Questo indice resta al coordinatore, non ai worker.
 
-## Prossima assegnazione: W06 / T06
+## Orchestrazione autorizzata — S06/S08–S11, con prerequisiti S02/S07
+
+Manifest locale: `.codex_tmp/claude-stabilization-20261104/orchestration.json`.
+Ogni directory contiene `task.json`, copie in `baseline/`, hash SHA-256 e allowlist;
+S08a/S09 includono copie modificabili in `work/` e `run_checks.py`. Le sole dipendenze
+Maven pubbliche sono esportate in `deps/`; nessuna intera cache, credenziale, APK,
+cronologia Git o checkout completo è stato incluso. Gli estratti mantengono percorso,
+righe e hash del file originale. Questi pacchetti locali sono ignorati da Git.
+Baseline eseguite dal coordinatore: S08a **44 test JVM**, S09 **27 test JVM**, tutte
+passate. Sono test esistenti e sovrapposti alla suite principale, non risultati
+prodotti da Claude né nuove prove di stress/interoperabilità.
+
+| Pacchetto | Incarico e criterio di accettazione | Ordine |
+|---|---|---|
+| S08a | Stress deterministico di CommandSession/CompanionClient/StreamSubscriptions: frame frammentati, timeout, cancellazioni, riconnessione, callback residue, cleanup OFF. Una correzione riprodotta e regressione sintetica; non certifica heap Android o tutte le code dell'app. | Primo lotto, indipendente |
+| S09 | Sincronizzazione Scottie e fixture indipendenti; baseline AudioDspTest. La sola auto-decodifica non prova interoperabilità. Mancano ancora fixture esterne/spec esportate: richiederle con provenienza, senza inventarle. | Primo lotto, revisione iniziale |
+| S11a | Audit in sola lettura di catture RF, troncamento e capability; distinguere percorso nativo e standalone. Nessuna estensione di trasmissioni o operazioni radio. Servono pacchetti successivi per completare l'inventario S11. | Primo lotto, indipendente |
+| S06-S10a | Revisione comune di proprietà connessione/porta/flash, permessi, ricreazione Activity e onCleared. Solo estratti dei coordinatori e adapter necessari. Consegna stati/proprietari e contratto del primo componente da estrarre; implementazione dopo revisione del coordinatore. | Evitare refactor concorrenti S06/S10 |
+| S02 | Configurazione build/CI e requisiti di verifica APK/upgrade; senza chiavi di firma. Non dichiarare accettazione senza ambiente build ed emulatore realmente utilizzabili. | Bloccato dai prerequisiti |
+| S07 | Prerequisiti migrazioni Room storiche. Nessuna implementazione senza schemi/fixture autentici v1/v2 e nessun fallback distruttivo. | Bloccato dai dati mancanti |
+
+Regola ordinaria prima del dispatch: autenticazione nel runtime consentito, isolamento
+effettivo verificato, rete limitata al provider e nuova verifica degli hash. Per il
+lotto locale 2026-11-04 si applica la deroga esplicita dell’utente descritta sopra. Il solo chmod
+delle baseline e il cambio di cwd **non** costituiscono isolamento. Nessun flag di
+bypass dei permessi e nessuna esposizione della repo per aggirare il blocco.
+Il coordinatore rivede e testa ogni consegna, integra in sequenza, poi esegue le
+verifiche complete applicabili. Un rifiuto o `NEEDS_INPUT` termina quel tentativo;
+eventuali follow-up risolvono lacune tecniche, non riformulano lo scopo per eludere controlli.
+Lo stato dei task resta nel backlog; preparazione non equivale a implementazione.
+
+## Archivio: preparazione iniziale W06 / T06
 
 Priorità esplicita dell'utente: **migrare le funzionalità esistenti verso moduli
 manutenibili prima degli altri task di sviluppo**. Il coordinatore prepara e
@@ -492,6 +532,53 @@ the VM supplies session-bound IO and retains the selected target/local-copy adap
 11 synthetic regressions; full cached Kotlin compile/tests recorded in TESTS.md.
 No worker launched. Next task W11n is tracked in backlog.md.
 
+## T11n — Mifare batches / macro runner (coordinator, completed 2026-10-31)
+
+Mifare stage implemented directly at the user's request; no worker launched.
+`nfc/MifareKeyCheckService` owns batches/state/cancellation; the ViewModel provides
+an original-session JSON runner and existing dictionary source. UI exposes Stop
+batches and distinguishes failure/cancellation from completion. Tests cover fake
+runners and real `CommandSession` over simulated transport; see TESTS.md.
+The firmware does not report tag identity or partial scans and cannot abort a
+running batch; follow-up is tracked in backlog.md.
+Macro stage subsequently implemented on explicit request, without workers:
+`automation/MacroRunner` owns sequencing, original-session binding, step snapshots,
+error handling and cancellation. ViewModel retains persistence and logged IO.
+Twelve macro tests plus combined full cached checks passed; see TESTS.md.
+W11o was subsequently completed by the coordinator; see below.
+
+## T11o — service lifecycle review (coordinator, completed 2026-10-31)
+
+Implemented directly on explicit request; no worker launched. Reviewed remaining
+callback adapters, wired the explicit service cleanup inventory, extracted parallel
+command ownership, removed the unused JSON dispatcher and fixed stale result mapper
+side effects/cancelled-scope busy state. Tests use actual services and CommandSession
+with simulated IO; counts and limitations are in TESTS.md.
+W11p was subsequently completed by the coordinator; see below.
+
+## T11p — file transfer ownership (coordinator, completed 2026-11-01)
+
+Implemented directly on explicit request; no worker launched. `FileTransferService`
+owns jobs, per-consumer supersession and local processing; `SessionFileLink` reuses
+CommandSession/DeviceFileReader and the shared wire mutex. ViewModel retains Android
+URI/storage and capture parsing adapters. The portal awaits the actual owned upload,
+with bidirectional cancellation and no late start. Local staging, original-session
+binding and verified-file checks are tested with synthetic IO; see TESTS.md.
+S04 below now covers firmware transactions; provider writes remain non-transactional. W11q was subsequently
+completed by the coordinator; see below.
+
+## T11q — FM/SSTV lifecycle (coordinator, completed 2026-11-01)
+
+Implemented directly on explicit request; no worker launched. `PcmStreamService`
+owns preparation through cleanup; `SessionPcmLink` provides original-session IO.
+Corrected speaker JSON arguments to the existing firmware contract, added correlated
+structured command waits and cooperative encode/decode cancellation. The ViewModel
+keeps Android factories and image snapshots; PCM format and SSTV samples are unchanged.
+Seventeen regression cases plus the full cached suite passed; see TESTS.md for exact
+evidence and physical/codec/firmware buffer-loss limits.
+S01 was subsequently completed by the coordinator (see below). The next scoped
+software task is S06 in backlog.md; do not launch workers or chain it automatically.
+
 ## Migration follow-ups — HOLD, no automatic chaining
 
 After accepting T06, prepare one packet at a time with actual source boundaries:
@@ -597,14 +684,54 @@ its full contract and harness only after the first batch's master review.
 
 ## S01 — coordinator integration review, not a worker packet
 
-`AppUpdater.fetchLatest()` e `fetchBoards()` leggono separatamente `/latest`.
-Verificare i call site in `WardriveViewModel`: un cambio release fra richieste può
-mescolare metadati e lista schede. Definire un unico snapshot immutabile e un test
-con due risposte successive diverse. Accettazione: versione, APK, selezione scheda
-e immagine provengono dallo stesso snapshot; refresh fallito non conserva una
-selezione incompatibile. È una verifica d'integrazione del coordinatore: non dare
-il ViewModel completo al worker. Preparare un eventuale modulo isolato solo dopo
-averne estratto e testato il contratto. Nessuna modifica assegnata a Claude ora.
+Completato dal coordinatore il 2026-11-01. `AppUpdater.fetchSnapshot()` legge
+`/latest` una volta; `ReleaseUpdateService` pubblica versione, note, APK, schede e
+selezione nello stesso stato. Refresh invalida prima dell'IO; errori e cancellazione
+non ripristinano asset precedenti. Click da selezioni obsolete vengono rifiutati.
+Home e Updates consumano lo stesso snapshot; il progresso del download è separato.
+Refresh bloccato durante download/installer e flash; immagine compatibile richiesta
+prima di prendere la porta USB. Nessuna modifica a protocollo, firmware o versione.
+
+Nove regressioni sintetiche; compilazione completa con cache: 156 file Kotlin,
+533 test / 86 suite non-Paparazzi. Gradle/lint bloccati dal lock globale; OTA live,
+permessi Android e flash fisico non verificati. Per l'evidenza vedere TESTS.md.
+S03 è stato successivamente completato (vedi sotto); S04 completato sotto; prossimo S06, S02 resta bloccato.
+Nessun worker da lanciare automaticamente. Il lifecycle completo di APK/flash resta
+in S06/S10; questa integrazione copre lo snapshot e i suoi punti di consumo.
+
+## S03 — coordinator capability/lifecycle matrix, completed 2026-11-04
+
+Implemented directly; no worker launched. The existing controls checklist now has
+a software matrix covering all 51 destinations, separating actual JVM evidence
+from Android/hardware acceptance. `CommandCapabilities` gates known hardware CMDs;
+`StreamSubscriptions` owns SUB waits, supersession, input checks and cleanup even
+when ACKs are missing. Fixed BurstLoop/WIDS startup/cancellation, duration bounds,
+LoRa Stop/receive flags, mixed offline/device screen gating and failed RF/NFC saves.
+Audio subscriptions react to connection/capability changes; DTMF/recording respect
+failed mic starts. Firmware/protocol wire format and release version are unchanged.
+
+Evidence: 24 added regressions; cached full Kotlin compilation 158 files and
+557 tests / 88 non-Paparazzi suites pass. 51/51 matrix-to-catalog correspondence;
+Gradle/lint still blocked by the global wrapper lock. No device, phone permission,
+UI lifecycle or physical shutdown acceptance. See TESTS.md and the matrix's open
+boundaries, tracked in S02/S04–S11. S04 was subsequently completed below; next S06
+only on explicit request; no automatic worker launch.
+
+## S04 — coordinator transactional uploads, completed 2026-11-04
+
+Implemented directly; no worker launched. Managed uploads require a new additive
+CAPS flag and matching begin/chunk/commit ACKs; older verified-file reads continue
+working. The Arduino-free transaction engine stages/verifies, journals FAT backups,
+rolls back failed promotion and retains recovery artifacts when rollback is impossible.
+LittleFS uses rename replacement. Abort/idle/exit cleanup and legacy-write exclusion
+are wired into the companion lifecycle. Lost commit replies never trigger replay.
+
+Evidence: 563 JVM tests / 88 suites with 158 production Kotlin files, 41 UBSan engine
+failure/reset scenarios, native storage/codec/framing and mock protocol checks, plus
+three firmware targets; see TESTS.md for build details and physical/Android limits.
+FAT is recoverable, not atomically visible or certified against power loss. Next S06:
+connection/session and installer/flash job ownership. S02/S05/S07 stay blocked for
+their recorded prerequisites; do not automatically launch workers or chain tasks.
 
 ## Coordinator acceptance
 

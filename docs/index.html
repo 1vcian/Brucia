@@ -347,7 +347,7 @@
         <a class="btn btn-ghost" href="https://github.com/1vcian/BruciaDev/releases/latest">Download the app</a>
         <a class="btn btn-ghost" href="https://s.click.aliexpress.com/e/_c33qeCLh" target="_blank" rel="noopener sponsored">Buy the board</a>
       </div>
-      <p class="note">Flash from desktop Chrome or Edge with a <b>data</b> USB cable. On Android, use the app’s USB flasher. Install activates when a matching release image is available.</p>
+      <p class="note">Flash from desktop Chrome or Edge with a <b>data</b> USB cable. On Android, use the app’s USB flasher. Install activates when a matching release image is available; it is first checked against the size and SHA-256 the release lists (older releases without a digest are shown as unverified).</p>
       <div class="badges">
         <span class="badge">USB companion</span>
         <span class="badge">ESP32-S3</span>
@@ -819,6 +819,9 @@
     });
 
     /* ---------- multi-board web flasher ---------- */
+    /* The image is fetched and checked against the release size/SHA-256 here; esp-web-tools
+       only ever receives a blob: URL of bytes that passed (or, for releases without a digest,
+       bytes reported as unverified). */
     (function () {
       var sel = document.getElementById("boardSelect");
       var btn = document.getElementById("boardInstall");
@@ -829,6 +832,9 @@
       var status = document.getElementById("releaseStatus");
       var release = null;
       var manifests = new Map();
+      var images = new Map();
+      var generation = 0;
+      var webSerial = typeof navigator !== "undefined" && !!navigator && "serial" in navigator;
       function setManifest(element, manifest) {
         if (!element) return;
         var old = manifests.get(element);
@@ -841,16 +847,44 @@
         manifests.set(element, url);
         element.setAttribute("manifest", url);
       }
+      function image(asset) {
+        var pending = images.get(asset.url);
+        if (!pending) {
+          pending = BruciaReleases.fetchVerified(fetch, crypto.subtle, asset).then(function (bytes) {
+            return URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+          });
+          images.set(asset.url, pending);
+          pending.catch(function () { if (images.get(asset.url) === pending) images.delete(asset.url); });
+        }
+        return pending;
+      }
+      function load(element, env, cf, gen, report) {
+        var asset = release.boards[env];
+        function say(text) { if (report && status) status.textContent = text; }
+        if (!asset) { say("No firmware asset for this board in release " + release.tag); return; }
+        if (!webSerial) { say("Firmware release " + release.tag + ": flashing needs desktop Chrome or Edge (Web Serial)"); return; }
+        say("Firmware release " + release.tag + ": downloading and checking the image...");
+        image(asset).then(function (blobUrl) {
+          if (gen !== generation) return;
+          setManifest(element, BruciaReleases.manifest(release, env, cf, blobUrl));
+          say("Firmware release " + release.tag + ": image " + BruciaReleases.label(asset));
+        }, function (error) {
+          if (gen !== generation) return;
+          say(error.message + ". Nothing was sent to the flasher.");
+        });
+      }
       function apply() {
+        var gen = ++generation;
         var opt = sel.options[sel.selectedIndex];
         if (!opt) return;
         var cf = opt.getAttribute("data-chip");
         if (chip) chip.textContent = cf;
         if (cliEnv) cliEnv.textContent = opt.value;
-        var selected = release && BruciaReleases.manifest(release, opt.value, cf);
-        setManifest(btn, selected);
-        setManifest(quick, release && BruciaReleases.manifest(release, "lilygo-t-embed-cc1101", "ESP32-S3"));
-        if (release && status) status.textContent = selected ? "Firmware release " + release.tag : "No firmware asset for this board in release " + release.tag;
+        setManifest(btn, null);
+        setManifest(quick, null);
+        if (!release) return;
+        load(btn, opt.value, cf, gen, true);
+        load(quick, "lilygo-t-embed-cc1101", "ESP32-S3", gen, false);
       }
       sel.addEventListener("change", apply);
       apply();
@@ -860,8 +894,13 @@
           return response.json();
         })
         .then(function (body) { release = BruciaReleases.parse(body); apply(); })
-        .catch(function (error) { setManifest(btn, null); setManifest(quick, null); if (status) status.textContent = error.message; });
-      window.addEventListener("pagehide", function () { manifests.forEach(function (url) { URL.revokeObjectURL(url); }); manifests.clear(); });
+        .catch(function (error) { generation++; setManifest(btn, null); setManifest(quick, null); if (status) status.textContent = error.message; });
+      window.addEventListener("pagehide", function () {
+        generation++;
+        manifests.forEach(function (url) { URL.revokeObjectURL(url); }); manifests.clear();
+        images.forEach(function (pending) { pending.then(function (url) { URL.revokeObjectURL(url); }, function () {}); });
+        images.clear();
+      });
       window.addEventListener("pageshow", apply);
     })();
   </script>

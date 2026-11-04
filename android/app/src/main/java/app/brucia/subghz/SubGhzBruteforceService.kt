@@ -24,6 +24,7 @@ class SubGhzBruteforceService(scope: CoroutineScope, runner: CommandRunner, isCo
             "subghz_bruteforce $protocolIdx $freqHz $bits $secs",
             "Brute-forcing for ${secs}s...",
             timeoutMs = timeoutMsFor(secs),
+            precheck = { if (secs !in 1..30) "Duration must be 1–30 seconds." else null },
         ) { ok, out -> out.ifBlank { if (ok) "Done." else "Failed." } }
     }
 
@@ -31,8 +32,7 @@ class SubGhzBruteforceService(scope: CoroutineScope, runner: CommandRunner, isCo
     fun stop() = op.stop()
 
     companion object {
-        // Firmware subghz.cpp clamps secs to [1, 30], so the run never exceeds the VM's (secs + 8) s
-        // wait: keep that formula verbatim.
-        fun timeoutMsFor(secs: Int): Long = (secs + 8) * 1000L
+        // Match the firmware's bounded duration without overflowing on invalid inputs.
+        fun timeoutMsFor(secs: Int): Long = (secs.coerceIn(1, 30).toLong() + 8) * 1000L
     }
 }

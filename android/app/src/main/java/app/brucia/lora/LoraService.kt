@@ -4,6 +4,8 @@ import app.brucia.session.CommandRunner
 import app.brucia.session.DeviceOperation
 import app.brucia.session.JsonCommandRunner
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,7 +19,7 @@ import org.json.JSONObject
  * [receiving] or call [onPacket], so a superseded reply never clears a newer flag nor re-delivers.
  */
 class LoraService(
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     runner: CommandRunner,
     private val json: JsonCommandRunner,
     private val isConnected: () -> Boolean,
@@ -34,13 +36,21 @@ class LoraService(
     private val lock = Any()
     private var recvToken = 0L
 
+    init {
+        scope.coroutineContext[Job]?.invokeOnCompletion {
+            synchronized(lock) { ++recvToken; _receiving.value = false }
+        }
+    }
+
     private fun loraErrMessage(out: String) = out.ifBlank { "No LoRa module on this device." }
 
     /**
      * Apply the LoRa radio configuration (lora_config <freqMHz> [bw] [sf] [cr]); only trailing blank
      * optional args are dropped so bw/sf/cr keep their positions.
      */
-    fun configure(freqMHz: String, bw: String = "", sf: String = "", cr: String = "") {
+    fun configure(freqMHz: String, bw: String = "", sf: String = "", cr: String = "") = synchronized(lock) {
+        ++recvToken
+        _receiving.value = false
         val freq = freqMHz.trim()
         val tail = listOf(bw, sf, cr).map { it.trim() }.dropLastWhile { it.isEmpty() }
         val cmd = ("lora_config " + (listOf(freq) + tail).joinToString(" ")).trim()
@@ -50,7 +60,9 @@ class LoraService(
     }
 
     /** Transmit one LoRa message (lora_send <text>). */
-    fun send(text: String) {
+    fun send(text: String) = synchronized(lock) {
+        ++recvToken
+        _receiving.value = false
         val msg = text.trim()
         op.start("lora_send $msg", "Sending...", { if (msg.isEmpty()) "Enter a message to send." else null }, SEND_TIMEOUT_MS) { ok, out ->
             if (ok) out.ifBlank { "Sent." } else loraErrMessage(out)
@@ -64,9 +76,10 @@ class LoraService(
      */
     fun receive(seconds: Int = 20) = synchronized(lock) {
         val t = ++recvToken
-        // Mirror the VM: only arm the indicator once the connection check has passed.
-        if (isConnected()) _receiving.value = true
-        op.startJson(json, "lora_recv $seconds", "Listening for LoRa packets (${seconds}s)...", timeoutMs = recvTimeoutFor(seconds)) { ok, d ->
+        _receiving.value = isConnected() && scope.isActive && seconds in 1..120
+        op.startJson(json, "lora_recv $seconds", "Listening for LoRa packets (${seconds}s)...",
+            precheck = { if (seconds !in 1..120) "Duration must be 1–120 seconds." else null },
+            timeoutMs = recvTimeoutFor(seconds)) { ok, d ->
             synchronized(lock) {
                 if (t == recvToken) {
                     _receiving.value = false
@@ -78,12 +91,8 @@ class LoraService(
         }
     }
 
-    /**
-     * Clear the receive indicator locally without stopping the wait (VM stopLoraRecv parity): the
-     * device keeps its listen window, so the in-flight receive still delivers its final packet and
-     * status. Stopping it would drop a packet the VM shows and set "Stopped.", which the VM never does.
-     */
-    fun stopReceive() = synchronized(lock) { _receiving.value = false }
+    /** Cancel the local receive wait; firmware keeps its bounded listen window. */
+    fun stopReceive() = stop()
 
     /** Hard stop: cancel any in-flight command and clear the receive indicator. */
     fun stop() = synchronized(lock) {
@@ -100,6 +109,6 @@ class LoraService(
 
         /** Firmware runLoraRecv listens secs*1000 (clamped to 120s max); margin covers the final ACK. */
         const val RECV_MARGIN_MS = 10_000L
-        fun recvTimeoutFor(secs: Int): Long = secs.coerceAtLeast(0) * 1000L + RECV_MARGIN_MS
+        fun recvTimeoutFor(secs: Int): Long = secs.coerceIn(1, 120).toLong() * 1000L + RECV_MARGIN_MS
     }
 }

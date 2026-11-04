@@ -13,6 +13,31 @@ class CapsTest {
         assertTrue(app.brucia.wardrive.DeviceFeatures.fromJson(JSONObject().put("verified_files", true)).verifiedFiles)
     }
 
+    @Test fun transactionalUploadSupportRequiresItsOwnLiteralFlag() {
+        val parse = app.brucia.wardrive.DeviceFeatures.Companion::fromJson
+        assertFalse(parse(null).transactionalUploads)
+        assertFalse(parse(JSONObject().put("verified_files", true)).transactionalUploads)
+        assertFalse(parse(JSONObject().put("transactional_uploads", "true")).transactionalUploads)
+        assertTrue(parse(JSONObject().put("transactional_uploads", true)).transactionalUploads)
+    }
+
+    @Test fun asyncSpeakerPlayRequiresItsOwnLiteralFlag() {
+        val parse = app.brucia.wardrive.DeviceFeatures.Companion::fromJson
+        assertFalse(parse(null).speakerPlayAsync)
+        assertFalse(parse(JSONObject().put("verified_files", true).put("transactional_uploads", true)).speakerPlayAsync)
+        assertFalse(parse(JSONObject().put("speaker_play_async", "true")).speakerPlayAsync)
+        assertFalse(parse(JSONObject().put("speaker_play_async", 1)).speakerPlayAsync)
+        assertTrue(parse(JSONObject().put("speaker_play_async", true)).speakerPlayAsync)
+    }
+
+    @Test fun inFlightMifareStopRequiresItsOwnLiteralFlag() {
+        val parse = app.brucia.wardrive.DeviceFeatures.Companion::fromJson
+        assertFalse(parse(null).mifareKeycheckStop)
+        assertFalse(parse(JSONObject().put("mifare_keycheck_report", true)).mifareKeycheckStop)
+        assertFalse(parse(JSONObject().put("mifare_keycheck_stop", "true")).mifareKeycheckStop)
+        assertTrue(parse(JSONObject().put("mifare_keycheck_stop", true)).mifareKeycheckStop)
+    }
+
     @Test fun absentCapsDoNotInventHardware() {
         val c = DeviceCaps.fromJson(null)
         assertFalse(c.cc1101 || c.nfc || c.nrf24 || c.fm || c.ir || c.mic || c.speaker || c.wifi || c.ble || c.lora || c.eth)

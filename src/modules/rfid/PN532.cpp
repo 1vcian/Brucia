@@ -370,9 +370,11 @@ bool PN532::beginInternal(bool quiet) {
         return false;
     }
 
+    _firmwareVersion = 0;
     if (!nfc.begin()) return false;
 
     uint32_t versiondata = nfc.getFirmwareVersion();
+    _firmwareVersion = versiondata;
     PN532_DBG(
         "[PN532] begin: versiondata=0x%08lX result=%d\n",
         (unsigned long)versiondata,
@@ -1169,52 +1171,64 @@ int PN532::authenticate_mifare_classic(byte block) {
 }
 
 // Brucia companion key-dictionary offload: the phone sends a batch of candidate keys,
-// the PN532 tests each one against every sector (key A and B) of the present tag. Reuses
-// the same nfc.mifareclassic_AuthenticateBlock() primitive as authenticate_mifare_classic().
-bool PN532::mifareKeyCheck(const uint8_t (*keyList)[6], size_t count, std::vector<MifareKeyHit> &out) {
-    // Detect the tag and capture its UID (auth needs uid.uidByte / uid.size).
-    if (!nfc.startPassiveTargetIDDetection(PN532_MIFARE_ISO14443A)) return false;
-    if (!nfc.readDetectedPassiveTargetID()) return false;
-    format_data();
-    set_uid();
-
-    // Sector count from the SAK: MIFARE Classic 1K = 16, 4K = 40, Mini = 5.
-    uint8_t sectors;
-    switch (uid.sak) {
-        case PICC_TYPE_MIFARE_MINI: sectors = 5; break;
-        case PICC_TYPE_MIFARE_4K: sectors = 40; break;
-        case PICC_TYPE_MIFARE_1K:
-        default: sectors = 16; break;
+// the PN532 tests each one against every sector (key A and B) of the present tag. The loop
+// control and completeness accounting live in the Arduino-free mifareKeyCheckCore(); this
+// is only the hardware adapter over nfc.mifareclassic_AuthenticateBlock() (the same primitive
+// authenticate_mifare_classic() uses) and passive-target detection.
+namespace {
+struct Pn532AuthBus : MifareAuthBus {
+    PN532 *self;
+    std::function<bool()> stopPoll; // phone-driven cancellation; empty = never stop
+    bool selectTag(uint8_t uidOut[10], uint8_t &uidLen, uint8_t &sak) override {
+        if (!self->nfc.startPassiveTargetIDDetection(PN532_MIFARE_ISO14443A)) return false;
+        if (!self->nfc.readDetectedPassiveTargetID()) return false;
+        // Mirror set_uid(): auth needs uid.uidByte / uid.size, and the companion reports the UID.
+        self->uid.sak = self->nfc.targetUid.sak;
+        self->uid.size = self->nfc.targetUid.size;
+        for (uint8_t i = 0; i < self->nfc.targetUid.size && i < 10; i++)
+            self->uid.uidByte[i] = self->nfc.targetUid.uidByte[i];
+        uidLen = self->uid.size > 10 ? 10 : self->uid.size;
+        for (uint8_t i = 0; i < uidLen; i++) uidOut[i] = self->uid.uidByte[i];
+        sak = self->uid.sak;
+        return true;
     }
-
-    uint32_t attempts = 0;
-    for (uint8_t sector = 0; sector < sectors; sector++) {
-        // The sector trailer authenticates the whole sector.
-        uint8_t trailer = (sector < 32) ? (sector * 4 + 3) : (128 + (sector - 32) * 16 + 15);
-        for (uint8_t kt = 0; kt < 2; kt++) { // 0 = key A, 1 = key B
-            for (size_t k = 0; k < count; k++) {
-                uint8_t keyBuf[6];
-                memcpy(keyBuf, keyList[k], 6);
-                uint8_t ok =
-                    nfc.mifareclassic_AuthenticateBlock(uid.uidByte, uid.size, trailer, kt, keyBuf);
-                if ((++attempts & 0x07) == 0) vTaskDelay(1); // keep the watchdog happy on big dicts
-                if (ok) {
-                    MifareKeyHit hit;
-                    hit.sector = sector;
-                    hit.keyB = (kt == 1);
-                    memcpy(hit.key, keyBuf, 6);
-                    out.push_back(hit);
-                    break; // found this key type for this sector; stop testing it
-                }
-                // A failed auth can desync the PN532; re-select the card before the next try.
-                if (!nfc.startPassiveTargetIDDetection(PN532_MIFARE_ISO14443A) ||
-                    !nfc.readDetectedPassiveTargetID()) {
-                    return true; // tag gone - return whatever we found so far
-                }
-            }
-        }
+    bool authenticate(uint8_t trailerBlock, uint8_t keyType, const uint8_t key[6]) override {
+        uint8_t keyBuf[6];
+        memcpy(keyBuf, key, 6);
+        return self->nfc.mifareclassic_AuthenticateBlock(
+            self->uid.uidByte, self->uid.size, trailerBlock, keyType, keyBuf
+        );
     }
-    return true; // tag was present and scanned (out may be empty)
+    bool reselect() override {
+        return self->nfc.startPassiveTargetIDDetection(PN532_MIFARE_ISO14443A) &&
+               self->nfc.readDetectedPassiveTargetID();
+    }
+    void onAttempt(uint32_t attempts) override {
+        if ((attempts & 0x07) == 0) vTaskDelay(1); // keep the watchdog happy on big dicts
+    }
+    bool shouldStop() override { return stopPoll && stopPoll(); }
+};
+} // namespace
+
+bool PN532::mifareKeyCheck(
+    const uint8_t (*keyList)[6], size_t count, std::vector<MifareKeyHit> &out,
+    MifareKeyCheckResult *info, std::function<bool()> shouldStop
+) {
+    Pn532AuthBus bus;
+    bus.self = this;
+    bus.stopPoll = shouldStop;
+    MifareKeyCheckResult r = mifareKeyCheckCore(bus, keyList, count);
+
+    out.clear();
+    for (const auto &h : r.hits) {
+        MifareKeyHit hit;
+        hit.sector = h.sector;
+        hit.keyB = h.keyB;
+        memcpy(hit.key, h.key, 6);
+        out.push_back(hit);
+    }
+    if (info) *info = r;
+    return r.tagPresent;
 }
 
 int PN532::read_mifare_ultralight_data_blocks() {

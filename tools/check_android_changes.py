@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Type-check modified main Kotlin files against an existing debug build/cache.
+"""Type-check modified main Kotlin files against an existing app build/cache.
 
-No Gradle daemon or sockets. Requires a previous Android debug build. This does
+No Gradle daemon or sockets. Requires a previous Android build. This does
 not regenerate Room/KSP output, run lint, package resources or build an APK.
 """
 import os
@@ -16,12 +16,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--unit-tests', action='store_true', help='Compile/run all non-Paparazzi unit suites against the cached app build')
     parser.add_argument('--all-main', action='store_true', help='Compile all production Kotlin, including Compose, against cached dependencies/generated Java')
+    parser.add_argument('--variant', choices=('debug', 'release'), default='debug', help='Existing build whose generated classes/resources are reused (default: debug)')
     args = parser.parse_args()
     cache = Path(os.environ.get("GRADLE_USER_HOME", Path.home() / ".gradle")) / "caches"
     modules = cache / "modules-2/files-2.1"
     compiler = [str(next((modules / g / a / v).glob(f"*/{a}-{v}.jar"))) for g, a, v in ARTIFACTS]
     build = ROOT / "android/app/build"
-    original = build / "tmp/kotlin-classes/debug"
+    original = build / "tmp/kotlin-classes" / args.variant
     sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
     if not sdk:
         props = ROOT / "android/local.properties"
@@ -30,11 +31,11 @@ def main():
     sdk = Path(sdk) if sdk else Path.home() / "Library/Android/sdk"
     android_jar = sdk / "platforms/android-34/android.jar"
     if not original.is_dir() or not android_jar.exists():
-        raise SystemExit("A previous debug build and Android SDK 34 are required")
-    classpath = [original, build / "intermediates/javac/debug/compileDebugJavaWithJavac/classes", android_jar]
+        raise SystemExit(f"A previous {args.variant} build and Android SDK 34 are required")
+    classpath = [original, build / f"intermediates/javac/{args.variant}/compile{args.variant.capitalize()}JavaWithJavac/classes", android_jar]
     classpath += list(cache.glob("*/transforms/**/classes.jar"))
     classpath += [p for p in modules.rglob("*.jar") if not p.name.endswith(("-sources.jar", "-javadoc.jar"))]
-    classpath += list(build.glob("intermediates/compile_and_runtime_not_namespaced_r_class_jar/debug/**/R.jar"))
+    classpath += list(build.glob(f"intermediates/compile_and_runtime_not_namespaced_r_class_jar/{args.variant}/**/R.jar"))
     changed = subprocess.check_output(["git", "diff", "--name-only", "HEAD"], cwd=ROOT, text=True).splitlines()
     changed += subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, text=True).splitlines()
     sources = sorted({str(ROOT / p) for p in changed if p.startswith("android/app/src/main/") and p.endswith(".kt") and (ROOT / p).exists()})

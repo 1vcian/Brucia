@@ -50,12 +50,35 @@ void target_atk_menu(const String &tssid, const String &mac, uint8_t channel);
 void target_atk(const String &tssid, const String &mac, uint8_t channel);
 
 void capture_handshake(const String &tssid, const String &mac, uint8_t channel);
-bool capture_handshake_bounded(const String &tssid, const String &mac, uint8_t channel, uint32_t seconds);
+
+// Brucia: per-run provenance the companion turns into the capture descriptor ACK
+// (CAPS features.capture_descriptor). Describes the pcap this run actually wrote, so the phone can
+// import exactly that file and verify it after transfer instead of diffing directory listings.
+struct CaptureRunInfo {
+    String path;                // the pcap this run actually wrote (writer-reported), or a fallback name
+    uint32_t frames = 0;        // pcap records this run appended to that file (measured, not assumed)
+    bool framesKnown = false;   // true only when `frames` is a real measurement of this run's writes
+    bool usable = false;        // a usable capture was detected (4-way complete / >=1 PMKID-EAPOL frame)
+    bool written = false;       // a file was actually created or grown this run (not just a stale file)
+    bool created = false;       // the file was newly created this run (vs. appended to an existing one)
+    uint32_t priorSize = 0;     // the file's size before this run's appends (0 when created)
+    bool aborted = false;       // the device button ended the run before a usable capture
+    bool budgetElapsed = false; // the full time budget elapsed (vs. an early success/abort exit)
+};
+
+// Bounded, headless handshake capture for the companion. `info` (optional) receives the per-run
+// provenance above. Standalone capture_handshake() is unchanged.
+bool capture_handshake_bounded(
+    const String &tssid, const String &mac, uint8_t channel, uint32_t seconds, CaptureRunInfo *info = nullptr
+);
 
 // Brucia: headless, bounded PMKID capture for the companion app. Writes EAPOL/PMKID
 // frames for the target BSSID straight to a pcap in /BrucePCAP/handshakes/ (the phone
-// extracts the PMKID). `outPath` receives the pcap path. Returns true if >=1 frame saved.
-bool capture_pmkid_bounded(const String &mac, uint8_t channel, uint32_t seconds, String &outPath);
+// extracts the PMKID). `outPath` receives the pcap path. `info` (optional) receives the per-run
+// provenance for the capture descriptor. Returns true if >=1 frame saved.
+bool capture_pmkid_bounded(
+    const String &mac, uint8_t channel, uint32_t seconds, String &outPath, CaptureRunInfo *info = nullptr
+);
 
 void beaconAttack();
 

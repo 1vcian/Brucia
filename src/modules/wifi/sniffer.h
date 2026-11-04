@@ -64,6 +64,22 @@ void sniffer_reset_handshake_cache();
 void markHandshakeReady(uint64_t key);
 bool sniffer_is_handshake_ready(uint64_t bssidKey);
 
+// Brucia: the deterministic pcap path the handshake sniffer writes for a given AP MAC + SSID
+// (HS_<MAC>[_<sanitized SSID>].pcap under /BrucePCAP/handshakes/). Same naming the writer uses,
+// exposed so the companion can report a best-effort fallback name when nothing was written this run.
+// The SSID is sanitized identically to the writer; pass "" (or nullptr) when the SSID is unknown.
+String snifferHandshakePath(const uint8_t mac[6], const char *ssid);
+
+// Brucia: capture-descriptor write tracking. The companion brackets a bounded capture with
+// snifferBeginCaptureTracking()/snifferEndCaptureTracking(); between them the writer records the
+// handshake file it actually created or appended to. snifferLastCapture() returns false when nothing
+// was written this run (so the companion reports complete:false, not a stale pre-existing file);
+// when true it yields the real path, the pcap records appended this run, whether the file was newly
+// created, and the file's size before this run's appends. Not used by standalone capture.
+void snifferBeginCaptureTracking(const uint8_t targetMac[6]);
+void snifferEndCaptureTracking();
+bool snifferLastCapture(String &path, uint32_t &frames, bool &created, uint32_t &priorSize);
+
 extern std::set<BeaconList> registeredBeacons;
 extern std::set<String> SavedHS;
 

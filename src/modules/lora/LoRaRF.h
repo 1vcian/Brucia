@@ -33,5 +33,11 @@ bool lora_companion_ready();
 
 // Tear the radio down (releases the RadioLib objects).
 void lora_companion_end();
+
+// Capability probe: RadioLib begin() (resets the chip and verifies its version register), then
+// sleep and release. Never starts RX/TX and attaches no interrupt. Returns false when pins are
+// unconfigured or the chip did not answer; *sx1262 reports the variant tried. Not for use while
+// lora_companion_begin() owns the radio.
+bool lora_companion_probe(bool *sx1262);
 #endif
 #endif

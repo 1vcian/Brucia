@@ -20,7 +20,8 @@ class JamDetectService(scope: CoroutineScope, runner: CommandRunner, isConnected
     /** Listen for [secs] seconds; ignored if one is already running. */
     fun run(secs: Int) {
         if (op.busy.value) return
-        op.start("jam_detect $secs", "Listening for ${secs}s...", timeoutMs = timeoutMsFor(secs)) { ok, out ->
+        op.start("jam_detect $secs", "Listening for ${secs}s...", timeoutMs = timeoutMsFor(secs),
+            precheck = { if (secs !in 1..120) "Duration must be 1–120 seconds." else null }) { ok, out ->
             out.ifBlank { if (ok) "Done." else "Failed." }
         }
     }
@@ -29,8 +30,7 @@ class JamDetectService(scope: CoroutineScope, runner: CommandRunner, isConnected
     fun stop() = op.stop()
 
     companion object {
-        // Firmware wifi.cpp clamps secs to [1, 120], so the window never runs longer than the VM's
-        // (secs + 8) s wait: keep that formula verbatim.
-        fun timeoutMsFor(secs: Int): Long = (secs + 8) * 1000L
+        // Clamp before arithmetic: even invalid callers cannot overflow or create an immediate timeout.
+        fun timeoutMsFor(secs: Int): Long = (secs.coerceIn(1, 120).toLong() + 8) * 1000L
     }
 }

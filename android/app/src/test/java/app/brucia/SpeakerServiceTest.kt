@@ -2,6 +2,8 @@ package app.brucia
 
 import app.brucia.audio.SpeakerService
 import app.brucia.session.CommandRunner
+import app.brucia.session.JsonCommandRunner
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -13,6 +15,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import org.json.JSONObject
 
 class SpeakerServiceTest {
     private val runner = GateRunner()
@@ -186,5 +189,187 @@ class SpeakerServiceTest {
         runner.reply(0, true, "late")
         delay(20)
         assertEquals("Stopped." to false, svc.state())
+    }
+
+    // --- Non-blocking speaker_play (firmware features.speaker_play_async) ---
+
+    /** Fake JSON transport: each speaker_play waits on its own gate. */
+    private class JsonGate : JsonCommandRunner {
+        val calls = CopyOnWriteArrayList<Pair<String, Long>>()
+        val gates = CopyOnWriteArrayList<CompletableDeferred<Pair<Boolean, JSONObject?>>>()
+        override suspend fun runJson(cmd: String, timeoutMs: Long): Pair<Boolean, JSONObject?> {
+            val gate = CompletableDeferred<Pair<Boolean, JSONObject?>>().also { gates += it }
+            calls += cmd to timeoutMs
+            return gate.await()
+        }
+        fun ack(i: Int, play: Long, path: String) =
+            gates[i].complete(true to JSONObject().put("ok", true).put("out", "playing $path").put("play", play))
+        fun fail(i: Int, d: JSONObject) = gates[i].complete(false to d)
+    }
+
+    private val json = JsonGate()
+    @Volatile private var async = true
+    private fun CoroutineScope.asyncSvc() = SpeakerService(this, runner, { connected }, json, { async })
+    private fun end(play: Long, state: String, path: String = "/a.wav", reason: String? = null) =
+        JSONObject().put("play", play).put("state", state).put("path", path).put("ms", 1200)
+            .apply { if (reason != null) put("reason", reason) }
+
+    /** Start /a.wav and complete its ACK with [play]; returns once the file is tracked. */
+    private suspend fun SpeakerService.started(play: Long, path: String = "/a.wav") {
+        val n = json.calls.size
+        playFile(path)
+        assertEquals("Starting $path..." to true, state())
+        until { json.calls.size == n + 1 }
+        json.ack(n, play, path)
+        until { !busy.value }
+    }
+
+    @Test(timeout = 5_000) fun asyncStartAcksAtOnceAndCompletionEventEndsIt() = runBlocking {
+        val svc = asyncSvc()
+        svc.started(7)
+        assertEquals("Playing /a.wav" to false, svc.state())
+        assertEquals("/a.wav", svc.filePlaying.value)
+        assertEquals(listOf("speaker_play /a.wav" to SpeakerService.PLAY_START_TIMEOUT_MS), json.calls.toList())
+        assertTrue(runner.calls.isEmpty())
+        svc.onPlayEvent(end(99, "completed", "/other.wav")) // not ours: ignored
+        assertEquals("/a.wav", svc.filePlaying.value)
+        svc.onPlayEvent(end(7, "completed"))
+        assertEquals("" to ("Played /a.wav." to false), svc.filePlaying.value to svc.state())
+        svc.onPlayEvent(end(7, "stopped", reason = "stop")) // duplicate: ignored
+        assertEquals("Played /a.wav.", svc.status.value)
+    }
+
+    @Test(timeout = 5_000) fun stopMidPlaySendsSpeakerStopAndReportsStopped() = runBlocking {
+        val svc = asyncSvc()
+        svc.started(8)
+        svc.stopFile()
+        until { runner.calls.size == 1 }
+        assertEquals("speaker_stop" to 10_000L, runner.calls[0])
+        assertEquals("/a.wav", svc.filePlaying.value) // still tracked until the device confirms
+        svc.onPlayEvent(end(8, "stopped", reason = "stop")) // firmware sends the EVENT before the ACK
+        assertEquals("" to ("Stopped /a.wav." to false), svc.filePlaying.value to svc.state())
+        runner.reply(0, true, "stopped")
+        delay(20)
+        assertEquals("Stopped /a.wav.", svc.status.value)
+
+        // A lost EVENT: the successful stop ACK still ends the tracking.
+        svc.started(9, "/b.mp3")
+        svc.stopFile()
+        until { runner.calls.size == 2 }
+        runner.reply(1, true, "stopped")
+        until { svc.filePlaying.value.isEmpty() }
+        assertEquals("Stopped /b.mp3." to false, svc.state())
+    }
+
+    @Test(timeout = 5_000) fun stopWhilePlaybackIsStillStartingCancelsTheStart() = runBlocking {
+        val svc = asyncSvc()
+        svc.playFile("/a.wav")
+        until { json.calls.size == 1 }
+        svc.stopFile()
+        assertEquals("Stopped." to false, svc.state())
+        until { runner.calls.size == 1 }
+        assertEquals("speaker_stop", runner.cmds[0])
+        json.ack(0, 3, "/a.wav") // late start ACK: ignored
+        svc.onPlayEvent(end(3, "stopped", reason = "stop"))
+        runner.reply(0, true, "stopped")
+        delay(20)
+        assertEquals("" to ("Stopped." to false), svc.filePlaying.value to svc.state())
+    }
+
+    @Test(timeout = 5_000) fun startErrorsAndErrorEvent() = runBlocking {
+        val svc = asyncSvc()
+        svc.playFile("x.mp3")
+        until { json.calls.size == 1 }
+        json.fail(0, JSONObject().put("ok", false).put("out", "file not found"))
+        until { !svc.busy.value }
+        assertEquals("file not found" to "", svc.status.value to svc.filePlaying.value)
+        svc.playFile("x.xyz")
+        until { json.calls.size == 2 }
+        json.fail(1, JSONObject().put("code", 400).put("msg", "usage: speaker_play <path>"))
+        until { !svc.busy.value }
+        assertEquals("usage: speaker_play <path>", svc.status.value)
+        svc.playFile("y.wav")
+        until { json.calls.size == 3 }
+        json.fail(2, JSONObject())
+        until { !svc.busy.value }
+        assertEquals("Playback failed.", svc.status.value)
+        svc.rejects("Enter a file path first.") { playFile("  ") }
+        assertEquals(3, json.calls.size)
+
+        svc.started(11, "/c.wav")
+        svc.onPlayEvent(end(11, "error", "/c.wav"))
+        assertEquals("" to ("Playback error: /c.wav." to false), svc.filePlaying.value to svc.state())
+        connected = false
+        svc.rejects(notConnected) { playFile("/c.wav") }
+        assertEquals(4, json.calls.size)
+    }
+
+    @Test(timeout = 5_000) fun eventReadBeforeItsStartAckIsMapped() = runBlocking {
+        val svc = asyncSvc()
+        svc.playFile("/tiny.wav")
+        until { json.calls.size == 1 }
+        svc.onPlayEvent(end(5, "stopped", "/old.wav", "superseded")) // previous file, other token
+        svc.onPlayEvent(end(6, "completed", "/tiny.wav"))
+        json.ack(0, 6, "/tiny.wav")
+        until { !svc.busy.value }
+        assertEquals("" to ("Played /tiny.wav." to false), svc.filePlaying.value to svc.state())
+    }
+
+    @Test(timeout = 5_000) fun newerSpeakerCommandForgetsTheFileAndKeepsItsWait() = runBlocking {
+        val svc = asyncSvc()
+        svc.started(12)
+        svc.tone(440, 500) // the device stops the file before the tone
+        assertEquals("" to ("Playing 440Hz for 500ms..." to true), svc.filePlaying.value to svc.state())
+        svc.onPlayEvent(end(12, "stopped", reason = "superseded")) // never cancels the tone wait
+        assertEquals("Playing 440Hz for 500ms..." to true, svc.state())
+        until { runner.calls.size == 1 }
+        runner.reply(0, true, "")
+        until { !svc.busy.value }
+        assertEquals("Tone played.", svc.status.value)
+
+        svc.started(13)
+        svc.dtmf('5')
+        assertEquals("", svc.filePlaying.value)
+        until { runner.calls.size == 2 }
+        runner.reply(1, true, "dtmf")
+        svc.started(14)
+        svc.onPlayEvent(end(14, "stopped", reason = "superseded")) // e.g. a mic stream took the I2S
+        assertEquals("Playback of /a.wav was interrupted.", svc.status.value)
+        svc.stopFile() // nothing tracked: nothing sent
+        delay(20)
+        assertEquals(listOf("speaker_tone 440 500", "speaker_dtmf 5 200"), runner.cmds)
+    }
+
+    @Test(timeout = 5_000) fun disconnectForgetsTheFileAndIgnoresItsLateEvent() = runBlocking {
+        val svc = asyncSvc()
+        svc.started(21)
+        connected = false
+        svc.disconnect()
+        assertEquals("" to (SpeakerService.LINK_CLOSED to false), svc.filePlaying.value to svc.state())
+        svc.onPlayEvent(end(21, "completed"))
+        assertEquals(SpeakerService.LINK_CLOSED, svc.status.value)
+        svc.stopFile()
+        delay(20)
+        assertTrue(runner.calls.isEmpty())
+        // Disconnect with nothing playing leaves the status alone.
+        svc.disconnect()
+        assertEquals(SpeakerService.LINK_CLOSED, svc.status.value)
+    }
+
+    @Test(timeout = 5_000) fun oldFirmwareKeepsTheBlockingContract() = runBlocking {
+        async = false
+        val svc = asyncSvc()
+        assertEquals("played /a.wav", svc.result(true to "played /a.wav") { playFile("/a.wav") })
+        assertEquals(listOf("speaker_play /a.wav" to 600_000L), runner.calls.toList())
+        assertTrue(json.calls.isEmpty())
+        assertEquals("", svc.filePlaying.value)
+        svc.onPlayEvent(end(1, "completed"))
+        svc.stopFile() // no tracked file on old firmware: nothing sent
+        delay(20)
+        assertEquals(1, runner.calls.size)
+        // Without a JSON transport the service never takes the async path.
+        val noJson = SpeakerService(this, runner, { connected }, null, { true })
+        assertEquals("Playback started.", noJson.result(true to "") { playFile("/b.wav") })
+        assertEquals("speaker_play /b.wav" to 600_000L, runner.calls.last())
     }
 }

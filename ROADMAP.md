@@ -137,7 +137,7 @@ The numbers in the earlier idea table rank future ideas only. They do not overri
 | Order | Deliverable | Dependency / reason |
 |---|---|---|
 | Now — P0 | Existing operation matrix, release consistency, recovery and physical acceptance | Establish what actually works before expanding |
-| Next — P1 | Smaller session/transfer coordinators, transactional firmware writes, capability evidence | Reduce failure modes and contributor coupling |
+| Next — P1 | Remaining connection/installer/flash coordinators, sustained-session tests, capability evidence | Reduce failure modes and contributor coupling; managed transfers and transactional upload software are implemented (W11p/S04), with physical durability still unverified |
 | Feature 1 | Portable capture bundle + offline replay of one existing passive stream | Reproduce bugs and share experiments without new radio operations |
 | Feature 2 | Hardware doctor on existing capability reporting | Explain why a tool is enabled, unavailable or unverified |
 | Feature 3 | Bounded recipes with assertions, cleanup and reports | Reuse stable command lifecycles |

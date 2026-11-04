@@ -445,6 +445,7 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
                 sendErr(id, 400, "bad target (use ios|android|windows|samsung|all)");
             }
 #else
+            (void)copies; // parsed for the full build only
             sendErr(id, 501, "ble_spam_platform not available in this (lite) build");
 #endif
             break;

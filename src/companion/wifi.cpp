@@ -1,7 +1,9 @@
 #include "core/display.h"
 #include "core/mykeyboard.h"
+#include "core/sd_functions.h"
 #include "core/wifi/wifi_common.h"
 #include "internal.h"
+#include "modules/wifi/capture_descriptor_core.h"
 #include "modules/wifi/deauther.h"
 #include "modules/wifi/evil_portal.h"
 #include "modules/wifi/netcut.h"
@@ -47,6 +49,60 @@ void sendWifiApEvent(const String &bssid, const String &ssid, int ch, int rssi, 
     r["ts"] = (uint32_t)millis(); // device uptime; the app stamps real time + GPS
     sendEnvelope(out);
 }
+
+#if !defined(LITE_VERSION)
+// Brucia: attach the capture artifact descriptor (CAPS features.capture_descriptor) to a bounded
+// capture's terminal ACK. It describes the file THIS run wrote so the phone imports exactly that
+// path and verifies size/CRC after transfer, instead of diffing directory listings. The CRC is the
+// same unsigned IEEE CRC-32 the fs_read transfer reports, so the two must match. The device never
+// claims a wall-clock capture time it has no RTC for: the only time reported is its monotonic uptime.
+static void addCaptureDescriptor(JsonObject &d, const CaptureRunInfo &info, bool handshakeCmd) {
+    JsonObject desc = d["desc"].to<JsonObject>();
+    desc["v"] = 1;
+    desc["path"] = info.path;
+
+    // size/crc describe the whole file at the path, read back only when THIS run created or grew it.
+    // A detected-but-not-written run (e.g. only a stale file present) never has its file fingerprinted.
+    bool haveFile = false;
+    uint32_t fileSize = 0;
+    uint32_t fileCrc = 0;
+    FS *fs = nullptr;
+    if (info.written && info.path.length() && getFsStorage(fs) && fs) {
+        File f = (*fs).open(info.path, FILE_READ);
+        if (f) {
+            if (!f.isDirectory()) {
+                uint8_t buf[512];
+                uint32_t crc = bruciaCrc32Begin();
+                uint32_t total = 0;
+                int n;
+                while ((n = f.read(buf, sizeof(buf))) > 0) {
+                    crc = bruciaCrc32Update(crc, buf, (size_t)n);
+                    total += (uint32_t)n;
+                }
+                fileCrc = bruciaCrc32Finish(crc);
+                fileSize = total;
+                haveFile = true;
+            }
+            f.close();
+        }
+    }
+    if (haveFile) {
+        desc["size"] = fileSize;
+        desc["crc32"] = fileCrc;
+    }
+    if (info.framesKnown && info.written) desc["frames"] = info.frames; // measured records this run wrote
+    if (handshakeCmd) desc["handshake"] = info.usable; // a usable 4-way handshake (M1..M4) was detected
+    desc["complete"] = info.usable && info.written && haveFile; // a usable capture was written this run
+    if (info.written && !info.created) { // the file pre-existed and this run appended to it
+        desc["appended"] = true;
+        desc["prior_size"] = info.priorSize; // size/crc above cover the whole accumulated file
+    }
+    CaptureStop stop = captureClassifyStop(info.usable, info.written && haveFile, info.aborted, info.budgetElapsed);
+    desc["stop"] = captureStopName(stop);
+    desc["time_src"] = "device_uptime_ms"; // the device has no trustworthy wall clock
+    desc["uptime_ms"] = (uint32_t)millis();
+}
+#endif
 
 // --- wifi.sta stream: headless station/client sniffer (promiscuous, channel-hopping).
 //     Reports devices (stations) and the BSSID they talk to; the phone lists/dedups them.
@@ -672,13 +728,15 @@ bool dispatchWifiCommand(const CommandRequest &request) {
                 if (secs < 5) secs = 30;
                 if (secs > 120) secs = 120;
 #if !defined(LITE_VERSION)
-                bool ok = capture_handshake_bounded(ssid, bssid, (uint8_t)channel, (uint32_t)secs);
+                CaptureRunInfo info;
+                bool ok = capture_handshake_bounded(ssid, bssid, (uint8_t)channel, (uint32_t)secs, &info);
                 JsonDocument o;
                 beginEnvelope(o, MSG_ACK, id);
                 JsonObject d = o["d"].to<JsonObject>();
                 d["ok"] = ok;
                 d["out"] = ok ? "handshake captured in /BrucePCAP/handshakes/"
                               : "no handshake (try again, closer, more time)";
+                addCaptureDescriptor(d, info, /*handshakeCmd=*/true);
                 sendEnvelope(o);
 #else
                 sendErr(id, 501, "wifi_handshake not available in this (lite) build");
@@ -716,13 +774,15 @@ bool dispatchWifiCommand(const CommandRequest &request) {
                 if (secs > 120) secs = 120;
 #if !defined(LITE_VERSION)
                 String outPath;
-                bool ok = capture_pmkid_bounded(mac, (uint8_t)channel, (uint32_t)secs, outPath);
+                CaptureRunInfo info;
+                bool ok = capture_pmkid_bounded(mac, (uint8_t)channel, (uint32_t)secs, outPath, &info);
                 JsonDocument o;
                 beginEnvelope(o, MSG_ACK, id);
                 JsonObject d = o["d"].to<JsonObject>();
                 d["ok"] = ok;
                 d["out"] = ok ? ("pmkid/eapol pcap written to " + outPath)
                               : "no PMKID/EAPOL seen (no clients? try again, closer, more time)";
+                addCaptureDescriptor(d, info, /*handshakeCmd=*/false);
                 sendEnvelope(o);
 #else
                 sendErr(id, 501, "wifi_pmkid not available in this (lite) build");

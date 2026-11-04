@@ -58,7 +58,7 @@ framing entirely and reuses the plain-text Bruce CLI transport.
 |-------|---------|---------------|------------|
 | 1 | `HELLO`        | phone → ESP   | `{app, appVersion}` (ESP replies with `CAPS`) |
 | 2 | `CAPS`         | ESP → phone   | device capabilities (see below) |
-| 3 | `CMD`          | phone → ESP   | `{cmd: string, args: {...}}` |
+| 3 | `CMD`          | phone → ESP   | `{cmd: string, ...command-specific fields}`; most CLI arguments are inside `cmd` |
 | 4 | `ACK`          | ESP → phone   | `{ok: bool, out?: string, size?: uint, ...}` |
 | 5 | `ERR`          | ESP → phone   | `{code: uint, msg: string}` |
 | 6 | `EVENT`        | ESP → phone   | `{ev: string, data: {...}}` discrete event |
@@ -71,6 +71,17 @@ Unknown message kinds get `ERR {code: 404, msg: "unknown message kind"}`;
 malformed JSON gets `ERR {code: 400, msg: "bad json"}` (both with `id` 0 when
 no envelope could be parsed). The device never crashes on a bad frame — it
 replies with an error and keeps the loop running.
+
+**Behavior during a blocking operation.** While the device is running a long/blocking
+command (e.g. `responder`, `karma`, `brucegotchi`, a `mifare_keycheck` batch), the main
+loop is paused but the device still drains one frame per poll so the link stays
+responsive: a `PING` is answered with `PONG` as usual, and any **other** `CMD` that is
+not a stop (`stop` / `*_stop`) is replied to immediately with `ERR {code: 409, msg:
+"device busy"}` carrying that frame's `id`, so the phone's await fails fast instead of
+blocking until its own timeout. Frames are not queued or replayed; the phone resends the
+rejected command after the operation ends. A `stop` / `*_stop` `CMD` is consumed to end
+the operation and is **not** itself ACKed (the operation's own final reply follows). This
+is why features serialize device commands and send their stop frames on a direct channel.
 
 ### `CAPS` body
 
@@ -86,11 +97,25 @@ Sent in reply to `HELLO`:
   "transports": ["usb"],
   "mtu":        8192,
   "battery":    87,
-  "features":   {"verified_files": true},
+  "features":   {"verified_files": true, "transactional_uploads": true},
+  "build": {
+    "commit": "aa98dfb7c0de", "dirty": false,
+    "id": "0.1.3+lilygo-t-embed-cc1101.aa98dfb7c0de",
+    "time": "2026-11-03T10:22:01Z", "time_src": "commit",
+    "env": "lilygo-t-embed-cc1101"
+  },
   "caps": {
     "wifi": true, "ble": true, "cc1101": true, "nfc": true,
     "ir": true, "mic": true, "speaker": true,
     "nrf24": false, "fm": false, "lora": false, "eth": false
+  },
+  "evidence": {
+    "cc1101": {"level": "probed", "probe": "present", "detail": "SPI PARTNUM 0x00 VERSION 0x14"},
+    "nrf24": {"level": "configured", "probe": "absent", "detail": "SPI SETUP_AW readback invalid",
+              "conflict": [{"gpio": 44, "role": "cs", "with": "eth", "with_role": "cs"},
+                           {"gpio": 43, "role": "ce", "with": "eth", "with_role": "int"}]},
+    "lora": {"level": "none"},
+    "ibutton": {"level": "compiled", "detail": "1-Wire answers only with a key present; not probed"}
   }
 }
 ```
@@ -105,16 +130,103 @@ prove end-to-end operation: see [hardware capabilities](../docs/HARDWARE_CAPABIL
 
 `features` describes software protocol support, separately from physical modules.
 Literal `features.verified_files: true` advertises correlated file DATA IDs, a
-terminal size/CRC32 ACK and the write grammar below. The current app blocks its
-managed transfers when this flag is missing or malformed, with a firmware-update
-message. This is an optional capability extension to protocol v0; it does not
+terminal size/CRC32 ACK and the legacy write grammar below. Managed transfers
+require this flag. Uploads additionally require literal
+`features.transactional_uploads: true`; absent/malformed support produces an
+update-firmware error, never a fallback to truncate/append. Older verified-file
+firmware remains usable for reads. Literal `features.capture_descriptor: true` advertises the
+capture artifact descriptor on `wifi_handshake` / `wifi_pmkid` terminal ACKs (see "Capture artifact
+descriptor" below). These are additive protocol v0 extensions; they do not
 assert hardware health or that all firmware commands are implemented.
+
+Literal `features.diag: true` advertises the `diag` command (recovery diagnostics, below).
+
+`build` is optional release provenance (additive, protocol v0). It does not repeat
+`fw`, `proto` or `features`. Values are generated at build time by
+`pre_build_provenance.py` (`tools/firmware_provenance.py`) into the gitignored
+`include/brucia_build_info.h`:
+
+- `commit`: 12-character Git SHA of `HEAD`, or `"unknown"` when the source tree has
+  no Git metadata of its own (release tarball, Git missing, or a tree nested in an
+  unrelated checkout). The build never fails for missing provenance.
+- `dirty`: `true` when `git status --porcelain` (tracked and untracked, non-ignored
+  files) was non-empty at build time; omitted when Git state is unknown.
+- `id`: `BRUCIA_BUILD_ID` from the build environment when set (for example a CI run),
+  otherwise `<VERSION>+<env>.<commit>[.dirty]`.
+- `time` / `time_src`: UTC ISO 8601 from `SOURCE_DATE_EPOCH` (`source_date_epoch`),
+  otherwise the `HEAD` commit time (`commit`), otherwise `"unknown"`. The wall clock is
+  never used, so the same commit yields the same header; a dirty build carries its
+  commit time, not the time of the uncommitted edits.
+- `env`: the PlatformIO environment (`board` remains the display name).
+
+All values are limited to `[A-Za-z0-9._+:-]`, at most 64 characters. The app accepts
+only such strings and a literal boolean `dirty`, shows them on the device card, and
+writes them into exported logs and session reports. Firmware without `build` remains
+fully usable; the app shows "Build: not reported by this firmware". Provenance
+identifies the source and build configuration, not a binary hash.
+
+#### Capability evidence (`evidence`)
+
+`evidence` is optional (additive, protocol v0). It explains `caps` per module; it does
+not replace it. Each key is a module name (the `caps` names plus `sd`) and each value is:
+
+- `level` (required): the highest positively established evidence, in increasing order:
+  - `none`: no support built for this board environment.
+  - `compiled`: support is built for this board environment (for `wifi`/`ble`, the SoC
+    radio; its driver starts per operation).
+  - `configured`: pins/bus are assigned by the board profile or the saved pin config. A
+    GPIO definition is never reported as a probe.
+  - `probed`: an electronic check ran this session and a bus transaction saw the chip.
+  - `initialized`: the driver was brought up successfully this session (its bring-up
+    includes chip identification).
+- `probe` (optional): `present`, `absent` (the check ran and no chip answered) or `busy`
+  (not probed because a bus might be owned by an active stream). Omitted when the module
+  has no electronic check, its pins are not configured, or the check was skipped.
+  `probed`/`initialized` always come with `present`; `absent`/`busy` stay at `configured`.
+- `detail` (optional): short printable text, for example the register values read.
+- `conflict` (optional): static pin findings from the active pin configuration, no bus
+  traffic: `{gpio, role, with, with_role}` for each GPIO this module shares with another
+  assignment. SCK/MISO/MOSI and SDA/SCL lines shared with the same role are one bus and
+  are not conflicts; a shared CS, CE/IRQ/reset line or I2S/IR/1-Wire pin is. A conflict
+  can be intentional board wiring (alternatives that cannot be used at the same time).
+
+"Physically tested" is not a level: the firmware cannot know it. Acceptance results
+belong to the hardware checklist, not to CAPS.
+
+Probes run at most once per boot, in a serialized window at companion entry before the
+service loop and any stream, and are cached. They are bounded, send no radio packets
+or tag commands, and leave the peripheral idle (RC522 exception in the table). A probe that has not run when that window is
+closed reports `busy` without touching the bus and is retried at the next companion
+entry. Current checks:
+
+| Module | Check | Level when found |
+|---|---|---|
+| `cc1101` | SPI PARTNUM/VERSION status-register read (no strobes, no writes) | `probed` |
+| `nfc` | PN532: reset/wake + GetFirmwareVersion (RF field stays off) | `probed` |
+| `nfc` | RC522/RFID2: driver init + version register; the MFRC522 init enables the 13.56 MHz carrier for a few ms and the probe switches it off. ST25R3916: RFAL init, powered down on release | `initialized` |
+| `nrf24` | RF24 begin + SETUP_AW readback, then power down (CE low); skipped when a W5500 already answered on the same CS | `probed` |
+| `eth` | W5500 VERSIONR read (read-only frame), run before the NRF24 probe | `probed` |
+| `fm` | I2C address ACK at 0x63 only (no chip ID) | `probed` |
+| `lora` | RadioLib begin (reset + version check + configuration), then sleep; no RX/TX | `initialized` |
+| `sd` | Live mount state (`mounted`); not mounted is not reported as absent | `probed` |
+| `ir`, `mic`, `speaker`, `ibutton` | None: GPIO/board profile only | `configured` |
+
+The app parses `evidence` when present (absent = older firmware, nothing claimed),
+shows it on the Device page and uses `probe: "absent"` to explain why a tool is
+unavailable. Only a proved absence clears a `caps` flag; every other value leaves the
+reported `caps` gating unchanged. Unknown levels/modules or malformed entries are ignored.
 
 `modules` is a coarse compatibility list; it must not replace `caps` when gating
 tools. `transports` currently contains only `usb`. `mtu` is
 `COMPANION_MAX_FRAME`. `battery` is the device's current
 battery percentage (`getBattery()`), included so the app can show it right
 after connecting without waiting for the first `PING`/`PONG`.
+
+The Android command preflight uses explicit CAPS flags for native hardware commands
+and its known radio CLI aliases, including commands submitted through macros/console.
+FM with the device microphone requires both `fm` and `mic`. Cleanup commands remain
+permitted without capability flags. This is not a sandbox for unknown CLI commands
+or script contents; firmware remains responsible for validating those operations.
 
 ### `CMD` mapping to existing Bruce CLI
 
@@ -136,12 +248,16 @@ text:
 | `cmd` prefix | args | behavior |
 |---|---|---|
 | `fs_read <path>` | SD/LittleFS path; spaces allowed | DATA frames echo the CMD request ID and carry `{stream:"file", seq, chunk}` (Base64, up to 768 raw bytes per chunk). Sequence starts at zero. Completion is `ACK {ok:true, size, crc32}`; CRC32 is the unsigned IEEE CRC-32 of all raw bytes. Empty files return size/CRC zero. Maximum size is 16 MiB; transfer time budget is 120 seconds. Premature EOF/read errors fail, not succeed with partial content. |
-| `fs_write <path> <base64>` | Last space separates path from Base64 | Creates/truncates a file. Internal path spaces are supported; a trailing separator with empty Base64 creates/truncates an empty file. Nonempty invalid Base64 is rejected before opening the destination. ACK includes `{ok:true,size}` for bytes written by this command. |
+| `fs_write <path> <base64>` | Last space separates path from Base64 | Legacy direct truncate/write. Internal path spaces and empty Base64 are supported. Invalid Base64 is rejected before opening the destination. Paths follow the canonical upload rules below (relative paths gain `/`); reserved names and writes during an active upload are rejected. ACK `{ok:true,size}` counts bytes written by this command. |
 | `fs_write_append <path> <base64>` | Same grammar | Appends one chunk and ACKs its byte count. Partial writes and directory destinations fail. Chunked writes are not an atomic file replacement; a failed upload can leave a partial destination and must not be reported as saved. |
+| `fs_upload_begin <token> <size> <crc32> <path>` | Canonical absolute path; internal spaces allowed | Recover prior transaction, create journal and empty staging file; ACK `{ok:true,token,size:0}`. Destination untouched. |
+| `fs_upload_chunk <token> <offset> <base64>` | Exact sequential offset, 1–3072 raw bytes | Append to staging; ACK `{ok:true,token,size}` where size is the cumulative byte count. |
+| `fs_upload_commit <token>` | Current owner token | Verify staging length/CRC, promote; ACK `{ok:true,token,size,crc32,committed:true,cleanup_pending}`. |
+| `fs_upload_abort <token>` | Current owner token | Discard staging/recover; ACK `{ok:true,token,size}` counts received bytes, not saved bytes. Unknown/inactive token rejects. |
 | `scr <0\|1>` | `0`=off, `1`=on | Sets display brightness to 0 (off) or the configured brightness (on). Replies `ACK {ok:true}`. |
 | `led <0\|1>` | `0`=off, `1`=on | Sets the status LED off (black) or to the configured LED color. Replies `ACK {ok:true}`. |
 | `wifi_deauth <bssid> <channel> <seconds>` | BSSID as `AA:BB:CC:DD:EE:FF` or 12 hex chars; channel 1-14; seconds 1-60 (clamped) | Runs a time-bounded deauth flood against the target AP (`runDeauthBounded`), then replies `ACK {ok:true, out:"deauth ... done"}`. `ERR 400` on a malformed BSSID or missing args. |
-| `wifi_handshake <bssid> <channel> <seconds> [ssid]` | channel 1-14; seconds 5-120 (clamped, default 30) | Runs a time-bounded WPA handshake capture against the target AP (`capture_handshake_bounded`); on success the handshake is saved under `/BrucePCAP/handshakes/` on the device. Replies `ACK {ok, out}` (`ok:false` and an explanatory `out` if no handshake was captured). `ERR 400` on malformed args. |
+| `wifi_handshake <bssid> <channel> <seconds> [ssid]` | channel 1-14; seconds 5-120 (clamped, default 30) | Runs a time-bounded WPA handshake capture against the target AP (`capture_handshake_bounded`); on success the handshake is saved under `/BrucePCAP/handshakes/` on the device. Replies `ACK {ok, out}` (`ok:false` and an explanatory `out` if no handshake was captured). With `features.capture_descriptor` the ACK also carries `d.desc` (see "Capture artifact descriptor"). `ERR 400` on malformed args. |
 | `ble_spam <seconds>` | seconds 1-60 (clamped, default 8) | Runs a time-bounded BLE advertising flood (`runBleSpamBounded`), then replies `ACK {ok:true}`. |
 
 These companion-specific commands are documented as part of the protocol
@@ -152,11 +268,309 @@ and reply shape; everything else is "whatever the CLI prints".
 silent for more than 15s, and always on leaving companion mode, so the device
 never gets stuck dark if the app disconnects mid-session.
 
+### Capture artifact descriptor (`wifi_handshake` / `wifi_pmkid`, additive)
+
+Legacy capture ACKs only say `ok`/`out`, and the CLI directory listing has no completeness token, so
+the host had to infer which file a capture run wrote by diffing `/BrucePCAP/handshakes/` listings and
+file contents before and after the run. Firmware advertising `features.capture_descriptor: true` adds
+a `desc` object to the **terminal ACK** of `wifi_handshake` and `wifi_pmkid`, describing the single
+file that run actually wrote, so the host imports exactly that path and verifies it after transfer.
+This is additive: `ok`/`out` are unchanged, and the device's standalone capture behavior (file
+naming, menus) is identical — only the companion reply carries extra data.
+
+```json
+"desc": {
+  "v": 1,
+  "path": "/BrucePCAP/handshakes/HS_AABBCCDDEEFF_MyAP.pcap",
+  "size": 812,
+  "crc32": 2882341475,
+  "frames": 5,
+  "handshake": true,
+  "complete": true,
+  "stop": "complete",
+  "appended": true,
+  "prior_size": 300,
+  "time_src": "device_uptime_ms",
+  "uptime_ms": 183450
+}
+```
+
+| field | type | meaning |
+|---|---|---|
+| `v` | uint | descriptor contract version (currently `1`) |
+| `path` | string | absolute path of the file this run actually wrote. The handshake writer names the file from the SSID **resolved out of the captured frames** (`HS_<MAC>[_<SSID>].pcap`, MAC-only when unresolved), which may differ from the requested SSID, so this is the writer's reported path, not a predicted one. When nothing was written this run it is a best-effort predicted name and `complete` is `false`. |
+| `size` | uint | byte length of the **whole** file at `path`; present only when this run created or grew it |
+| `crc32` | uint | unsigned IEEE CRC-32 of the whole file — the **same** CRC the `fs_read` terminal ACK reports, so the host verifies the pulled bytes; present only when this run created or grew the file |
+| `frames` | uint | pcap records this run actually appended to the file (measured: beacon + EAPOL M1..M4 for a handshake, EAPOL frames saved for PMKID — never a fixed assumption); present only when this run wrote the file |
+| `handshake` | bool | `wifi_handshake` only: a usable 4-way handshake (M1..M4) was detected |
+| `complete` | bool | `true` only when a usable capture was detected **and** a file was created/grown this run and read back |
+| `stop` | string | `"complete"`, `"timeout"` (budget elapsed, nothing usable), `"aborted"` (device button ended the run), `"no_capture"` (ran out, nothing seen), or `"not_written"` (a usable capture was detected but no new file was created/grown this run — e.g. only a stale pre-existing file) |
+| `appended` | bool | present and `true` when the file pre-existed and this run appended to it; `size`/`crc32` then describe the whole accumulated file (handshake pcaps accumulate across runs; PMKID files are truncated each run so this is absent) |
+| `prior_size` | uint | file size before this run's appends, present only with `appended:true` |
+| `time_src` | string | always `"device_uptime_ms"`: the device has no trustworthy wall clock and never claims a capture timestamp |
+| `uptime_ms` | uint | device monotonic uptime (`millis()`) at stop — the only time the device can honestly report, not a capture time |
+
+The device tracks which file the sniffer writer actually created or grew during the run (not a
+predicted name), so a run that detects a handshake but writes nothing new — for instance when a stale
+file from an earlier run already sits at the path — reports `complete:false, stop:"not_written"` and
+makes no claim about the pre-existing file. `size`/`crc32`/`frames` are omitted whenever no file was
+written (any `complete:false`). A `complete:false` descriptor means nothing usable was written this
+run: the host reports the `stop` reason and does not import. The host also rejects a `path` whose
+basename is not the expected per-BSSID capture name, and any pulled file whose size/CRC-32 does not
+match the descriptor (it reads and fingerprints the whole file, which for `appended:true` includes the
+accumulated prior content). Firmware without `capture_descriptor` omits `desc` entirely; the host keeps
+the legacy listing-diff import and labels the result as inferred from a listing diff rather than a
+device descriptor. The pure stop/CRC logic lives in the Arduino-free
+`src/modules/wifi/capture_descriptor_core.cpp` (host-tested by
+`tools/test_firmware_capture_descriptor.py`); the sniffer writer records the real path/record counts
+(`src/modules/wifi/sniffer.cpp`) and the companion reads them back after flush and builds the JSON.
+
+### Transactional upload and recovery
+
+The token is 32 lowercase hexadecimal characters, chosen freshly by the client.
+Size, offset and IEEE CRC32 are unsigned decimal integers; size is at most 16 MiB.
+Only one upload is active. Begin pins SD if mounted, otherwise LittleFS; removal
+never redirects chunks to the other filesystem. Keep the same medium mounted for
+the entire transaction and recovery; the protocol does not identify SD cards.
+Commands use normal CMD IDs in addition to the transaction token. The app validates
+the token and cumulative byte count on every ACK, and literal `committed:true` plus
+CRC on commit. Empty uploads use begin/commit with size=CRC=0 and no chunks.
+
+Paths are absolute, 2–192 UTF-8 bytes. Empty, `.` and `..` segments, trailing `/`,
+segment edge spaces/trailing dots, control characters and `\ : * ? " < > |` are
+rejected. The case-insensitive root prefix `/.brucia-upload.` is reserved. The app
+adds `/` to relative input. Parent directories must already exist.
+
+The firmware owns `/.brucia-upload.pending` (journal), `/.brucia-upload.part`
+(staging) and `/.brucia-upload.bak` (FAT backup). The journal is written and read
+back before staging or destination mutation. It contains five newline-terminated
+fields: `BRUCIA-UPLOAD-1`, token, size, CRC32, destination. It is bounded to 512 bytes.
+Staging is closed and reread for exact length/CRC before any destination rename.
+LittleFS replaces via one rename. FAT uses backup → promote → cleanup, with rollback
+on promotion failure; it is recoverable, **not an atomic visibility guarantee**.
+If rollback also fails, the previous file remains in the backup and the command
+returns an error. A successful promotion with failed cleanup still ACKs committed,
+with `cleanup_pending:true`; it must not be reported as a failed replacement.
+
+Recovery runs at companion entry on mounted backends and before begin. A missing
+destination with a valid journal/backup is restored. With both destination and
+backup present, only a destination matching the journal's new size/CRC allows
+backup deletion. Invalid journals, orphan reserved files and conflicting targets
+fail closed, retaining artifacts; do not delete these blindly. Inspect/copy the
+backup and journal through recovery tooling before resolving a conflict manually.
+This assumes successful filesystem operations persist as reported; it does not
+certify physical power-loss behavior, faulty media, FAT metadata or CRC authenticity.
+Concurrent generic CLI/scripts and other filesystem writers are outside transaction
+isolation; legacy `fs_write*` is blocked while an upload is active.
+
+Idle transactions expire 120 s after the last successful upload ACK when the
+companion loop next runs. Abort and
+companion exit attempt cleanup; disconnect without an abort relies on idle expiry.
+CRC readback has a 120 s budget, checked between reads (driver calls may block).
+The app waits 130 s for begin/recovery and commit, 8 s per chunk, and up to 2 s for
+best-effort abort. A timeout/cancellation after commit was sent cannot prove rollback:
+verify the destination before retrying. There is no automatic commit/upload replay.
+Malformed command grammar returns ERR 400; transaction failures return ERR 409.
+
+### PCM transmit commands (existing v0 wire format)
+
+The handlers in `src/companion/audio.cpp` use different argument layouts for FM
+and speaker playback. Speaker parameters are fields of `d`, not appended CLI text:
+
+| `d.cmd` | Other `d` fields | Meaning |
+|---|---|---|
+| `spkr_pcm_begin` | `sr: 16000` | Initialize mono S16LE playback; wait for `ACK.ok` before sending samples. |
+| `spkr_pcm_data` | `pcm: "<base64>"` | PCM samples; app batches at most 2048 samples (4096 raw bytes). |
+| `spkr_pcm_stop` | none | Close playback; ACK reports completion of the stop handler. |
+| `fm_audio_begin <freqKHz> <phone\|mic>` | none | FM 87500–108000 kHz; the firmware probes the external Si4713. |
+| `fm_audio_data <base64>` | none | Phone PCM, mono S16LE at 16 kHz; app batches at most 1024 samples. Reply carries accepted counts (below). |
+| `fm_audio_stop` | none | End FM transmission. |
+
+All these commands reply with correlated ACK/ERR. The app awaits begin, frame and
+stop results, and paces PCM by sample count using a monotonic clock. An ACK is not
+proof of audible/RF output.
+
+#### `fm_audio_data` accepted-sample accounting (additive)
+
+Current firmware adds these fields to every `fm_audio_data` ACK (no command, CAPS key
+or on-air behavior changes):
+
+| Field | Meaning |
+|---|---|
+| `samples` | Whole S16 samples decoded from this frame (a trailing odd byte is ignored). |
+| `accepted` | Samples queued for transmission, always the first `accepted` samples of the frame, in order. |
+| `free` | Free space in the device ring after this frame (usable capacity 8191 samples, about 0.5 s). |
+| `lost` | Cumulative since `fm_audio_begin`: samples taken from the ring that the I2S write did not take within its 10 ms timeout. |
+
+A full ring is flow control, not an error: the firmware accepts what fits (possibly 0)
+and replies `ok:true` with `accepted < samples` and `out` = `ring full: accepted N of M
+samples`; the samples after `accepted` were not queued. It never discards part of a
+frame without saying so. Not active, mic source or invalid Base64 reply `ok:false`,
+`accepted:0` and a reason in `out`.
+
+The app resends only the unaccepted remainder after waiting for the ring to drain
+(estimated from `free` at 16 samples/ms, each wait 4–128 ms), waits before a frame
+when the last reported `free` is too small, counts real-time pacing and progress
+from accepted samples, and fails the stream once it has waited 2 s of drain time
+without any sample accepted, instead of looping. A `lost` above 0 is shown as "Device dropped N samples";
+an impossible count (`accepted` outside 0..frame, `samples` different from the frame)
+fails the stream. Older firmware replies without `accepted`: the app keeps the
+previous behavior (one send per frame) and labels FM delivery as unknown.
+
+Limits: `accepted` proves only that samples entered the device ring. `lost` counts
+I2S short writes; ring underruns (the phone sending slower than the device drains)
+are silence gaps and are not counted. None of this proves audible or RF output.
+
+### Speaker file playback (`speaker_play`, additive)
+
+Firmware with literal `features.speaker_play_async: true` in CAPS (boards with the onboard
+speaker) plays files without blocking the companion loop; PING and other commands are served
+during playback.
+
+| Message | Fields | Meaning |
+|---|---|---|
+| `CMD speaker_play <path>` | none | Start a WAV/MP3/AAC/FLAC/MOD/Opus/RTTTL file from SD/LittleFS. |
+| `ACK` (start) | `ok: true`, `out: "playing <path>"`, `play: <CMD id>` | The file is open and the decoder started. |
+| `ACK` (start) | `ok: false`, `out` | `unsupported format`, `no storage`, `file not found`, `playback failed: <path>`. |
+| `ERR 400` | `msg` | Empty path. |
+| `EVENT ev="speaker.play"` | `data: {play, state, path, ms, reason?}` | Exactly one per started file, after its start ACK. |
+| `CMD speaker_stop` | none | Stop playback; a playing file sends its EVENT (`stopped`, `reason: "stop"`) before the `ACK out:"stopped"`. |
+
+`state` is `completed` (the decoder ended), `stopped` or `error`. `reason` accompanies
+`stopped`: `stop` (speaker_stop) or `superseded` (another `speaker_play`, `speaker_tone`,
+`speaker_rtttl`, `speaker_song`, `speaker_dtmf`, `spkr_pcm_begin`, `mic_record` or a mic
+stream SUB took the audio peripherals). `ms` is elapsed wall time since start. The decoder
+library does not distinguish end of stream from giving up on corrupt data, so both report
+`completed`; the current firmware does not emit `error`, which clients must still accept.
+Stopping waits at most about 2.5 s for the player task to release the decoder, file and I2S
+output. Leaving companion mode stops playback without an EVENT. A `speaker_play` that passes
+the format/storage/existence checks reports the previous file as `stopped`/`superseded` before
+its own ACK. Clients correlate by `play`
+(the starting CMD id); an EVENT can be read before the client has processed its start ACK.
+
+Without the flag, `speaker_play` replies once after the whole file (`out: "played <path>"`)
+and cannot be stopped; clients keep a long timeout for it.
+
+### NFC MIFARE Classic key-check (`mifare_keycheck`)
+
+`CMD {cmd:"mifare_keycheck <hexKey1,hexKey2,...>"}` tests a batch of up to 64
+comma-separated 12-hex-char candidate keys against the present MIFARE Classic tag
+(`src/companion/nfc.cpp`). The phone owns the dictionary and splits it into batches;
+the device only tests. Replies:
+
+- No RFID module: `ACK {ok:false, out:"no RFID module (PN532) found"}`.
+- No tag / non-Classic: `ACK {ok:false, out:"no MIFARE Classic tag present ..."}`.
+- Tag present: `ACK {ok:true, found:[{sector, type:"A"|"B", key:"<12 hex>"}, ...], ...}`.
+
+The `found` array is the recovered-key list and is unchanged. A **v1** firmware
+(advertised by `features.mifare_keycheck_report: true` in CAPS) adds these additive
+fields to the tag-present ACK so the app can tell a fully-tested batch from one cut
+short and tie consecutive batches to the same card:
+
+| field | type | meaning |
+|---|---|---|
+| `v` | uint | reply contract version for this field group (currently `1`) |
+| `uid` | string | tag UID read at batch start, uppercase hex (empty if 0-length) |
+| `sak` | uint | tag SAK byte (0x08=1K, 0x18=4K, 0x09=Mini) |
+| `sectors` | uint | total sectors on this tag |
+| `tested_sectors` | uint | sectors fully tested before the scan stopped |
+| `keys` | uint | candidate keys supplied in this batch |
+| `auth_attempts` | uint | individual authenticate operations performed |
+| `complete` | bool | `true` only if every sector × (A,B) × key was tested |
+| `stop` | string | `"complete"`, `"tag_lost"` (reselect failed mid-scan → partial), `"cancelled"` (phone stopped the batch mid-scan → partial), or `"no_tag"` |
+
+A `complete:false` (`stop:"tag_lost"`) reply means the remaining sectors/keys were
+**not** tested: the app must not claim an exhaustive scan or report "no key found"
+for untested keys. The app rejects a batch sequence when `uid` changes between
+batches (card swapped), and keeps the keys found before the change. Older firmware
+without these fields still returns `found`; the app runs the sequence but labels the
+result "completeness unknown" instead of asserting an exhaustive scan. The loop
+control and completeness accounting live in the Arduino-free
+`src/modules/rfid/mifare_keycheck_core.cpp` (host-tested by
+`tools/test_firmware_mifare.py`); the PN532 is only the hardware adapter.
+
+**Stopping an in-flight batch.** Firmware advertising `features.mifare_keycheck_stop: true`
+in CAPS checks for a stop frame between every authenticate() call while a batch runs. The
+phone ends a running batch by sending a direct, unlogged `CMD {cmd:"mifare_keycheck_stop"}`
+(any `stop` / `*_stop` CMD is accepted); the firmware polls and consumes it but does **not**
+ACK it. Instead the batch already in flight returns within one attempt as its own ACK with
+`complete:false, stop:"cancelled"` and the `found` hits recovered so far (its remaining
+sectors/keys were **not** tested — partial, like `tag_lost`). The phone sends the stop frame
+only when the CAPS flag is present; it then waits a bounded time for that `cancelled` ACK and,
+if it never arrives (e.g. a dropped link), finalizes the sequence as a partial stop locally and
+drops any late reply. Older firmware without the flag ignores the frame and the app can only
+stop its own batch sequencing, not an in-flight device batch.
+
+The whole batch is naturally bounded: the core performs at most `sectors × 2 × keys`
+authenticate() operations (≤ 40 × 2 × 64 per batch) and then returns — there is no unbounded
+wall-clock loop — but per-auth time on hardware is uncharacterized, so a `mifare_keycheck` ACK
+still waits up to the app's 650 s batch budget as a conservative ceiling; the stop handshake
+above is what makes cancellation prompt. Card removal/swap fixtures remain a hardware follow-up.
+
+### Recovery diagnostics (`diag`, additive)
+
+Firmware with literal `features.diag: true` in CAPS answers `CMD {cmd:"diag"}` with one ACK.
+There is no automatic telemetry: the counters live in RAM only, nothing is sent unless the
+app sends `diag`, and nothing is written to storage. Older firmware routes `diag` to the
+generic CLI; the app does not send it without the flag and shows "not supported by this
+firmware".
+
+```json
+{"ok": true, "v": 1, "reset": "poweron", "reset_code": 1, "uptime_s": 5123,
+ "heap": {"free": 181220, "min_free": 120440, "largest": 110580},
+ "psram": {"size": 8386295, "free": 8100000, "min_free": 8000000, "largest": 8257524},
+ "link": {"sessions": 1, "rx_frames": 412, "tx_frames": 980, "rx_zero_len": 0,
+          "rx_oversize": 0, "rx_alloc_fail": 0, "rx_stale": 1, "rx_bad_json": 0, "busy_409": 2,
+          "err": {"400": 0, "404": 1, "409": 2, "413": 0, "4xx": 0, "5xx": 0, "other": 0}},
+ "drops": {"fm_pcm_lost": 0, "fm_pcm_active": false, "mic_pcm_dropped": 0}}
+```
+
+| Field | Meaning |
+|---|---|
+| `v` | Reply contract version for this field group (currently 1). |
+| `reset` | `esp_reset_reason()` of the current boot as a stable name: `unknown`, `poweron`, `ext`, `sw`, `panic`, `int_wdt`, `task_wdt`, `wdt`, `deepsleep`, `brownout`, `sdio`, `usb`, `jtag`, `efuse`, `pwr_glitch`, `cpu_lockup`, or `other` for a value this firmware does not name. |
+| `reset_code` | The raw numeric reason (ESP-IDF 5.x numbering, checked at build time). |
+| `uptime_s` | Seconds since boot (`esp_timer`, does not wrap like `millis()`). |
+| `heap` | Internal heap bytes: `free` now, `min_free` (lowest free since boot), `largest` free block. |
+| `psram` | Present only when the board has PSRAM: `size`, `free`, `min_free`, `largest`. |
+| `link` | Companion link counters since boot (kept across companion-mode entries, reset only by a reboot). |
+| `drops` | Existing per-stream loss figures, read from the same counters as their streams (absent keys = not compiled in or not readable now). |
+
+`link` keys, in this order:
+
+- `sessions`: companion-mode entries since boot.
+- `rx_frames`: complete frames read by the frame decoder (valid length, before JSON parsing). The `diag` request itself is included.
+- `tx_frames`: frames written, every kind. The `diag` reply itself is not included.
+- `rx_zero_len`, `rx_oversize`: length prefix 0 or above `COMPANION_MAX_FRAME`; the decoder resets.
+- `rx_alloc_fail`: valid length but the payload buffer could not be reserved.
+- `rx_stale`: partial frame discarded after 2 s without bytes.
+  The length prefix is not self-synchronizing: after a rejected length the following payload
+  bytes are read as new headers, so one corrupt frame can raise several of these counters.
+- `rx_bad_json`: complete frame whose payload is not JSON (ERR 400 in the service loop; dropped without reply while a blocking operation polls).
+- `busy_409`: CMDs rejected with ERR 409 "device busy" by `companionPollStop` during a blocking operation (also counted in `err["409"]`).
+- `err`: every ERR reply sent, by status code: `"400"`, `"404"`, `"409"`, `"413"`, `"4xx"` (other 4xx), `"5xx"`, `"other"`.
+
+`drops` keys: `fm_pcm_lost` (with `fm_pcm_active`) on builds with FM audio is the
+`fm_audio_data` `lost` value since the last `fm_audio_begin`; `mic_pcm_dropped` is the
+`mic.pcm` EVENT `dropped` value since the current SUB, present only while that capture runs
+and the driver reports overruns.
+
+Every counter is a fixed-size `uint32` that **saturates** at 4294967295 (it never wraps);
+that value means "at least this many". Increments are single additions in the frame reader,
+frame writer and ERR path, with no allocation or I/O. Counters describe this boot only: a
+reset clears them, which is why `reset` and `uptime_s` accompany them. The app shows them
+in a Diagnostics section and adds them to log exports and session reports, together with its
+own link counters (malformed frames it skipped, command timeouts, replies with no pending
+command). None of this proves hardware health or radio behavior.
+
 ## Streams (`SUB` + `EVENT`/`DATA`)
 
 A stream is a named channel the phone turns on/off with
 `SUB {stream: "<name>", on: bool}` (the device replies `ACK {ok:true}`, or
-`ERR {code:404}` for an unknown stream name).
+`ERR {code:404}` for an unknown stream name). Starting `subghz.raw` or
+`subghz.spectrum` replies `ERR {code:503}` when the radio or RMT receiver cannot
+be initialized; the stream then stays off. A `subghz.spectrum` start with invalid
+sweep parameters replies `ERR {code:400}` and changes no stream (see below).
 
 - **Structured streams** deliver `EVENT {ev: "<name>", data: {...}}` messages
   (`id` is always 0 — these are unsolicited).
@@ -174,17 +588,75 @@ Current streams:
   `ev = "ble.dev"`, `data = {mac, name, rssi}`. The device runs an active
   NimBLE scan (2s windows) while this stream is on; the phone lists, dedups
   and analyzes results.
-- `subghz.raw` — raw sub-GHz (433.92 MHz OOK) RMT edge timings for signal
+- `subghz.raw` — raw sub-GHz OOK RMT edge timings for signal
   capture/replay tooling, one `EVENT` per received RMT symbol burst (≥5
-  symbols): `ev = "subghz.raw"`, `data = {freq, timings: [uint, ...]}`
-  (`freq` in Hz; `timings` is a flat array of pulse durations in ns, high and
-  low alternating). All decoding happens on the phone; the device only
-  captures and forwards raw timings.
+  symbols): `ev = "subghz.raw"`,
+  `data = {freq, symbols, max_symbols, timings: [uint, ...]}`
+  (`freq` in Hz is the frequency the receiver is tuned to: the device RF
+  frequency, 433.92 MHz by default, which `subghz_config` and the jammer also
+  set, rounded to the nearest kHz so float artifacts such as 868349952 for
+  868.35 MHz are not reported; `timings` is a flat array of pulse durations in µs (1 MHz RMT
+  resolution), high and low alternating, with zero-duration end markers
+  omitted). All decoding happens on the phone; the device only captures and
+  forwards raw timings.
+  `symbols` (RMT symbols stored for the burst) and `max_symbols` (receive
+  buffer capacity, currently 64) are additive completeness metadata; firmware
+  that omits them gives no completeness information. The ESP-IDF 5.5 RMT
+  driver stores at most `max_symbols` and silently drops the rest, so
+  `symbols < max_symbols` rules out a buffer cut, while
+  `symbols == max_symbols` means completeness is unknown (the burst may have
+  been longer). Neither value proves that every on-air pulse was captured
+  (bursts between receive re-arms are not seen), and the firmware never
+  reports proved loss. The app shows a burst at the limit as "possibly
+  truncated" and appends both values as trailing `symbols,max_symbols` CSV
+  columns (empty when absent); the `.sub` export format is unchanged.
+- `subghz.spectrum` — CC1101 RSSI sweep (not an IQ SDR), one `EVENT` per
+  completed sweep: `ev = "subghz.spectrum"`,
+  `data = {start, step, count, rssi: [dBm, ...]}` with `start`/`step` in kHz;
+  point `i` was tuned to exactly `start + i * step` kHz. The SUB may carry
+  optional numbers `f_start`, `f_end` and `step` in MHz (defaults 300, 348
+  and 1). The firmware rounds them to whole kHz and replies `ERR {code:400}`
+  instead of sweeping something else when a value is not a finite number,
+  `f_start`/`f_end` fall outside 280–928 MHz, `f_end < f_start`, the step is
+  below 1 kHz, or the grid exceeds 128 points (the step is not widened and the
+  range is not swapped or clamped). A start while a sweep runs applies the new
+  grid. `subghz.raw` and `subghz.spectrum` are mutually exclusive.
+- `mic.pcm` (requires `caps.mic`) — continuous device-microphone PCM for
+  phone-side DSP and recording. Unlike the streams above, the fields sit directly
+  in `d` (no `data` object): `ev = "mic.pcm"`, `d = {sr, pcm, seq, dropped}`.
+  `sr` is the sample rate (16000); `pcm` is Base64 of signed 16-bit little-endian
+  mono samples, 2048 samples per event on current firmware (receivers must accept
+  any even byte count). `seq` and `dropped` are additive continuity metadata;
+  firmware that omits them gives no continuity information, and receivers treat
+  their absence as unknown, not as zero loss:
+  - `seq` (uint) counts emitted chunks and restarts at 0 on every `SUB on`. A
+    jump between consecutive chunks means chunks were lost between device and
+    phone; a restart mid-recording means the stream was resubscribed and a partial
+    chunk was discarded. Either is a splice in the recorded audio.
+  - `dropped` (uint) is the cumulative number of samples the ESP-IDF I2S driver
+    discarded since that `SUB on` because the reader fell behind (RX queue
+    overflow drops the oldest filled DMA buffer, 256 samples at the current DMA
+    setting). It is sampled when the chunk is emitted, so a loss lies inside or
+    just before the first chunk whose `dropped` increased; the exact sample
+    position is not known. It is omitted when the driver refused the overflow
+    callback (loss unknown), while `seq` is still sent.
+  The device never inserts filler samples. The app reports splices with the
+  recording result ("gaps detected: N", seq gaps plus chunks with a device
+  overrun) and does not pad the WAV, because neither field locates the loss
+  sample-exactly.
+
+The Android SUB owner waits up to 8 seconds for a matching ACK/ERR. Missing or
+failed acknowledgements clear the local running indication but retain a cleanup
+obligation: Stop all retries OFF and disconnect attempts OFF on the old connection.
+Superseded request callbacks are released, so late ACKs cannot reactivate a stream.
+Monitor starts accept channel 1–13 or an omitted channel, and an optional six-byte
+colon-separated BSSID. Neither a local timeout nor an OFF ACK proves physical
+radio silence; those need device acceptance.
 
 `fs_read` (above) is not a `SUB`-gated stream: it is a one-shot `CMD` that
 produces a `DATA {stream:"file", ...}` burst followed by a terminal `ACK`.
 The app serializes managed uploads/downloads, binds them to the connection that
-started them and checks read sequence, size/CRC and write byte counts. Wrong IDs,
+started them and checks read sequence, size/CRC and upload token/offset/commit ACKs. Wrong IDs,
 missing/duplicate chunks and malformed payloads cannot complete another transfer.
 Its read buffer is capped at 16 MiB and a read has a 120-second total timeout.
 Cancellation/disconnection releases the pending operation. CRC32 checks accidental

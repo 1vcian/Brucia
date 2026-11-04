@@ -1,6 +1,5 @@
 package app.brucia.session
 
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +22,7 @@ class LongOperation(
     isConnected: () -> Boolean,
     private val stopRunner: CommandRunner = runner,
 ) {
+    private val stops = CommandTasks(scope)
     private val op = DeviceOperation(scope, runner, isConnected, DEFAULT_TIMEOUT_MS)
 
     private val _status = MutableStateFlow("")
@@ -43,6 +43,7 @@ class LongOperation(
      * [result] maps the final (ok, out) to the status text. [timeoutMs] must exceed the bounded run.
      */
     fun start(cmd: String, runningText: String, timeoutMs: Long, result: (Boolean, String) -> String) {
+        stops.cancel()
         op.start(cmd, runningText, timeoutMs = timeoutMs) { ok, out -> result(ok, out) }
     }
 
@@ -54,19 +55,11 @@ class LongOperation(
     fun requestStop(stopCmd: String, stoppingText: String?) {
         if (!op.busy.value) return
         stoppingText?.let { _status.value = it }
-        scope.launch {
-            try {
-                stopRunner.run(stopCmd, STOP_TIMEOUT_MS)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                // Fire-and-forget: the stop frame carries no status of its own.
-            }
-        }
+        stops.run(stopRunner, stopCmd, STOP_TIMEOUT_MS)
     }
 
     /** Hard stop for disconnect / teardown: cancel the wait (DeviceOperation.stop) and drop any late reply. */
-    fun abandon() = op.stop()
+    fun abandon() { stops.cancel(); op.stop() }
 
     companion object {
         /** Generous default; each [start] passes a timeout derived from the bounded run length. */

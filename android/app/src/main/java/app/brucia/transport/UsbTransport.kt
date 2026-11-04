@@ -14,12 +14,23 @@ class UsbTransport(
     // read loop can notice the link is gone instead of spinning on empty reads.
     @Volatile private var broken = false
 
+    /**
+     * Opens [port] on [connection]. On failure both are released before the error propagates (see
+     * [releaseUsbPort]): the port is closed only if this open succeeded, so a refused open never
+     * closes a port another transport still uses; otherwise the connection is closed directly.
+     */
     init {
+        var opened = false
         try {
             port.open(connection)
+            opened = true
             port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
         } catch (error: Exception) {
-            try { port.close() } catch (_: Exception) { }
+            releaseUsbPort(
+                opened,
+                closePort = { try { port.close() } catch (e: Exception) { app.brucia.BruciaLog.d("UsbTransport", "close port: ${e.message}") } },
+                closeConnection = { try { connection.close() } catch (e: Exception) { app.brucia.BruciaLog.d("UsbTransport", "close connection: ${e.message}") } },
+            )
             throw error
         }
     }
@@ -46,6 +57,7 @@ class UsbTransport(
             0
         }
 
+    /** Closing the port also closes its UsbDeviceConnection (usb-serial-for-android 3.8.1, see [releaseUsbPort]). */
     override fun close() {
         broken = true
         try { port.close() } catch (e: Exception) { app.brucia.BruciaLog.d("UsbTransport", "close failed: ${e.message}") }

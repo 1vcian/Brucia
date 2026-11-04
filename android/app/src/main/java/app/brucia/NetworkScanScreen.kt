@@ -39,8 +39,8 @@ internal fun NetworkScanScreen() {
     val localIp = remember { NetworkScanner.localIpv4()?.first }
     val hosts = remember { mutableStateListOf<ScanHost>() }
     var scanning by remember { mutableStateOf(false) }
-    var progress by remember { mutableStateOf(0) }
-    var total by remember { mutableStateOf(254) }
+    var progress by remember { mutableIntStateOf(0) }
+    var total by remember { mutableIntStateOf(254) }
     var job by remember { mutableStateOf<Job?>(null) }
 
     DisposableEffect(Unit) { onDispose { job?.cancel() } }

@@ -567,6 +567,34 @@ int lora_companion_poll(String &data, float &rssi, float &snr) {
 
 bool lora_companion_ready() { return intlora; }
 
+bool lora_companion_probe(bool *sx1262) {
+    if (intlora) return false; // the companion LoRa session owns the radio
+    const bool is1262 = getLoraBusyPin() != GPIO_NUM_NC;
+    if (sx1262) *sx1262 = is1262;
+    if (getLoraCsPin() == GPIO_NUM_NC || bruceConfigPins.LoRa_bus.mosi == GPIO_NUM_NC ||
+        bruceConfigPins.LoRa_bus.miso == GPIO_NUM_NC || bruceConfigPins.LoRa_bus.sck == GPIO_NUM_NC ||
+        getLoraIrqPin() == GPIO_NUM_NC) {
+        return false;
+    }
+    loraSpi = selectLoraSPIBus();
+    clearLoraRadio();
+    loraModule = new Module(
+        getLoraCsPin(), getLoraIrqPin(), getLoraResetPin(), is1262 ? getLoraBusyPin() : GPIO_NUM_NC, *loraSpi
+    );
+    int state;
+    if (is1262) {
+        lora1262 = new SX1262(loraModule);
+        state = lora1262->begin(433.0f);
+        if (state == RADIOLIB_ERR_NONE) lora1262->sleep(); // leave the chip idle; begin() resets it
+    } else {
+        lora1276 = new SX1276(loraModule);
+        state = lora1276->begin(433.0f);
+        if (state == RADIOLIB_ERR_NONE) lora1276->sleep(); // SX127x power-on mode is sleep
+    }
+    clearLoraRadio();
+    return state == RADIOLIB_ERR_NONE;
+}
+
 void lora_companion_end() {
     clearLoraRadio();
     intlora = false;

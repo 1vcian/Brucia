@@ -3,6 +3,7 @@ package app.brucia.wifi
 import app.brucia.session.CommandRunner
 import app.brucia.session.DeviceOperation
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,7 +63,16 @@ class EvilPortalService(
             if (templateBytes != null && templateName.isNotBlank()) {
                 val path = "/$templateName"
                 pushJob = scope.launch {
-                    val (ok, msg) = pushTemplate(path, templateBytes)
+                    val (ok, msg) = try {
+                        pushTemplate(path, templateBytes)
+                    } catch (e: CancellationException) {
+                        synchronized(lock) {
+                            if (token == startGen) op.show("Template upload cancelled.")
+                        }
+                        throw e
+                    } catch (e: Exception) {
+                        false to (e.message ?: "Upload failed")
+                    }
                     synchronized(lock) {
                         if (token != startGen) return@launch
                         if (ok) startCmd(token, name, path, ch, deauth)
@@ -91,6 +101,14 @@ class EvilPortalService(
                 out.ifBlank { "Stopped." }
             }
         }
+    }
+
+    /** Drop local ownership on link loss; do not send a command to a replacement device. */
+    fun abandon() = synchronized(lock) {
+        ++startGen
+        cancelPush()
+        _active.value = false
+        op.show("Disconnected")
     }
 
     /** Send evil_portal_start with the 4 tab-separated fields; the ACK sets [active] and [status]. */

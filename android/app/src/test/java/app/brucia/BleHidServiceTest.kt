@@ -124,6 +124,6 @@ class BleHidServiceTest {
         runner.reply(0, true, "advertising")
         delay(20)
         assertFalse(svc.busy.value)
-        assertEquals("Starting...", svc.status.value) // late reply ignored
+        assertEquals("Stopped.", svc.status.value) // terminal state; late reply ignored
     }
 }

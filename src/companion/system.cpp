@@ -61,7 +61,7 @@ static void runEspnowSend(const String &args, uint32_t id) {
         }
     }
     EspConnection::Message msg; // Connect wire format (<=250 B)
-    memset(&msg, 0, sizeof(msg));
+    memset(static_cast<void *>(&msg), 0, sizeof(msg)); // all members are plain data: zero the wire bytes
     msg.dataSize = text.length();
     msg.totalBytes = text.length();
     msg.bytesSent = text.length();
@@ -273,6 +273,13 @@ bool dispatchSystemCommand(const CommandRequest &request) {
 
         if (cmdStr.startsWith("clock_set ")) {
             runClockSet(cmdStr.substring(10), id);
+            break;
+        }
+
+        // Brucia: recovery diagnostics, only when the app asks (no automatic telemetry).
+        //   diag
+        if (cmdStr == "diag") {
+            runDiagCommand(id);
             break;
         }
 

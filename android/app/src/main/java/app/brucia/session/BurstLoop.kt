@@ -2,6 +2,7 @@ package app.brucia.session
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,8 +67,8 @@ class BurstLoop(
     /**
      * Stop any running loop silently (never two at once), then run [cmd]'s bursts while [active]
      * and [linkOpen]. [running] shows while looping. Each burst is `runner.run(cmd(), timeoutMs)`:
-     * a failure with non-blank out ends the loop and shows that text (the VM's onReject); a blank
-     * failure continues. A runner exception other than cancellation ends the loop with its message
+     * any failure ends the loop (a blank failure reports [FAILED]).
+     * A runner exception other than cancellation ends the loop with its message
      * as status, or [FAILED] when blank. When the loop ends under its own ownership (link closed,
      * rejection or cancellation), [active] clears, [status] becomes [stoppedText] if it still
      * equals [running], and [onEnd] runs (not after [stop], whose caller owns that cleanup).
@@ -84,9 +85,14 @@ class BurstLoop(
             runningText = running
             this.stoppedText = stoppedText
             this.onEnd = onEnd
+            if (!scope.isActive) {
+                _status.value = stoppedText
+                onEnd()
+                return
+            }
             _active.value = true
             _status.value = running
-            job = scope.launch {
+            val next = scope.launch(start = CoroutineStart.LAZY) {
                 val myJob = coroutineContext[Job]
                 var rejection: String? = null
                 try {
@@ -99,12 +105,15 @@ class BurstLoop(
                             rejection = e.message?.takeIf { it.isNotBlank() } ?: FAILED
                             break
                         }
-                        if (!ok && out.isNotBlank()) { rejection = out; break }
+                        if (!ok) { rejection = out.ifBlank { FAILED }; break }
                     }
                 } finally {
                     finish(myJob, rejection)
                 }
             }
+            job = next
+            next.invokeOnCompletion { finish(next, null) }
+            next.start()
         }
     }
 
@@ -115,8 +124,9 @@ class BurstLoop(
      */
     fun stop(silent: Boolean = false) {
         synchronized(lock) {
-            job?.cancel()
+            val previous = job
             job = null
+            previous?.cancel()
             _active.value = false
             if (!silent && _status.value == runningText) _status.value = stoppedText
         }
@@ -131,6 +141,7 @@ class BurstLoop(
     private fun finish(myJob: Job?, rejection: String?) {
         synchronized(lock) {
             if (job !== myJob) return
+            job = null
             _active.value = false
             when {
                 rejection != null -> _status.value = rejection

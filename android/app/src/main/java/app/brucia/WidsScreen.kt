@@ -36,8 +36,8 @@ internal fun WidsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val widsStatus by vm.widsStatus.collectAsState()
     val events by vm.widsEvents.collectAsState()
 
-    var window by remember { mutableStateOf(15f) }
-    var threshold by remember { mutableStateOf(20f) }
+    var window by remember { mutableFloatStateOf(15f) }
+    var threshold by remember { mutableFloatStateOf(20f) }
     val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
     val alerting = active && widsStatus.startsWith("ALERT")
 

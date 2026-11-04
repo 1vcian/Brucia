@@ -90,4 +90,10 @@ bool mic_stream_begin(uint32_t sampleRate, float gain);
 int mic_stream_read(int16_t *out, int maxSamples);
 /** Stop the continuous capture and release the I2S peripheral. */
 void mic_stream_end();
+/**
+ * Samples the I2S driver discarded since mic_stream_begin() because the reader fell behind
+ * (RX queue overflow: the oldest filled DMA buffer is dropped). Returns false when overflow
+ * reporting is unavailable (no stream, no mic, or the driver refused the callback): loss unknown.
+ */
+bool mic_stream_dropped_samples(uint32_t *out);
 #endif

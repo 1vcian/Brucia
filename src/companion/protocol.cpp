@@ -1,4 +1,5 @@
 #include "core/utils.h"
+#include "diag_core.h"
 #include "internal.h"
 #include <globals.h>
 
@@ -21,7 +22,10 @@ void resetFrameReader() {
 
 bool readFrame(String &payload, uint32_t timeoutMs) {
     // A genuinely abandoned frame must not retain a prefix across a new session.
-    if ((rxHeaderUsed || rxExpected) && millis() - rxLastByte > 2000) resetFrameReader();
+    if ((rxHeaderUsed || rxExpected) && millis() - rxLastByte > 2000) {
+        diagNoteRxReject(DIAG_RX_STALE);
+        resetFrameReader();
+    }
     const uint32_t started = millis();
     while (Serial.available() && millis() - started < timeoutMs) {
         const int c = Serial.read();
@@ -34,6 +38,10 @@ bool readFrame(String &payload, uint32_t timeoutMs) {
                          (static_cast<uint32_t>(rxHeader[2]) << 16) |
                          (static_cast<uint32_t>(rxHeader[3]) << 24);
             if (rxExpected == 0 || rxExpected > COMPANION_MAX_FRAME || !rxPayload.reserve(rxExpected + 1)) {
+                diagNoteRxReject(
+                    rxExpected == 0 ? DIAG_RX_ZERO_LEN
+                                    : (rxExpected > COMPANION_MAX_FRAME ? DIAG_RX_OVERSIZE : DIAG_RX_ALLOC_FAIL)
+                );
                 resetFrameReader();
                 return false;
             }
@@ -42,6 +50,7 @@ bool readFrame(String &payload, uint32_t timeoutMs) {
             if (rxPayload.length() == rxExpected) {
                 payload = rxPayload;
                 resetFrameReader();
+                diagNoteRxFrame();
                 return true;
             }
         }
@@ -60,6 +69,7 @@ static void writeFrame(const String &payload) {
     Serial.write(lenbuf, 4);
     Serial.write((const uint8_t *)payload.c_str(), len);
     Serial.flush();
+    diagNoteTxFrame();
 }
 
 void beginEnvelope(JsonDocument &out, uint8_t kind, uint32_t id) {
@@ -76,6 +86,8 @@ void sendEnvelope(JsonDocument &out) {
         out["d"]["code"] = 413;
         out["d"]["msg"] = "response exceeds frame limit";
     }
+    // Recovery diagnostics: every ERR, whichever handler built it, lands in one status bucket.
+    if ((out["t"] | 0) == MSG_ERR) diagNoteErr(out["d"]["code"] | 0u);
     String s;
     serializeJson(out, s);
     writeFrame(s);

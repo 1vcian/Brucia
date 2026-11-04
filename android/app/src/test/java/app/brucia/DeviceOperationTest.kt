@@ -28,6 +28,9 @@ internal class GateRunner : CommandRunner {
 /** Bounded polling: lets service coroutines run without fixed sleeps. */
 internal suspend fun until(cond: () -> Boolean) = withTimeout(2_000) { while (!cond()) delay(1) }
 
+/** Let every ready coroutine on the single-threaded runBlocking loop run; no wall-clock wait. */
+internal suspend fun settle() = repeat(50) { yield() }
+
 class DeviceOperationTest {
     private val runner = GateRunner().apply { sticky = true }
 
@@ -157,5 +160,18 @@ class DeviceOperationTest {
         replies[2].completeExceptionally(IllegalStateException("boom"))
         until { !op.busy.value }
         assertEquals("boom", op.status.value)
+    }
+
+    @Test fun showIfIdleNeverCancelsAPendingWait() = runBlocking {
+        val op = op()
+        assertTrue(op.showIfIdle("idle note"))
+        assertEquals("idle note" to false, op.state())
+        op.go()
+        until { runner.calls.size == 1 }
+        assertFalse(op.showIfIdle("late note"))
+        assertEquals("Running..." to true, op.state())
+        assertEquals("ok:x", op.answer(0, true, "x"))
+        assertTrue(op.showIfIdle("after"))
+        assertEquals("after" to false, op.state())
     }
 }

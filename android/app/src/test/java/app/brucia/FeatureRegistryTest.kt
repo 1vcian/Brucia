@@ -106,8 +106,8 @@ class FeatureRegistryTest {
         val reg = BuiltinFeatures.registry
         assertEquals(11, reg.categories.size)
         assertEquals(50, reg.features.size)
-        // Wi-Fi gate preserved on the dictionary/WPA (crack) tool.
-        assertEquals("wifi", reg.byTabId(7)?.cap)
+        // Mixed tools remain reachable: actual capture/playback operations own their gates.
+        for (tab in listOf(7, 27, 28)) assertNull(reg.byTabId(tab)?.cap)
         // Null cap keeps its meaning (ESP-NOW is always available).
         assertNull(reg.byTabId(32)?.cap)
         // Legacy-tab -> stable-id adapter round-trips.

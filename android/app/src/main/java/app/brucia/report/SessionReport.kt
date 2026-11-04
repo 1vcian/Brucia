@@ -20,6 +20,10 @@ data class ReportData(
     val fw: String? = null,
     val board: String? = null,
     val modules: List<String> = emptyList(),
+    /** Firmware provenance lines from CAPS (see DeviceInfo.provenanceLines); empty when unknown. */
+    val provenance: List<String> = emptyList(),
+    /** App + device Diagnostics lines (see wardrive.Diagnostics.exportLines); empty to omit. */
+    val diagnostics: List<String> = emptyList(),
     val aps: List<ApObservation> = emptyList(),
     val stations: List<Station> = emptyList(),
     val probes: List<ProbeRequest> = emptyList(),
@@ -52,6 +56,7 @@ object SessionReport {
             if (d.modules.isNotEmpty()) sb.append(" / ").append(d.modules.joinToString(", "))
             sb.append("  \n")
         }
+        for (line in d.provenance) sb.append(mdCell(line)).append("  \n")
         sb.append("For authorized security research and education only.\n")
 
         if (d.aps.isNotEmpty()) {
@@ -151,6 +156,11 @@ object SessionReport {
         val insights = insights(d, vendorOf)
         if (insights.isEmpty()) sb.append("- Nothing captured yet.\n")
         else for (i in insights) sb.append("- ").append(i).append('\n')
+
+        if (d.diagnostics.isNotEmpty()) {
+            sb.append("\n## Diagnostics\n\n")
+            for (line in d.diagnostics) sb.append("- ").append(mdCell(line)).append('\n')
+        }
 
         sb.append("\n---\nBrucia - companion to Bruce, AGPL-3.0.\n")
         return sb.toString()

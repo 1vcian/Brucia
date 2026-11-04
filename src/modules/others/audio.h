@@ -48,5 +48,6 @@ void audio_pcm_end();                      // flush + close
 bool stopAudioPlayback();                    // Stop current playback
 bool pauseAudioPlayback();                   // Pause/resume toggle
 bool isAudioPlaying();                       // Check if audio is playing
+bool isAudioPlaybackTaskActive();             // Async player task still holds the decoder/I2S (lock-free)
 AudioPlaybackInfo getAudioPlaybackInfo();    // Get current state for GUI
 void setAudioPlaybackVolume(uint8_t volume); // Change volume during playback

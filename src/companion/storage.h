@@ -6,6 +6,9 @@ namespace companion {
 struct CommandRequest;
 
 bool dispatchStorageCommand(const CommandRequest &request);
+void startCompanionStorage();
+void serviceCompanionStorage();
+void stopCompanionStorage();
 
 } // namespace companion
 } // namespace brucia

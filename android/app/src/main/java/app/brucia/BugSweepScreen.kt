@@ -54,7 +54,7 @@ internal fun BugSweepScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     // Peak-hold and hotter/colder direction, sampled so the arrow is readable.
     var peakHold by remember { mutableStateOf<Int?>(null) }
     var prevSample by remember { mutableStateOf<Int?>(null) }
-    var trend by remember { mutableStateOf(0) } // -1 colder, 0 flat, +1 hotter
+    var trend by remember { mutableIntStateOf(0) } // -1 colder, 0 flat, +1 hotter
     // Keep a live handle to the latest overall RSSI so the long-running sampling loop sees updates
     // as the aps/ble/spectrum flows emit (otherwise it would read the value captured at launch).
     val overallLive = rememberUpdatedState(overall)

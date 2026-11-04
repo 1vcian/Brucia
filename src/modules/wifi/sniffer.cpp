@@ -6,6 +6,7 @@
 */
 #if !defined(LITE_VERSION)
 #include "sniffer.h"
+#include "capture_descriptor_core.h"
 /* include all necessary libraries */
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -93,6 +94,68 @@ std::set<uint64_t> handshakeReadyBssids;
 portMUX_TYPE handshakeReadyMux = portMUX_INITIALIZER_UNLOCKED;
 std::set<uint64_t> handshakeBeaconLogged;
 std::map<uint64_t, HandshakeTracker> perApHandshakeTracker;
+
+// Brucia: per-run capture provenance for the companion (features.capture_descriptor). The sniffer
+// writer records which handshake file it actually wrote this run and how much, so the companion
+// reports the file that was really written (the name comes from the SSID resolved from the frames,
+// not from the requested SSID) and never reports a stale pre-existing file as this run's capture.
+// Standalone capture ignores these; tracking is off unless a companion capture turns it on.
+static uint64_t macToKey(const void *mac); // defined below; needed by the tracking helpers here
+static bool captureTracking = false;
+static uint64_t captureTargetKey = 0; // AP the capture targets; only its appends are counted
+static String captureTrackPath;      // path the writer last appended to for the target AP
+static uint32_t captureTrackFrames;  // pcap records this run appended to captureTrackPath
+static bool captureTrackCreated;     // the file was newly created this run (prior size 0)
+static uint32_t captureTrackPrior;   // file size before this run's first append (0 if created)
+
+// Called by the sniffer writer task after it appends `records` pcap records to AP `apKey`'s handshake
+// file (`path`) whose size was `priorSize` before this append. During one capture the writer may touch
+// several APs' files (a beacon for any AP on the channel, another AP's 4-way); only the target AP's
+// appends are counted, so the descriptor never describes or mixes a different AP. Serialized with the
+// companion's read via handshakeMutex (best-effort; the companion only reads after a flush).
+static void trackHandshakeAppend(uint64_t apKey, const String &path, uint32_t records, uint32_t priorSize) {
+    bool locked = handshakeMutex && xSemaphoreTake(handshakeMutex, pdMS_TO_TICKS(50)) == pdTRUE;
+    if (captureTracking && captureTrackShouldCount(captureTargetKey, apKey)) {
+        if (captureTrackPath != path) {
+            captureTrackPath = path;
+            captureTrackCreated = (priorSize == 0);
+            captureTrackPrior = priorSize;
+            captureTrackFrames = 0;
+        }
+        captureTrackFrames += records;
+    }
+    if (locked) xSemaphoreGive(handshakeMutex);
+}
+
+void snifferBeginCaptureTracking(const uint8_t targetMac[6]) {
+    bool locked = handshakeMutex && xSemaphoreTake(handshakeMutex, pdMS_TO_TICKS(50)) == pdTRUE;
+    captureTracking = true;
+    captureTargetKey = targetMac ? macToKey(targetMac) : 0;
+    captureTrackPath = "";
+    captureTrackFrames = 0;
+    captureTrackCreated = false;
+    captureTrackPrior = 0;
+    if (locked) xSemaphoreGive(handshakeMutex);
+}
+
+void snifferEndCaptureTracking() {
+    bool locked = handshakeMutex && xSemaphoreTake(handshakeMutex, pdMS_TO_TICKS(50)) == pdTRUE;
+    captureTracking = false;
+    if (locked) xSemaphoreGive(handshakeMutex);
+}
+
+bool snifferLastCapture(String &path, uint32_t &frames, bool &created, uint32_t &priorSize) {
+    bool locked = handshakeMutex && xSemaphoreTake(handshakeMutex, pdMS_TO_TICKS(50)) == pdTRUE;
+    bool wrote = captureTrackPath.length() > 0;
+    if (wrote) {
+        path = captureTrackPath;
+        frames = captureTrackFrames;
+        created = captureTrackCreated;
+        priorSize = captureTrackPrior;
+    }
+    if (locked) xSemaphoreGive(handshakeMutex);
+    return wrote;
+}
 
 // --- 4-way handshake frame buffer ---
 // Buffer M1, M2, and M3 in memory; flush all 4 frames when M4 arrives.
@@ -323,6 +386,7 @@ void saveHandshake(const wifi_promiscuous_pkt_t *packet, bool beacon, FS &Fs, co
 
         File f = Fs.open(filePath, FILE_APPEND);
         if (!f) { return; }
+        uint32_t priorSize = f.size();
         pcaprec_hdr_t hdr;
         hdr.ts_sec = packet->rx_ctrl.timestamp / 1000000;
         hdr.ts_usec = packet->rx_ctrl.timestamp % 1000000;
@@ -331,6 +395,7 @@ void saveHandshake(const wifi_promiscuous_pkt_t *packet, bool beacon, FS &Fs, co
         f.write((const byte *)&hdr, sizeof(pcaprec_hdr_t));
         f.write(packet->payload, packet->rx_ctrl.sig_len);
         f.close();
+        trackHandshakeAppend(apKey, filePath, 1, priorSize); // one beacon record appended to an existing HS file
         return;
     }
 
@@ -391,7 +456,9 @@ void saveHandshake(const wifi_promiscuous_pkt_t *packet, bool beacon, FS &Fs, co
             return;
         }
 
-        if (f.size() == 0) {
+        uint32_t priorSize = f.size(); // 0 => this run created the file; >0 => it pre-existed/accumulates
+        uint32_t recordsWritten = 0;
+        if (priorSize == 0) {
             writeHeader(f);
             // Write the last-seen beacon for this AP first, so the SSID is
             // available to the cracker before it stops reading at M2+M3.
@@ -405,6 +472,7 @@ void saveHandshake(const wifi_promiscuous_pkt_t *packet, bool beacon, FS &Fs, co
                 f.write((const byte *)&bhdr, sizeof(pcaprec_hdr_t));
                 f.write(beaconIt->second.data, beaconIt->second.len);
                 registerHandshakeBeacon(apKey);
+                recordsWritten++; // beacon record
             }
         }
 
@@ -431,6 +499,8 @@ void saveHandshake(const wifi_promiscuous_pkt_t *packet, bool beacon, FS &Fs, co
         f.write(packet->payload, m4Len);
 
         f.close();
+        recordsWritten += 4; // M1..M4 EAPOL records
+        trackHandshakeAppend(apKey, filePath, recordsWritten, priorSize);
         eapol4WayBuffer.erase(apKey);
 
         if (handshakeReadyBssids.find(apKey) == handshakeReadyBssids.end()) { num_HS++; }
@@ -478,6 +548,13 @@ static String buildHandshakePath(const uint8_t *mac, const char *ssid) {
     }
     path += ".pcap";
     return path;
+}
+
+// Brucia: public mirror of buildHandshakePath()+sanitizeSsid() so the companion can report the exact
+// file the bounded capture targets. Keeps the naming in one place (the writer and the descriptor must
+// agree, or the phone would verify the wrong file).
+String snifferHandshakePath(const uint8_t mac[6], const char *ssid) {
+    return buildHandshakePath(mac, sanitizeSsid(ssid).c_str());
 }
 
 static bool shouldSaveBeaconForHandshake(const uint8_t *mac) {

@@ -10,6 +10,17 @@ import org.junit.Test
 
 /** Reuses [GateRunner] and [until] from DeviceOperationTest. */
 class SubGhzBruteforceServiceTest {
+    @Test(timeout = 5000) fun invalidDurationsAreRejectedAndCannotOverflowTimeouts() = runBlocking {
+        val svc = svc()
+        for (seconds in listOf(Int.MIN_VALUE, -9, 0, 31, Int.MAX_VALUE)) {
+            svc.run(2, 433920000L, 24, seconds)
+            assertFalse(svc.busy.value)
+            assertTrue(svc.status.value.contains("Duration must"))
+            assertTrue(SubGhzBruteforceService.timeoutMsFor(seconds) in 9_000L..38_000L)
+        }
+        assertTrue(runner.calls.isEmpty())
+    }
+
     private val runner = GateRunner()
     @Volatile private var connected = true
 

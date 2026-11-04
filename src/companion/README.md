@@ -11,14 +11,15 @@ by `internal.h`. The USB wire contract remains in
 |---|---|
 | `companion.cpp` / `session.h` | Enter/leave companion mode, own Serial, suspend/resume the standalone CLI, poll services, restore outputs and clean up |
 | `protocol.*` | Incremental bounded framing and JSON response construction; no radio drivers |
-| `capabilities.*` | Probe supported chips once before capture, cache results and report CAPS |
+| `capabilities.*` / `capability_evidence_core.*` | Probe supported chips once before capture, cache results and report CAPS; Arduino-free evidence-level and static pin-conflict logic |
 | `commands.*` / `command_request.h` | Small dispatcher registry, CLI output capture and session/UI commands |
 | `wifi.*`, `bluetooth.*`, `subghz.*` | Radio-specific command matching, capture state, callbacks, service polling and cleanup |
 | `nfc.*`, `infrared.*`, `nrf24.*` | Reader/IR/optional-radio commands and their hardware-specific error paths |
 | `audio.*` | Microphone, speaker, PCM streaming and FM audio ownership |
 | `network.*` | LoRa/Ethernet command matching and teardown |
-| `storage.*` / `codec.*` | File transfer and bounded binary/text encoding |
+| `storage.*` / `storage_upload.*` / `codec.*` | FS adapter, Arduino-free upload transaction/recovery engine and bounded binary/text encoding |
 | `system.*` | Clock, scripts, ESP-NOW and other device tools |
+| `diag.*` / `diag_core.h` | `diag` reply (reset reason, heap, uptime); Arduino-free saturating link counters incremented by the framing/ERR paths, read only on request |
 | `config.h` | Compile-time driver support; it must not be mistaken for physical presence |
 
 A service implements `dispatch…Command(const CommandRequest&)`: return `false`
@@ -48,6 +49,15 @@ the ST25R3916-before-PN532 include ordering where both libraries are needed.
    Building is not a substitute for hardware tests.
 
 Host checks: `python3 tools/test_firmware_framing.py`,
-`python3 tools/test_firmware_codec.py` and `python3 tools/test_protocol_e2e.py`.
+`python3 tools/test_firmware_codec.py`, `python3 tools/test_firmware_storage.py`,
+`python3 tools/test_firmware_upload.py`, `python3 tools/test_firmware_capability_evidence.py`,
+`python3 tools/test_firmware_diag.py`
+and `python3 tools/test_protocol_e2e.py`.
 These cover the real reader/codec with host shims and simulated protocol traffic;
 they do not validate electrical timing, chip probes or the Android USB stack.
+
+Storage lifecycle hooks recover mounted filesystems on entry, expire idle uploads
+while polling and attempt cleanup on exit. Upload state stays in the storage module;
+its fake Store tests inject write/rename/read/cleanup failures and simulated resets.
+Preserve the journal/backup on ambiguous recovery errors. FAT's backup/promote flow
+is recoverable but has a visibility gap; physical power-loss acceptance is separate.

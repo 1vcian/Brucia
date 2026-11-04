@@ -21,6 +21,89 @@ files (`AudioScreens.kt`, `MitmUi.kt`, `NetworkScanScreen.kt`, `WidsScreen.kt`,
 `ChannelAnalyzerScreen.kt`, `RfMap3dScreen.kt`, `BugSweepScreen.kt`, `PcapDissectScreen.kt`,
 `GeoSignalsScreen.kt`).
 
+
+## Software contract matrix — 2026-11-04 (S03)
+
+This inventory covers all 50 catalogued tools plus Theme. It describes software
+contracts and their evidence; **none of the hardware checkboxes below is changed
+by JVM tests**. `TESTS.md` records the latest executed suite and build limitations.
+A passing shared primitive does not prove every Android screen, firmware driver,
+argument combination or peripheral works. Outstanding integration is identified
+below and in S02/S04–S11 of the maintenance backlog.
+
+Shared contracts used in the matrix:
+
+- **CMD:** `CommandSession` checks `CommandCapabilities` before native hardware
+  commands and the app's `rf`/`subghz`/`ir`/`rfid` CLI aliases, including commands
+  from macros/console and structured PCM bodies. Only explicit CAPS true permits
+  use. Cleanup commands remain allowed without CAPS. This is an app preflight,
+  not a sandbox for arbitrary scripts/unknown Bruce CLI commands; those remain
+  firmware-validated. LF RFID and iButton do not inherit NFC support.
+- **OP:** `DeviceOperation`/`CommandTasks` bind waits to their original connection;
+  cancellation, replacement and disconnect suppress stale callbacks. ACK waits are
+  bounded by each service; timeout is not proof that firmware execution stopped.
+  Shared tests: `CommandSessionTest`, `DeviceOperationTest`, `LifecycleRegressionTest`,
+  `CommandCapabilitiesTest`. Generic legacy callbacks wait up to 650 seconds.
+- **SUB:** `StreamSubscriptions` owns all nine known SUB names, an 8-second ACK
+  deadline and exclusive Wi-Fi/CC1101/mic peers. Unknown names, missing modules,
+  invalid monitor channel/BSSID reject before writing. Starts are optimistic until
+  ACK. Failed/missing ACKs clear the UI flag but retain cleanup obligations; Stop all
+  retries OFF and disconnect sends best-effort OFF on the original link. Late replies,
+  queued changes, parent cancellation and write failures have fake-transport tests.
+  An OFF ACK confirms the handler reply, not physical radio silence.
+- **BURST:** `BurstLoop` owns repeated short commands. Stop prevents another burst;
+  blank and explicit failures now end the loop. Cancelled scopes and immediate
+  replies cannot leave active stuck. `BurstLoopTest` covers sequencing and cleanup;
+  a burst already on the firmware can finish after app Stop.
+- **LOCAL:** phone work needs no ESP capability. Parsing/DSP fixtures cover the listed
+  pure components; Android storage/permissions, background behavior and UI lifecycle
+  still need S02/S10. A blank screen capability is permission to open the screen,
+  not permission to start every contained operation.
+
+| Tabs / tools | Requirements, owner and deadline | Input / cancellation evidence and remaining limits |
+|---|---|---|
+| 0, 11, 15, 17, 26 — Wardrive, Sniffer, Probes, Monitor, Channels | Wi-Fi SUB; monitor channel 1–13 and optional six-byte colon-separated BSSID | `CapsTest`, `StreamSubscriptionsTest`, `PcapWriterTest`; Room/export, automatic screen subscriptions and phone location require Android acceptance |
+| 7 — Crack | LOCAL dictionary/import; guided capture requires Wi-Fi and verified files; `CaptureWorkflow` total 600 s, `DictionaryTestService` owns CPU work | Parser/hash fixtures, 11 capture and 7 dictionary regressions; Stop closes owned readers, rejects stale/ambiguous captures; no firmware capture abort or artifact descriptor |
+| 30 — Evil Portal | Wi-Fi CMD/OP; `EvilPortalService`; custom template requires verified files + transactional uploads; 650 s command wait | `EvilPortalServiceTest`, `FileTransferServiceTest`, native upload fixtures; Stop invalidates pending template/start; FAT recovery is not atomic visibility; physical shutdown/media behavior remain S05 |
+| 33, 34 — MAC, Connect | Wi-Fi CMD/OP; MAC 10 s, join 30 s, status/leave 10 s | `WifiMacServiceTest`, `WifiJoinServiceTest`; MAC/blank inputs checked; actual association/DHCP pending |
+| 35, 38, 40 — Brucegotchi, Karma, Responder | Wi-Fi CMD; independent `LongOperation`; firmware duration 5–600 s plus 30 s margin | `HeadlessWifiOpsTest`, `LongOperationTest`; explicit stop channel keeps final ACK wait, disconnect abandons; joined-network requirement for Responder still firmware/runtime-dependent |
+| 44 — WIDS | Wi-Fi CMD; `WidsService`; windows 1–120 s plus 8 s margin, positive alert threshold | `WidsServiceTest`; cancellation/link loss terminates, failure retries back off 1 s, invalid/overflow durations reject; physical counts unverified |
+| 2 — RF | CC1101 CMD/SUB; BURST jammer, OP brute-force (1–30 s + 8 s), generic CLI capture/replay | `SubGhzBruteforceServiceTest`, `SubFileTest`, decoder/encoder/CSV tests; failed CLI capture is no longer saved as a signal; RF ranges/protocol interoperability and capture truncation remain S05/S11 |
+| 14 — FM | FM CMD; device-mic source additionally needs mic; `PcmStreamService` owns preparation through stop | `PcmStreamServiceTest`, `SessionPcmLinkTest`; ACK 4 s, cleanup 5 s, source/frequency checks; firmware can ACK dropped samples, no physical silence/lossless guarantee |
+| 22 — LoRa | LoRa CMD/OP; config 10 s, send 650 s, receive 1–120 s + 10 s | `LoraServiceTest`; Stop waiting cancels delivery, send/config supersede receive, scope cancellation clears flag; firmware has no receive-abort command. Numeric config compatibility remains firmware-validated |
+| 13 — NRF24 | NRF24 CMD/BURST for scan/sniff/jammer/MouseJack | `CommandCapabilitiesTest`, `BurstLoopTest`; no module sends nothing; actual ESB/radio behavior unverified |
+| 50 — Spam Wi-Fi | Wi-Fi CMD/BURST; each bounded burst awaits its ACK | `CommandCapabilitiesTest`, `BurstLoopTest`; blank SSID list rejected by caller; Stop prevents subsequent bursts, physical beacon cessation pending |
+| 32 — ESP-NOW | Wi-Fi CMD/OP; `EspNowService`, 10 s; nonblank message | `EspNowServiceTest`; device/build support beyond Wi-Fi still may return firmware ERR |
+| 3, 51 — NFC, Spam NFC | NFC CMD/OP; LF read separately needs lf_rfid; Mifare batches 48 keys / 650 s; NDEF 75 s, other readers per service | `NfcToolsServiceTest`, `MifareKeyCheckServiceTest`, NDEF/UID fixtures; Stop ends local batches; tag identity/completeness missing from firmware ACK; unsupported headless helpers remain unsupported |
+| 5, 39, 49 — BLE, BLE Remote, Spam BLE | BLE SUB/CMD; HID 10 s; GATT/media/BadBLE 650 s; BURST advertising | `BleHidServiceTest`, `GattServiceTest`, `BleMediaServiceTest`, `BadBleServiceTest`, shared SUB/BURST tests; disconnect clears local trees/pending reads; physical pairing/advertising cleanup pending |
+| 1, 37 — IR, IR Remote | IR CMD/OP; receive 20 s, TV-B-Gone 75 s, CLI 650 s, BURST jammer | `IrReceiveServiceTest`, `IrRxSummaryTest`, `TvBGoneServiceTest`, catalog/parser tests; raw receive summaries lack frequency (38 kHz assumption); on-device capture/persistence pending |
+| 4 — BadUSB | Saved/script editor LOCAL; BadBLE requires BLE CMD/OP; legacy USB scripts use firmware CLI | `BadBleServiceTest`, `CommandCapabilitiesTest`; CAPS has no separate USB-HID flag and CLI may reject native-USB-incompatible commands; do not claim USB HID support from screen availability |
+| 18 — MITM | Phone network/service; no ESP capability | `HttpWireTest`, `MitmCaTest` validate bounded parsing/CA; sockets, foreground lifecycle, TLS trust and routing require S02/S10 and controlled end-to-end tests |
+| 31 — Network Scan | Phone network and screen-owned job | Network scan result/Android network lifecycle is not certified by shared CMD tests; cancellation/background integration stays S10 |
+| 46, 47 — RF Fingerprint, RF Timeline | Wi-Fi screen gate; component scans use individually gated Wi-Fi/BLE SUB; local comparisons/history | SUB tests cover radio prerequisites; fingerprint persistence/timeline retention and screen lifecycle remain Android/S08/S10 acceptance |
+| 6, 8 — Device info, Console | Connection required; CMD preflight for known hardware; generic callbacks 650 s | CMD/OP tests; unknown CLI and scripts remain firmware authority; arbitrary command side effects/output completeness are not covered by hardware preflight |
+| 9 — Remote | Separate unframed mirror/control transport owner in ViewModel | `TftProtocolTest`; disconnect cancels remote readers; mode-switch/reconnect, touch gestures and Activity teardown remain S06/S10 |
+| 10 — Files | Verified files for reads; additionally transactional uploads for writes; `FileTransferService` / `SessionFileLink`; CLI metadata uses OP | Reader/chunk/CRC/request-ID/token/commit bounds, cancellation and failure recovery tested; lost commit ACK requires verification. LittleFS rename / FAT backup recovery; Android provider rollback and physical durability remain unverified |
+| 12 — Updates | Phone network; one `ReleaseUpdateService` snapshot; supported T-Embed image required before bootloader takeover | `ReleaseUpdateServiceTest`, `ReleaseCatalogTest`, `DownloadIOTest`, `FirmwareImageTest`, `EspProtocolTest`; URL/image selection tested; installer/USB permissions, cancellation and re-enumeration remain S02/S06/S10 |
+| 23 — Ethernet | eth CMD/OP; status 16 s, config 18 s, timed operations duration + 14 s | `EthernetServiceTest`; failed config does not chain status, stale mapping suppressed; IP/driver validation and physical DHCP/SPI need acceptance |
+| 25, 29 — Audio, Oscilloscope | Device mic SUB; optional phone mic requires Android permission; `RecordingBuffer` retains unsaved samples | SUB and recording/export/DSP fixtures; auto-subscribe effect now reacts to connection/capability changes; Android source/export and physical timing pending |
+| 27, 28 — SSTV, Tone | Mixed LOCAL editing/DSP, mic SUB for receive, speaker CMD/PCM for transmit; no blanket mic screen gate | PCM/SSTV/DTMF/speaker fixtures; missing/failed mic start cannot leave DTMF/recording active; speaker requires explicit support. Codec/permission UI and external SSTV sync remain S05/S09/S10 |
+| 21 — Report | LOCAL snapshots of captured data | `ReportTest`, `SessionReportTest`, `SessionExportTest`; report/share UI and provider export need Android acceptance |
+| 19 — Scripts | Connection; `ScriptService` OP 25 s; nonblank source <=6000 bytes | `ScriptServiceTest`; firmware interpreter validates execution/build availability; app Stop does not forcibly interrupt arbitrary script effects |
+| 41 — Macros | LOCAL persistence; `MacroRunner` pins original session, commands 650 s, delays 0–60000 ms; CMD gates per step | `MacroRunnerTest`; failed command ends sequence; Stop cancels future steps, not already-running firmware code |
+| 42, 43 — RF Map 3D, Bug Sweep | Composite views; each Wi-Fi/BLE/CC1101 SUB gated independently | Shared SUB tests; RSSI positions are approximate; PNG export and view lifecycle need Android checks; no SDR/IQ claim |
+| 45 — PCAP dissect | LOCAL; bounded 32 MiB import, cancellation checkpoints every 256 records | `PcapDissectorTest`, `PcapWriterTest`; blocked provider reads still must return before cancellation completes |
+| 48 — Geo signals | Phone location/persistence; replay uses IR/CC1101 CMD gate | `CommandCapabilitiesTest`, signal parser fixtures; geofence persistence, permissions and background replay behavior remain S10 |
+| 20 — Gadgets | Per-operation iButton, speaker, mic, Wi-Fi requirements; clock needs connection only | `IButtonServiceTest`, `ClockServiceTest`, `SpeakerServiceTest`, `MicRecordServiceTest`, `EspNowServiceTest`; no inferred modules; hardware and GPIO acceptance pending |
+| 24 — Utilities | LOCAL password/hash/Base64/OUI/QR tools | `PhoneUtilsTest`, `OuiLookupTest`; no device gate; clipboard/QR rendering needs Android UI verification |
+| 36 — Theme & LED | Connection; `DeviceAppearanceService` OP 10 s | Service tests cover bounds/supersession; no LED-presence capability exists, so unsupported hardware reports firmware ERR; save/display behavior needs device acceptance |
+
+Software evidence is **not** all-green production acceptance. S02 owns fresh builds
+and emulator upgrade checks; S04's software upload fixtures do not certify media durability; S06/S10 own
+remaining ViewModel/Activity/installer jobs; S08 owns sustained sessions and late
+EVENT/data pressure; S09/S11 own interoperability, unsupported commands and inventory
+limits. Keep per-control hardware results separate below.
+
 ---
 
 # App chrome (always on screen)
@@ -113,6 +196,7 @@ files (`AudioScreens.kt`, `MitmUi.kt`, `NetworkScanScreen.kt`, `WidsScreen.kt`,
 | Tested | Control | What it does | Notes |
 |---|---|---|---|
 | [ ] | "Dismiss" text button | `vm.resetHandshakeFlow()` | Shown for an inactive handshake flow |
+| [ ] | "Cancel import" button | `vm.cancelHandshakeFlow()` | Cancels guided import; not firmware capture |
 | [ ] | "Built-in list" outlined button | `vm.crackBuiltin()` | |
 | [ ] | "Demo" outlined button | `vm.demoCrack()` | |
 | [ ] | "Stop" outlined button | `vm.cancelCrack()` | Enabled while cracking |
@@ -222,7 +306,7 @@ files (`AudioScreens.kt`, `MitmUi.kt`, `NetworkScanScreen.kt`, `WidsScreen.kt`,
 | [ ] | "Connect over USB" button | USB connect | |
 | [ ] | Duration selector 30s / 60s / 120s / 300s | Set run duration | |
 | [ ] | "Start (Ns)" button | `vm.startKarma()` | Shown when idle |
-| [ ] | "Stop" button | `vm.stopLongOp()` | Shown when running |
+| [ ] | "Stop" button | `vm.stopKarma()` | Shown when running |
 
 ## Brucegotchi (`BrucegotchiScreen`, tab 35)
 
@@ -294,7 +378,7 @@ files (`AudioScreens.kt`, `MitmUi.kt`, `NetworkScanScreen.kt`, `WidsScreen.kt`,
 | [ ] | "Message" field | Set message | |
 | [ ] | "Send" button | `vm.loraSend()` | |
 | [ ] | "Duration (seconds)" field | Set receive duration | |
-| [ ] | "Start receive" / "Stop" button | `vm.loraRecv()` / `vm.stopLoraRecv()` | |
+| [ ] | "Start receive" / "Stop waiting" button | `vm.loraRecv()` / `vm.stopLoraRecv()` | 1–120 s; Stop suppresses late results, firmware window can continue |
 | [ ] | "Clear" outlined button | `vm.clearLoraPackets()` | Enabled when packets exist |
 
 ---
@@ -336,6 +420,7 @@ files (`AudioScreens.kt`, `MitmUi.kt`, `NetworkScanScreen.kt`, `WidsScreen.kt`,
 | [ ] | "Clone tag" button | `vm.nfcClone()` | |
 | [ ] | "Emulate tag" button | `vm.nfcEmulate()` | |
 | [ ] | "Run key attack" button | `vm.runMifareKeyCheck()` | |
+| [ ] | "Stop batches" button | `vm.stopMifareKeyCheck()` | Cancels local sequencing; current firmware batch can continue |
 | [ ] | "Import keys" outlined button | Pick file -> `vm.importMifareKeys()` | |
 | [ ] | "Clear" text button | `vm.clearMifareUserKeys()` | Shown when user keys imported |
 | [ ] | "Write" outlined button | `vm.nfcWrite()` | |
@@ -523,7 +608,7 @@ files (`AudioScreens.kt`, `MitmUi.kt`, `NetworkScanScreen.kt`, `WidsScreen.kt`,
 | [ ] | "Connect over USB" button | USB connect | |
 | [ ] | Duration selector 30s / 60s / 120s / 300s | Set run duration | |
 | [ ] | "Start (Ns)" button | `vm.startResponder()` | Shown when idle |
-| [ ] | "Stop" button | `vm.stopLongOp()` | Shown when running |
+| [ ] | "Stop" button | `vm.stopResponder()` | Shown when running |
 
 ## WIDS (`WidsScreen`, tab 44)
 
@@ -635,12 +720,12 @@ files (`AudioScreens.kt`, `MitmUi.kt`, `NetworkScanScreen.kt`, `WidsScreen.kt`,
 
 | Tested | Control | What it does | Notes |
 |---|---|---|---|
-| [ ] | "Check for app update" outlined button | `vm.checkUpdates()` | |
+| [ ] | "Check for app update" outlined button | `vm.checkUpdates()` | One snapshot; disabled during download/flash, failed refresh clears old assets |
 | [ ] | "Download & install <ver>" button | `vm.requestAppInstall()` | Shown when a newer APK exists |
 | [ ] | "Board image" dropdown button | Open the board menu | |
 | [ ] | "Auto (connected device)" dropdown item | `vm.selectBoard(null)` | |
 | [ ] | Per-board dropdown items | `vm.selectBoard()` | Repeated per board |
-| [ ] | "Flash latest firmware" / "Flash <board>" button | `vm.resetFlash()` + `onFlash()` | |
+| [ ] | "Flash latest firmware" / "Flash <board>" button | `vm.resetFlash()` + `onFlash()` | Requires matching T-Embed image in current snapshot before USB takeover |
 | [ ] | Flash log "Clear" text button | `vm.clearFlashLog()` | Shown when log non-empty |
 
 ## Ethernet (`EthernetScreen`, tab 23)

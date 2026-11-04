@@ -31,6 +31,31 @@ object BruciaLog {
     private val lock = Any()
     @Volatile private var file: File? = null
 
+    /**
+     * Provenance of the last device that completed a CAPS handshake (firmware version, protocol,
+     * commit/dirty, build id/time, env). Kept after disconnect so a later export still names the
+     * artifact the log was produced against. Local only: it is never sent anywhere.
+     */
+    @Volatile var deviceProvenance: String? = null
+
+    /**
+     * Diagnostics lines (app link counters + the last device `diag` result) for the export header;
+     * set by the ViewModel. Local only, evaluated when the user exports.
+     */
+    @Volatile var diagnostics: (() -> List<String>)? = null
+
+    /** Header prepended to every exported log so a report identifies the exact app + firmware build. */
+    fun exportHeader(
+        appVersion: String = BuildConfig.VERSION_NAME,
+        appCode: Long = BuildConfig.VERSION_CODE.toLong(),
+        device: String? = deviceProvenance,
+        diagnosticLines: List<String> = try { diagnostics?.invoke() } catch (_: Throwable) { null } ?: emptyList(),
+    ): String = "Brucia log export\n" +
+        "App: $appVersion ($appCode)\n" +
+        "Last device: " + (device ?: "none connected since the app started") + "\n" +
+        (if (diagnosticLines.isEmpty()) "" else "Diagnostics:\n" + diagnosticLines.joinToString("") { "  $it\n" }) +
+        "----\n"
+
     /** Point the log at the app's external files dir. Safe to call more than once. */
     fun init(ctx: Context) {
         synchronized(lock) {
@@ -94,7 +119,7 @@ object BruciaLog {
         return try {
             val dir = ctx.getExternalFilesDir(null) ?: ctx.filesDir
             val out = File(dir, "brucia-log.txt")
-            out.writeText(tail(maxLines))
+            out.writeText(exportHeader() + tail(maxLines))
             out
         } catch (e: Throwable) {
             w("Log", "export failed", e)
@@ -135,5 +160,5 @@ object BruciaLog {
 
     /** Save the last [maxLines] of the log to Download/Brucia with a timestamped name; returns the path. */
     fun exportToDownloads(ctx: Context, maxLines: Int = 2000): String? =
-        saveToDownloads(ctx, "brucia-log-${fileStamp.format(Date())}.txt", tail(maxLines))
+        saveToDownloads(ctx, "brucia-log-${fileStamp.format(Date())}.txt", exportHeader() + tail(maxLines))
 }

@@ -123,12 +123,15 @@ object PcmSource {
      * Decode an audio file [uri] to 16 kHz mono 16-bit PCM using the platform codecs.
      * Intended for short clips - the whole clip is held in memory. Empty on failure.
      */
-    fun decodeFile(context: Context, uri: Uri): ShortArray {
+    fun decodeFile(context: Context, uri: Uri, checkActive: () -> Unit = {}): ShortArray {
+        checkActive()
         val extractor = MediaExtractor()
-        val afd = context.contentResolver.openAssetFileDescriptor(uri, "r") ?: return ShortArray(0)
+        var afd: android.content.res.AssetFileDescriptor? = null
         var codec: MediaCodec? = null
         try {
-            extractor.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            val descriptor = context.contentResolver.openAssetFileDescriptor(uri, "r") ?: return ShortArray(0)
+            afd = descriptor
+            extractor.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
             var trackIndex = -1
             var format: MediaFormat? = null
             for (i in 0 until extractor.trackCount) {
@@ -152,6 +155,7 @@ object PcmSource {
             var sawOutputEos = false
             val timeout = 10000L
             while (!sawOutputEos) {
+                checkActive()
                 if (!sawInputEos) {
                     val inIndex = codec.dequeueInputBuffer(timeout)
                     if (inIndex >= 0) {
@@ -172,6 +176,7 @@ object PcmSource {
                 if (outIndex >= 0) {
                     val outBuf = codec.getOutputBuffer(outIndex)
                     if (outBuf != null && info.size > 0) {
+                        require(info.size <= 16 * 1024 * 1024 - out.size()) { "Decoded audio exceeds 16 MiB limit" }
                         val chunk = ByteArray(info.size)
                         outBuf.position(info.offset)
                         outBuf.get(chunk, 0, info.size)
@@ -190,18 +195,20 @@ object PcmSource {
             val shorts = ShortArray(bytes.size / 2)
             ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(shorts)
             return downmixAndResample(shorts, srcRate, channels)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (_: Exception) {
             return ShortArray(0)
         } finally {
             try { codec?.stop() } catch (e: Exception) { app.brucia.BruciaLog.d("Pcm", "codec stop: ${e.message}") }
             try { codec?.release() } catch (e: Exception) { app.brucia.BruciaLog.d("Pcm", "codec release: ${e.message}") }
             try { extractor.release() } catch (e: Exception) { app.brucia.BruciaLog.d("Pcm", "extractor release: ${e.message}") }
-            try { afd.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Pcm", "afd close: ${e.message}") }
+            try { afd?.close() } catch (e: Exception) { app.brucia.BruciaLog.d("Pcm", "afd close: ${e.message}") }
         }
     }
 
     /** Live capture from the phone microphone as 16 kHz mono 16-bit PCM. Needs RECORD_AUDIO. */
-    class MicReader : PcmReader {
+    class MicReader(private val failOnReadError: Boolean = false) : PcmReader {
         private var record: AudioRecord? = null
 
         /** Open and start the mic. Returns false if unavailable or permission is missing. */
@@ -235,6 +242,7 @@ object PcmSource {
         override fun read(out: ShortArray): Int {
             val r = record ?: return -1
             val n = r.read(out, 0, out.size)
+            if (n < 0 && failOnReadError) throw java.io.IOException("Microphone read failed ($n)")
             return if (n < 0) -1 else n
         }
 

@@ -44,6 +44,8 @@ public:
     bool begin();
     // Identify the reader without opening an interactive error dialog.
     bool probe();
+    // GetFirmwareVersion response from the last begin()/probe() (IC<<24 | Ver<<16 | Rev<<8 | Support), 0 = none.
+    uint32_t firmwareVersion() const { return _firmwareVersion; }
 
     /////////////////////////////////////////////////////////////////////////////////////
     // Operations
@@ -58,12 +60,16 @@ public:
     int save(const String &filename);
     String emulationCaveat() const override;
     // Brucia companion: MIFARE Classic key-dictionary check (see RFIDInterface).
-    bool mifareKeyCheck(const uint8_t (*keyList)[6], size_t count, std::vector<MifareKeyHit> &out) override;
+    bool mifareKeyCheck(
+        const uint8_t (*keyList)[6], size_t count, std::vector<MifareKeyHit> &out,
+        MifareKeyCheckResult *info = nullptr, std::function<bool()> shouldStop = {}
+    ) override;
 
 private:
     bool beginInternal(bool quiet);
     bool _use_i2c;
     CONNECTION_TYPE _connection_type;
+    uint32_t _firmwareVersion = 0;
 
     /////////////////////////////////////////////////////////////////////////////////////
     // Converters

@@ -26,21 +26,25 @@ ARTIFACTS = [
     ("org.json", "json", "20240303"),
 ]
 TESTS = [
-    "ProtocolTest", "DeviceFilesTest", "FileListTest", "CapsTest", "AudioDspTest",
+    "ProtocolTest", "DeviceFilesTest", "FileListTest", "CapsTest", "CapsEvidenceTest", "AudioDspTest",
     "TftProtocolTest", "SubGhzDecoderTest", "SubGhzEncoderTest", "NdefBuilderTest", "DeviceFileReaderTest", "DownloadIOTest", "ReleaseCatalogTest", "AwaitReplyTest", "FirmwareImageTest", "UpdateHttpTest", "HttpWireTest", "RecordingBufferTest",
+    "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
 ]
 SOURCES = [
-    "protocol/Protocol.kt", "protocol/CompanionClient.kt", "protocol/CommandReply.kt",
-    "transport/Transport.kt", "wardrive/DeviceInfo.kt",
+    "protocol/Protocol.kt", "protocol/CompanionClient.kt", "protocol/CommandReply.kt", "protocol/LinkCounters.kt",
+    "session/CommandSession.kt", "wardrive/DeviceDiagnostics.kt",
+    "transport/Transport.kt", "wardrive/DeviceInfo.kt", "wardrive/CapabilityEvidence.kt",
     "files/DeviceFilePush.kt", "files/FileKinds.kt", "files/FileTemplates.kt",
     "files/DeviceFileReader.kt",
-    "update/DownloadIO.kt", "update/ReleaseCatalog.kt", "update/FirmwareImage.kt", "protocol/StreamPolicy.kt", "protocol/AwaitReply.kt",
+    "update/DownloadIO.kt", "update/ReleaseCatalog.kt", "update/AssetIntegrity.kt", "update/FirmwareImage.kt", "protocol/StreamPolicy.kt", "protocol/AwaitReply.kt",
     "update/UpdateHttp.kt",
     "mitm/HttpWire.kt",
     "audio/RecordingBuffer.kt",
     "files/FileList.kt", "remote/TftProtocol.kt", "nfc/NdefBuilder.kt",
     "subghz/OokProtocols.kt", "subghz/DecodedSignal.kt", "subghz/SubGhzDecoder.kt", "subghz/SubGhzEncoder.kt",
     "audio/Dtmf.kt", "audio/Fft.kt", "audio/Goertzel.kt", "audio/Oscilloscope.kt", "audio/Sstv.kt",
+    "session/CommandRunner.kt", "wifi/CaptureWorkflow.kt", "wifi/CaptureDescriptor.kt",
+    "wifi/HandshakeParser.kt", "wifi/WpaCracker.kt", "wifi/Pmkid.kt",
 ]
 
 

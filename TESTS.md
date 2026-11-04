@@ -4,7 +4,44 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
-## Latest software checkpoint — 2026-10-31
+## Latest software checkpoint — 2026-11-05, candidate 0.1.4
+
+Four coordinated batches (backlog S01/S02/S06/S08/S10/S11/W01-W03/W11, firmware items 2-5).
+Merged tree before release: Android `:app:testDebugUnitTest` 760/760, `lintDebug` 0 errors
+(14 warnings: 13 GradleDependency, 1 OldTargetApi), `verifyPaparazziDebug` unchanged;
+22/22 `tools/test_*.py`; website 15/15; emulator (API 36) instrumentation 7/7 and a debug
+versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 47.6%, flash
+25.8% of chip), Cardputer, core4mb (LITE), LAUNCHER_CYD, nesso-n1; 12 envs compiled in the
+matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
+was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
+
+### Batches 1-4 - verify on hardware
+- [ ] `diag` card: Refresh shows reset reason (power-on, then after a reset/brownout if
+      reproducible), heap, link counters rising with traffic; busy 409 during a long op.
+- [ ] Wi-Fi handshake/PMKID capture with descriptor: imported file matches size/CRC; a second
+      capture on the same AP reports `appended`; Esc abort and timeout import nothing.
+- [ ] Mifare key check: UID/sectors/complete shown; Stop mid-batch returns "Stopped (partial)"
+      within seconds; swapping the card between batches stops the run.
+- [ ] Speaker file playback with the link alive; Stop ends it; end event arrives.
+- [ ] Hardware evidence card on the T-Embed: CC1101/PN532/SD levels and pin conflicts plausible;
+      LoRa/RC522 probes leave the peripherals idle.
+- [ ] Sub-GHz Listen/Spectrum: init failure turns the switch off with a reason; sweep limits.
+- [ ] NFC read, `rf rx`, IR learn, device panel, Files: Stop all and unplug end the wait.
+- [ ] USB: permission prompt once, flash takes the port from the companion link, wake lock held
+      through a flash, service gone after the app is swiped away.
+- [ ] In-app update: APK + firmware download, cancel mid-download, flash after verification.
+- [ ] FM PCM (needs a Si4713 board): accepted/lost counts, no silent loss.
+
+## Latest software checkpoint — 2026-11-04
+
+Claude orchestration: six scoped packets in
+`.codex_tmp/claude-stabilization-20261104/`; source and packet hashes rechecked before
+launch. Historical coordinator JVM baselines passed 44 tests (S08a) and 27 (S09),
+overlapping the main suite. Explicitly permitted execution verified host Claude
+authentication and Docker 27.5.1. The user requested local Mac Claude Code instead
+of Linux/Docker: four workers launched (S08a/S09/S11a/S06-S10a), review pending.
+CLI permissions and packet scope do not provide OS filesystem/network isolation.
+S02/S07 remain blocked; launch does not prove completion or interoperability.
 
 W11l: `DictionaryTestService` is wired into the existing offline dictionary paths.
 Seven synthetic tests cover missing targets, early-match counts, read failures,
@@ -17,12 +54,161 @@ failures, failed baseline listing, PMKID routing, stopped/superseded blocked rea
 and missing hardware/link prerequisites. Tests use fake IO and parser fixtures;
 actual RF capture, USB timing and the final UI remain pending on-device acceptance.
 
-`python3 tools/check_android_changes.py --all-main --unit-tests` passed compilation
-of 147 production Kotlin files and 456 tests in 78 non-Paparazzi suites. This count
-excludes screenshot tests and is not directly comparable to the 455-test Gradle
-checkpoint below. A new Gradle unit/lint attempt failed before execution because
-the global wrapper lock was not writable. Current lint, fresh APK and device
-acceptance are not established by these cached-source checks.
+W11n (Mifare stage): 11 `MifareKeyCheckServiceTest` tests cover 48-key batching,
+normalization and dictionary snapshots, preserving prior hits on failure, malformed
+replies, missing connection/module, Stop/reset/supersede with a delayed reply,
+cancelled parent scope, empty success and IO errors. Real `CommandSession` over a
+simulated transport verifies timeout/cancellation cleanup, late ACK suppression and
+reconnect isolation. No NFC hardware was connected. Firmware ACKs do not expose tag
+identity or partial scans; a completed app sequence is not proof of an exhaustive
+scan of one card. Stop does not abort a batch already running on the device.
+
+W11n (macro stage): 12 `MacroRunnerTest` cases cover ordered commands/pauses,
+step snapshots, double-start prevention, failure/exception/timeout short-circuiting,
+empty/blank steps, missing connection, Stop during a pause, Stop/restart with a
+non-cancellable old reply, parent cancellation before/during execution and consistent
+delay bounds for saved/direct macros. Real `CommandSession` with simulated transport
+covers timeout/Stop cleanup, late ACKs and reconnect isolation. Firmware commands
+and saved JSON are unchanged; hardware execution and final UI are unverified.
+
+W11o: 10 `LifecycleRegressionTest` cases cover cancelled scopes before/during a
+command, stale mapper side effects, mapper errors, a cancelled Ethernet config
+that must not trigger refresh, queued and delayed callback cancellation, late BLE
+refresh, portal template completion after disconnect, combined cleanup of real
+services over a simulated `CommandSession`, and cleanup continuing after a failing
+hook. Updated the HID Stop regression to require a terminal status. Existing
+service suites still pass. Stream/UI/device stop behavior has not been physically
+validated. File-transfer ownership was subsequently covered by W11p below.
+
+W11p: 11 `FileTransferServiceTest` cases cover invocation-time session capture,
+queued/active cancellation, reconnect, delayed non-cancellable reads, serialized
+writes after supersession, discarded local-file cleanup, failed download before
+opening a destination, unavailable verified files, cancelled parent scopes,
+bidirectional caller/transfer cancellation and actual portal/service integration.
+The original seven `SessionFileLinkTest` cases exercise real `CommandSession` and
+`DeviceFileReader` with simulated transport: matching ID/size/CRC, chunked/empty
+uploads, bad write ACKs, timeout/cancellation cleanup, queued wire operations,
+late data and invalid/oversized/closed-link requests. Existing reader fixtures
+continue to cover corrupt and missing chunks. All data is synthetic.
+
+Android document-provider behavior and physical USB timing remain unverified. A
+provider write that already truncated a document has no guaranteed rollback.
+Firmware upload safety is now covered by S04 below; legacy direct truncate/append
+still can leave partial files. Provider writes are not certified as atomic.
+
+W11q: 12 `PcmStreamServiceTest` cases cover begin gating, exact frame boundaries
+and monotonic pacing, failed begin/data/read/stop, Stop during non-cancellable
+preparation/read, source cleanup, ordered old-stop/new-begin, reconnect, background
+device-mic ownership, duplicate/invalid/unavailable starts, parent cancellation,
+empty-read backoff and cooperative SSTV cancellation with unchanged normal samples.
+Five `SessionPcmLinkTest` cases validate actual framed JSON through `CommandSession`:
+speaker `d.sr`/`d.pcm`, exact S16LE bytes, FM text grammar, failed begin without PCM,
+structured wait timeout/cancellation, stale/closed links and frame bounds.
+
+Android MediaCodec/AudioRecord and physical FM/speaker playback are unverified.
+A blocking source must return before its serialized cleanup/new run can proceed.
+Stop invalidates app ownership immediately; it does not prove hardware silence.
+The FM firmware ACK has no accepted-sample count and can hide ring-buffer loss;
+protocol documentation records that remaining limitation. No firmware was changed.
+
+S01: nine `ReleaseUpdateServiceTest` cases exercise `AppUpdater.fetchSnapshot`
+with injected HTTP bodies: two successive releases, one request per refresh,
+metadata/asset consistency, immediate invalidation while IO is pending, duplicate
+refresh suppression, failed-refresh retry, obsolete/foreign/unsupported board
+selection, missing assets without fallback, malformed/ambiguous metadata,
+cancellation during a blocked fetch, already-cancelled scope and immutable parsed
+board lists. Home and Updates now consume one state; download progress is separate.
+APK/USB handoff guards were reviewed and compiled, but permission UI, live GitHub
+requests, installer behavior and physical flashing were not exercised.
+
+S03: the software matrix in `docs/APP_CONTROLS_CHECKLIST.md` maps all 50 tool tabs
+plus Theme to prerequisites, ownership, deadlines, input checks, cancellation and
+evidence/remaining integration. A source-to-table check found no missing, extra or
+duplicate tab after reconciliation; hardware checkboxes remain unmarked.
+
+Five `CommandCapabilitiesTest` cases cover all 13 hardware families (including
+cross-family rejection), composite FM/mic requirements, cleanup exceptions and real
+CommandSession text/JSON/structured rejection without writes or pending leaks.
+Ten `StreamSubscriptionsTest` cases use real framed SUB/ACK on fake transport:
+missing modules, unknown streams, monitor input rejection, immediate/missing ACK,
+exclusive and independent streams, failed OFF retry, Stop/supersede, reconnect,
+queued capability/session changes, scope cancellation, write failure and close.
+
+Nine additional regressions cover BurstLoop immediate/cancelled-scope completion;
+WIDS startup/cancellation and invalid windows; jam-detect/Sub-GHz duration overflow;
+and LoRa receive supersession, cancellation and invalid duration. Existing burst
+blank-failure and LoRa Stop tests now require termination and no late delivery.
+Registry tests require offline Crack and mixed SSTV/Tone screens to remain reachable.
+The older burst cancellation test now waits for runner entry, avoiding its former
+race against an optimistic UI flag. Initial SUB tests returned non-Unit values and
+were rejected by JUnit; that harness issue was fixed before the passing run.
+
+UI wiring now restarts automatic audio subscriptions on connection/capability
+changes, requires explicit speaker/mic support, clears DTMF when its SUB fails, and
+prevents recording after a failed immediate start. Failed RF/NFC reads no longer
+persist a synthetic success. These Android adapters were reviewed/compiled;
+Compose lifecycle, Android codecs/providers and actual radio shutdown remain
+unverified. LoRa Stop cancels the app wait; firmware has no receive abort.
+
+S04: managed uploads now use a separate transactional capability and begin/chunk/
+commit/abort contract. Twelve `SessionFileLinkTest` cases exercise real correlated
+sessions with synthetic transport: empty/chunked transfers, strict token/size/CRC/
+commit ACKs, lost commit replies without retries, old-firmware reads/no upload
+fallback, cancellation/abort, reconnect, late replies and canonical path limits.
+`CapsTest` independently rejects missing/malformed transactional support.
+
+`python3 tools/test_firmware_upload.py` passed 41 failure/recovery scenarios with
+the real C++ engine and UBSan: both rename models, old/new/empty destinations,
+partial writes, bad/truncated/oversized staging, read/rename/rollback/cleanup errors,
+reset boundaries, artifact collisions, invalid journals, conflicting recovery and
+idle-clock wrap. `test_firmware_storage.py` passed against the real dispatcher and
+FS adapter, including transaction ACKs, legacy-write exclusion and reserved-path
+aliases. Codec/framing and all five mock protocol E2E checks also passed. The new
+upload harness is included in CI. Mock protocol E2E itself still covers reads;
+the new upload contract is covered by the JVM/native fixtures above.
+
+FAT backup/promote recovery has a visibility gap. If promotion and rollback both
+fail, the previous bytes remain in the backup; no success is claimed. Failed cleanup
+after successful commit is explicitly reported. Physical media durability, power
+interruption, card swaps and Android provider/USB behavior remain unverified (S05).
+Generic CLI/scripts are outside upload isolation. No release or flash performed.
+
+`python3 tools/check_android_changes.py --variant release --all-main --unit-tests`
+passed compilation of 158 production Kotlin files and 563 tests in 88 non-Paparazzi
+suites. The checker now accepts an explicit cached build variant; only release
+outputs were available after 0.1.3. This count excludes screenshot tests and is not
+directly comparable to the 455-test Gradle checkpoint below. A new Gradle unit/lint
+attempt failed before execution because the global wrapper lock was not writable.
+Current lint, fresh APK and device acceptance are not established by these cached-source
+checks. `git diff --check` passed.
+
+Final S04 firmware builds passed on all three targets:
+
+| Target | RAM | Flash |
+|---|---|---|
+| LilyGO T-Embed CC1101 | 154,384 B (47.1%) | 4,304,398 B (25.7%) |
+| M5Stack Core 4 MB (LITE, no RGB LED) | 98,152 B (30.0%) | 2,672,063 B (63.7%) |
+| M5Stack Cardputer | 156,584 B (47.8%) | 4,309,563 B (51.4%) |
+
+`python3 tools/test_android_logic.py --firmware Bruce-lilygo-t-embed-cc1101.bin`
+also passed: the 4,370,480-byte merged T-Embed image passed the production Kotlin
+preflight, and 121 standalone JVM tests passed (overlapping the full suite).
+
+Firmware S04 build verification uses installed dependencies copied into the ignored
+`.pio/local-core` directory, leaving global caches untouched. Reproduce after provisioning
+that local cache with:
+
+```sh
+PLATFORMIO_CORE_DIR="$PWD/.pio/local-core" ~/.platformio/penv/bin/pio run \
+  -e lilygo-t-embed-cc1101 -e m5stack-core4mb -e m5stack-cardputer
+```
+
+The normal global-cache attempt was denied `platforms.lock`. The local build still
+warns that esptool dependency installation cannot reach PyPI, then uses the cached
+installation successfully. This is a cached-toolchain build, not a clean online
+provisioning check. Generated binaries retain VERSION 0.1.3 and are local development
+artifacts, not a new release. Full Android Gradle/lint remains blocked at its global
+wrapper lock; the cached Kotlin result above does not substitute for it.
 
 ## Current evidence — 2026-10-30, candidate 0.1.1
 
@@ -66,10 +252,11 @@ For a restricted environment with cached dependencies:
 
 ```sh
 python3 tools/test_android_logic.py
-python3 tools/check_android_changes.py --all-main --unit-tests
+python3 tools/check_android_changes.py --variant release --all-main --unit-tests
 node --test tools/test_site_release.cjs
 python3 -m unittest discover -s tools -p 'test_*.py'
 python3 tools/test_firmware_storage.py
+python3 tools/test_firmware_upload.py
 python3 tools/test_firmware_codec.py
 python3 tools/test_firmware_framing.py
 python3 tools/test_audio_noise_bounds.py -e lilygo-t-embed-cc1101
@@ -80,7 +267,8 @@ version constant generated for the host. Add `--firmware <merged-image.bin>` to
 validate a real T-Embed image with the production preflight. The cached-app checker
 compiles all 113 current production Kotlin files (Compose included) and runs 253
 non-Paparazzi tests; it requires a previous debug build and cached SDK/dependencies.
-It does not regenerate Room/KSP output, run lint or create an APK. Counts overlap.
+Those counts describe the original debug-cache checkpoint; see the latest release-cache
+results above. It does not regenerate Room/KSP output, run lint or create an APK. Counts overlap.
 
 Native storage/framing checks exercise actual firmware code with host IO shims.
 The Base64 test checks 134 vectors against Python and uses UBSan. The AAC test

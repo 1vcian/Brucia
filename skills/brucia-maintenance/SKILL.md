@@ -32,8 +32,11 @@ current until their app/firmware pair has passed acceptance.
   at a time; avoid broad mechanical splits.
 - `files/DeviceFileReader`, `audio/RecordingBuffer`, `mitm/HttpWire`,
   `protocol/AwaitReply`, `session/CommandSession` (per-link command/reply correlation) and `update/` contain extracted contracts and unit tests.
-- Managed file transfers require `features.verified_files`; size/CRC and request
-  identity must agree. Uploads are not yet atomic. Failed exports retain audio.
+- Managed file transfers require `features.verified_files`; uploads additionally
+  require literal `features.transactional_uploads`. Validate token, cumulative size
+  and commit CRC; never fall back to truncate/append. LittleFS uses rename; FAT uses
+  journal/backup recovery, not atomic visibility or certified power-loss safety.
+  A lost commit ACK requires destination verification before retry. Failed exports retain audio.
 - Module presence, driver initialization and physical verification are different.
   Optional hardware gates operations; CC1101 is not an IQ SDR; stock hardware does
   not supply LF RFID/iButton. See `docs/HARDWARE_CAPABILITIES.md`.

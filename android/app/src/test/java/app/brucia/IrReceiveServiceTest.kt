@@ -12,7 +12,9 @@ class IrReceiveServiceTest {
     private val captured = CopyOnWriteArrayList<IrButton>()
     private var connected = true
 
-    private fun CoroutineScope.svc() = IrReceiveService(this, runner, { connected }) { captured += it }
+    private val learned = CopyOnWriteArrayList<List<IrButton>>()
+
+    private fun CoroutineScope.svc() = IrReceiveService(this, runner, { connected }, onLearned = { learned += it }) { captured += it }
 
     private suspend fun answer(i: Int, ok: Boolean, out: String) {
         until { runner.calls.size > i }
@@ -169,6 +171,49 @@ class IrReceiveServiceTest {
         assertFalse(s.rxBusy.value || s.captureBusy.value)
         delay(20)
         assertTrue(runner.calls.isEmpty())
+    }
+
+    @Test(timeout = 5_000) fun learnParsesCliOutputIntoButtons() = runBlocking {
+        val s = svc()
+        s.learn()
+        assertTrue(s.learnBusy.value)
+        settle()
+        runner.reply(0, true, NEC_BLOCK + "\n#\n" + RAW_BLOCK)
+        settle()
+        assertFalse(s.learnBusy.value)
+        assertEquals(listOf(listOf("Power", "Learned")), learned.map { list -> list.map { it.name } })
+        s.learn()
+        settle()
+        runner.reply(1, false, "timeout")
+        settle()
+        assertEquals(1, learned.size)
+        assertEquals(listOf("ir rx" to 20_000L, "ir rx" to 20_000L), runner.calls.toList())
+        assertTrue(captured.isEmpty())
+    }
+
+    @Test(timeout = 5_000) fun learnIsIndependentAndStopDropsItsLateReply() = runBlocking {
+        val s = svc()
+        s.learn()
+        s.receiveOnce()
+        settle()
+        assertTrue(s.learnBusy.value && s.rxBusy.value)
+        s.stopLearn()
+        assertFalse(s.learnBusy.value)
+        assertTrue(s.rxBusy.value)
+        runner.reply(0, true, NEC_BLOCK)
+        runner.reply(1, true, NEC_BLOCK)
+        settle()
+        assertTrue(learned.isEmpty())
+        assertEquals("Received: Power (NEC)", s.rxStatus.value)
+    }
+
+    @Test(timeout = 5_000) fun learnNotConnectedSendsNothing() = runBlocking {
+        connected = false
+        val s = svc()
+        s.learn()
+        settle()
+        assertTrue(runner.calls.isEmpty())
+        assertFalse(s.learnBusy.value)
     }
 
     private companion object {

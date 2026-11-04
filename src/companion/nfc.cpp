@@ -87,7 +87,12 @@ static void runMifareKeycheck(const String &argsIn, uint32_t id) {
     }
 
     std::vector<RFIDInterface::MifareKeyHit> hits;
-    bool tag = rfid->mifareKeyCheck(keyList, (size_t)nKeys, hits);
+    MifareKeyCheckResult info;
+    // Cooperative cancellation: the companion loop is blocked while the batch runs, so the driver
+    // polls the serial between authenticate() calls for a phone-sent stop frame (same channel the
+    // responder/karma long ops use - companionPollStop consumes a "stop"/"*_stop" CMD and never
+    // ACKs it). A stopped batch returns the hits found so far with complete:false, stop:"cancelled".
+    bool tag = rfid->mifareKeyCheck(keyList, (size_t)nKeys, hits, &info, companionPollStop);
     delete rfid;
 
     JsonDocument o;
@@ -100,6 +105,28 @@ static void runMifareKeycheck(const String &argsIn, uint32_t id) {
         return;
     }
     d["ok"] = true;
+    // Versioned completeness contract (v1): additive fields older apps ignore. They let the
+    // app tell a fully-tested batch from one cut short (tag lost), and tie consecutive batches
+    // to the same card via the UID read at batch start. `found` stays the recovered-key list.
+    d["v"] = 1;
+    char uidHex[21];
+    for (uint8_t i = 0; i < info.uidLen; i++) snprintf(uidHex + i * 2, 3, "%02X", info.uid[i]);
+    uidHex[info.uidLen * 2] = '\0';
+    d["uid"] = uidHex;
+    d["sak"] = info.sak;
+    d["sectors"] = info.sectors;              // total sectors on this tag
+    d["tested_sectors"] = info.sectorsCompleted; // sectors fully tested before stopping
+    d["keys"] = info.keysInBatch;            // candidate keys in this batch
+    d["auth_attempts"] = info.authAttempts;  // individual auth operations performed
+    d["complete"] = (info.stop == MIFARE_KC_COMPLETE);
+    const char *stopStr = "no_tag";
+    switch (info.stop) {
+        case MIFARE_KC_COMPLETE: stopStr = "complete"; break;
+        case MIFARE_KC_TAG_LOST: stopStr = "tag_lost"; break;
+        case MIFARE_KC_CANCELLED: stopStr = "cancelled"; break; // phone asked to stop mid-scan
+        case MIFARE_KC_NO_TAG: default: stopStr = "no_tag"; break;
+    }
+    d["stop"] = stopStr;
     JsonArray found = d["found"].to<JsonArray>();
     for (auto &h : hits) {
         JsonObject e = found.add<JsonObject>();

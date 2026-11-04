@@ -12,11 +12,14 @@ import kotlinx.coroutines.flow.asStateFlow
  * [DeviceOperation] so neither supersedes the other: a one-shot receive held in [rxResult]
  * for review, and a capture handed to [onKeyCaptured] for the custom remote. Only the
  * request that still owns its flow may set [rxResult] or call [onKeyCaptured].
+ * A third independent line, [learn], runs the legacy CLI `ir rx` (same ~10 s loop_headless
+ * window, .ir file output) and hands every parsed button to [onLearned].
  */
 class IrReceiveService(
     scope: CoroutineScope,
     runner: CommandRunner,
     isConnected: () -> Boolean,
+    private val onLearned: (List<IrButton>) -> Unit = {},
     private val onKeyCaptured: (IrButton) -> Unit,
 ) {
     private val lock = Any()
@@ -24,6 +27,7 @@ class IrReceiveService(
     private var captureToken = 0L
     private val rx = DeviceOperation(scope, runner, isConnected, TIMEOUT_MS)
     private val capture = DeviceOperation(scope, runner, isConnected, TIMEOUT_MS)
+    private val learning = DeviceOperation(scope, runner, isConnected, TIMEOUT_MS)
 
     val rxStatus: StateFlow<String> = rx.status
     val rxBusy: StateFlow<Boolean> = rx.busy
@@ -32,6 +36,7 @@ class IrReceiveService(
     val rxResult: StateFlow<IrButton?> = _rxResult.asStateFlow()
     val captureStatus: StateFlow<String> = capture.status
     val captureBusy: StateFlow<Boolean> = capture.busy
+    val learnBusy: StateFlow<Boolean> = learning.busy
 
     /** Arm the receiver once; clears [rxResult] and supersedes a pending receive. */
     fun receiveOnce() = synchronized(lock) {
@@ -80,6 +85,19 @@ class IrReceiveService(
         }
     }
 
+    /**
+     * Learn a remote via the CLI `ir rx`: the owning reply's parsed buttons (success or not, as
+     * the legacy callback did; an error output parses to nothing) go to [onLearned] when any.
+     */
+    fun learn() = learning.start(LEARN_CMD, null) { _, out ->
+        val parsed = IrParser.parse(out)
+        if (parsed.isNotEmpty()) onLearned(parsed)
+        null
+    }
+
+    /** Cancel a pending learn; its late reply never reaches [onLearned]. */
+    fun stopLearn() = learning.stop()
+
     /** Cancel a pending receive; its late reply never sets [rxResult]. */
     fun stopReceive() = synchronized(lock) { ++rxToken; rx.stop() }
 
@@ -88,6 +106,8 @@ class IrReceiveService(
 
     companion object {
         const val CMD = "ir_rx"
+        /** Legacy CLI receive; IrRead::loop_headless(10), the same window as [CMD]. */
+        const val LEARN_CMD = "ir rx"
         /** Firmware listens ~10 s (loop_headless(10)); margin for the ACK. */
         const val TIMEOUT_MS = 20_000L
         const val RX_RUNNING = "Receiving - point a remote at the device and press a button (10s)..."

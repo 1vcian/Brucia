@@ -7,6 +7,167 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+## [0.1.4] - 2026-11-05
+
+Software-only release: everything below passed unit, host, emulator and build checks;
+none of it has been verified on a device yet (see TESTS.md).
+
+- Device diagnostics: new `diag` command (CAPS `features.diag`) reports reset reason,
+  uptime, heap/PSRAM and bounded link counters since boot (frames, rejected frames by
+  kind, ERR replies by code, busy replies) plus the existing FM/mic drop figures. Sent
+  only when the app asks; nothing leaves the phone. The app now counts malformed frames
+  it used to skip silently, timeouts and unmatched replies, shows both in a Diagnostics
+  card and includes them in log exports and session reports.
+- Wi-Fi capture descriptor (CAPS `features.capture_descriptor`): the handshake/PMKID
+  capture reply names the file this run actually created or grew for the target AP,
+  with size, CRC-32, measured record count, stop reason and whether the file accumulates
+  earlier runs. The app imports exactly that file and verifies size/CRC; an incomplete
+  capture imports nothing. Older firmware keeps the listing-diff import, labeled.
+- Mifare key check: replies carry tag UID, sectors tested and a complete/partial flag;
+  Stop now ends a batch already running on the device (`stop:"cancelled"`, hits so far
+  kept). The app stops on a partial batch or a tag change between batches.
+- During long blocking operations the device now answers PING and replies `ERR 409
+  device busy` to other commands instead of silently dropping them.
+- Speaker playback no longer blocks the link: it starts at once, can be stopped and
+  reports its end (`features.speaker_play_async`). FM PCM reports accepted/lost
+  samples and the app resends the remainder instead of losing audio silently.
+- CAPS reports per-module evidence (compiled / configured / probed / initialized, probe
+  result, static pin conflicts) and build provenance (commit, dirty, time); the app shows
+  a Hardware evidence card. Probes are read-only where possible; the LoRa probe leaves the
+  radio asleep and the RC522 antenna is switched off after its check.
+- Sub-GHz receive: init failures are reported (ERR 503) instead of aborting or leaving the
+  Listen switch on; spectrum sweeps are validated (ERR 400) on a whole-kHz grid; raw events
+  say when the device buffer may have truncated a signal; saved-signal write failures are
+  reported.
+- Remaining request/response tools (NFC read, Sub-GHz receive, IR learn, device panel,
+  file browser, capture list) moved to owned services: Stop all and disconnect end their
+  waits, a newer request replaces an older one, and the file browser no longer stays on
+  "Loading..." after Stop all. `rf rx`, `ir rx` and the device panel time out after 20 s
+  (the firmware bounds) instead of 650 s.
+- USB ownership: one owner per port between the companion link and flashing, a single
+  permission receiver, and the connection service keeps the wake lock through a flash
+  and does not restart itself after being killed.
+- Updates: downloads verify their size/hash before use; concurrent or cancelled APK and
+  firmware downloads can no longer overwrite each other or continue into a flash after an
+  abort. Release catalog URLs are checked strictly on both app and website.
+- MITM HTTP parser rejects more malformed framing (CR-less chunk lines, oversized chunk
+  extensions, DEL, HTTP/1.0 with Transfer-Encoding, lowercase CONNECT).
+- Recording saves never overwrite a same-second folder and remove partial folders on
+  failure.
+- Firmware builds are reproducible: the build year, `__DATE__/__TIME__` and source paths
+  come from the commit, so two checkouts of the same commit produce identical binaries.
+- Themed (monochrome) launcher icon; Kotlin/lint warnings cleaned up.
+
+- SSTV batch and streaming decoders now follow each measured line sync, avoiding
+  cumulative Scottie S1 horizontal drift from fractional sample timing. Four
+  synthetic S1/S2 regressions cover first and last lines; external interoperability
+  remains unverified.
+
+- Managed device uploads now stage data, verify length/CRC and require an explicit
+  matching commit ACK. New `transactional_uploads` CAPS support is mandatory for
+  uploads; older verified-file firmware still supports reads, without unsafe upload
+  fallback. Lost commit acknowledgements require destination verification before retry.
+- Firmware adds bounded, single-owner `fs_upload_*` commands and journal recovery.
+  LittleFS uses one rename; FAT preserves the previous file in a backup while
+  promoting, restoring it on failure or retaining it for recovery if rollback fails.
+  Cleanup failures after commit are reported separately from replacement success.
+  Reserved paths and concurrent legacy writes reject. Simulated failure/reset tests
+  cover the transaction; physical power-loss behavior is not certified.
+
+- Centralized hardware preflight for native commands and the app's radio CLI aliases,
+  including macros, console and structured PCM. Missing CAPS cannot enable hardware;
+  cleanup commands remain usable. Offline Crack and mixed SSTV/Tone screens remain
+  reachable without the capture module, with individual operations still gated.
+- Extracted `StreamSubscriptions`: one owner per request, bounded ACK wait, validated
+  monitor filters, exclusive stream replacement and reconnect/cancellation handling.
+  Missing/failed ACKs retain a cleanup obligation, so Stop all/disconnect still try
+  OFF instead of losing track of a possibly active radio.
+- Fixed BurstLoop and WIDS flags stuck on immediate completion or a cancelled scope.
+  Blank burst failures now terminate. WIDS/jam-detect/Sub-GHz duration checks prevent
+  invalid or overflowing waits. LoRa Stop now cancels the app wait and suppresses
+  late packets; send/config supersession and scope cancellation clear its indicator.
+  LoRa receive durations are bounded to 1–120 s; the firmware listen window can continue.
+- Audio auto-subscriptions react to connection/capability changes; missing/failed mic
+  starts do not leave DTMF or recording active. Failed legacy RF/NFC reads are not
+  persisted as successful captures. Added the software contract/evidence matrix to
+  the existing controls checklist; hardware acceptance remains pending.
+
+- App and firmware updates now load version, notes, APK and all board images from
+  one release response, exposed as one UI state. Refresh immediately clears the
+  previous assets and selection; network/parse failures cannot leave old downloads
+  enabled. Obsolete board-menu selections are rejected, and duplicate checks share
+  the active request. Cancelled checks cannot publish a late response.
+- Refresh is disabled during APK download/installer handoff and firmware flashing;
+  board selection is locked through bootloader re-enumeration. Missing or unsupported
+  firmware images are rejected before taking over USB. An install-permission request
+  is tied to its APK URL and invalidated by a refresh. Per-board URL validation,
+  image validation and version ordering are unchanged. Live OTA/flash is unverified.
+
+- FM/SSTV preparation, encoding, PCM streaming and finalization now belong to
+  `PcmStreamService`. Stop works during encoding; runs keep their original session,
+  reject duplicate starts, close their sources and serialize old cleanup before a
+  newer begin. Late readers/finalizers cannot send PCM or overwrite a newer run.
+- Fixed the speaker PCM wire format: the app now sends `spkr_pcm_begin` with `d.sr`
+  and `spkr_pcm_data` with `d.pcm`, matching the existing firmware handlers. The
+  previous appended-string arguments did not match those handlers. Added correlated
+  structured CMD waits; no firmware command/schema/version change.
+- Await begin and frame ACKs, preserve errors instead of showing “Finished”, and
+  pace 16 kHz S16LE mono PCM with a monotonic clock. SSTV encoding and Android file
+  decode check cancellation; decoder buffering is bounded to 16 MiB. FM microphone
+  read errors become failures. Hardware stop, provider/codec behavior and FM buffer
+  loss still need physical verification; firmware can ACK a partially dropped FM
+  frame when its ring is full.
+
+- File transfers now use `FileTransferService` and `SessionFileLink`: capture the
+  connection when requested, cancel queued/active work on Stop all or disconnect,
+  supersede older requests for the same consumer/destination, and suppress stale
+  imports/callbacks. Capture reads share the verified session adapter and wire mutex.
+  Existing download size/CRC/request-ID validation and upload chunk-size ACK checks
+  are preserved; upload inputs are bounded snapshots.
+- Manual pulls use unique local files; discarded results remove their staged copies.
+  Exports verify the download before opening a destination, check cancellation between
+  writes and serialize processing so an old blocking write finishes before a newer
+  export. Provider writes already started cannot be rolled back; managed firmware
+  uploads now use the transactional contract above. Legacy direct writes remain non-atomic.
+- Template-upload cancellation now reaches the actual transfer in both directions;
+  a cancelled upload cannot start the portal or leave its status at “Starting...”.
+  Upload command-log entries receive a terminal cancellation result.
+
+- Added an explicit service cleanup inventory shared by Stop all and disconnect.
+  Stop all now reaches the migrated device services, capture workflow, parallel
+  callbacks, stream subscriptions, FM/SSTV, phone mic and timeline. Firmware stop
+  requests retain their real ACK status; the command log no longer marks every
+  running entry failed before cleanup completes. Offline dictionary work is stopped
+  by Stop all but remains independent of link disconnection.
+- Disconnect clears GATT exploration, speaker song and portal ownership and cancels
+  remote readers. Parallel BLE/GATT/speaker requests and legacy console/IR/NFC/RF
+  callbacks are cancellable; queued IO captures its original connection. Removed
+  the unused JSON callback dispatcher.
+- Fixed shared `DeviceOperation` cancellation: obsolete replies cannot invoke result
+  mappers or chain follow-up commands; cancelled scopes cannot leave busy stuck.
+  Mapper errors become terminal failures. BLE HID Stop now reports “Stopped.”
+  instead of keeping “Starting...”. Local Stop does not prove firmware execution
+  ended; audio encoder/finalizer ownership is now covered by W11q above.
+
+- Macro execution moved to `automation/MacroRunner`: snapshot steps and the original
+  connection, preserve the double-start guard, and ignore old results after Stop
+  and restart. The first failed command/timeout stops the sequence instead of
+  advancing and eventually displaying “finished”. Unexpected errors retain their
+  cause; cancellation also clears running state when the parent scope is closed.
+- Cmds Stop all now stops macro sequencing. Raw macro commands use the generic
+  650 s ACK wait instead of the 12 s radio-burst default. Stop cancels the app
+  sequence; a command already sent can continue on the device. Direct/builder
+  pauses use the same 0–60 s bounds as saved macros; saved JSON is unchanged.
+
+- Mifare dictionary batches moved to `MifareKeyCheckService`: Stop/reset/disconnect
+  and restart discard stale replies; a run keeps its original connection and key
+  list. Failures stop subsequent batches and preserve earlier hits. Invalid reply
+  data is rejected instead of becoming a recovered key or an empty success.
+- Added Stop batches and integrated it into Cmds Stop all. Cancellation stops app
+  sequencing; the current firmware batch may continue. Error/cancelled runs no
+  longer display the completed-run “no keys” message. Existing commands, batch
+  size and firmware are unchanged.
+
 ## [0.1.3] - 2026-10-31
 
 App and T-Embed CC1101 firmware, published to the private BruciaDev repo. Hardware
