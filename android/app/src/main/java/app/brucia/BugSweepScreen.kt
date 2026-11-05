@@ -1,5 +1,6 @@
 package app.brucia
 
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -34,9 +35,9 @@ internal fun BugSweepScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val ble by vm.ble.collectAsState()
     val spectrum by vm.spectrum.collectAsState()
 
-    var useWifi by remember { mutableStateOf(true) }
-    var useBle by remember { mutableStateOf(true) }
-    var useSub by remember { mutableStateOf(true) }
+    var useWifi by rememberSaveable { mutableStateOf(true) }
+    var useBle by rememberSaveable { mutableStateOf(true) }
+    var useSub by rememberSaveable { mutableStateOf(true) }
     var sweeping by remember { mutableStateOf(false) }
 
     // Latest strength per band (dBm; null = nothing seen) and who the strongest emitter is.

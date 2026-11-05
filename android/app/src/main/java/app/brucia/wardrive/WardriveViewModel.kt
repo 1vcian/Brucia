@@ -699,6 +699,11 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private var remoteWatchdogJob: Job? = null
     private val _remoteFrame = MutableStateFlow(0L)
     val remoteFrame: StateFlow<Long> = _remoteFrame.asStateFlow()
+    // Whether the remote session is up (startRemote .. stopRemote). Held here, not in the screen,
+    // so a rotation or resize cannot show "Start" while the mirror still runs (and Stop, which
+    // brings companion mode back, would be disabled).
+    private val _remoteRunning = MutableStateFlow(false)
+    val remoteRunning: StateFlow<Boolean> = _remoteRunning.asStateFlow()
     fun remoteBitmap(): android.graphics.Bitmap? = remote?.renderer?.bitmap
     // Mirror watchdog state: last time we saw any raw bytes vs. a decoded TFT frame.
     @Volatile private var lastRemoteByteAt = 0L
@@ -717,6 +722,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         readJob?.cancel(); pingJob?.cancel() // remote is exclusive with the companion loop
         val rc = app.brucia.remote.RemoteController(t)
         remote = rc
+        _remoteRunning.value = true
         val now = System.currentTimeMillis()
         lastRemoteByteAt = now; lastRemoteFrameAt = now
         remoteJob = viewModelScope.launch(Dispatchers.IO) {
@@ -764,6 +770,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         remoteWatchdogJob?.cancel(); remoteWatchdogJob = null
         remoteJob?.cancel(); remoteJob = null
         remote = null
+        _remoteRunning.value = false
         // Remote was exclusive with the companion loops (startRemote cancelled them);
         // bring companion mode back so wardrive/console/pings/file pulls work again.
         if (transport?.isOpen == true) startCompanionLoops()
@@ -2796,6 +2803,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         remoteWatchdogJob?.cancel(); remoteWatchdogJob = null
         remoteJob?.cancel(); remoteJob = null
         remote = null
+        _remoteRunning.value = false
         stopTimeline()
         dtmfJob?.cancel()
         dtmfJob = null

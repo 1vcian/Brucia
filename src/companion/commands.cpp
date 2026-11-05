@@ -72,6 +72,7 @@ public:
     }
     int read() override { return -1; }
     size_t write(uint8_t *str, size_t size) override {
+        if (!onOwnerTask()) return size;
         for (size_t i = 0; i < size && buf.length() < CAP; i++) buf += (char)str[i];
         return size;
     }
@@ -82,11 +83,52 @@ public:
 private:
     static const int CAP = 3500; // keep the ACK within one frame
     String &buf;
+    // serialDevice is global: another task (tftLogger's async writer, a script's interpreter task)
+    // can print to it while a routed command runs. Only the routing task touches the String.
+    const TaskHandle_t owner = xTaskGetCurrentTaskHandle();
+    bool onOwnerTask() const { return xTaskGetCurrentTaskHandle() == owner; }
     void append(const String &s) {
+        if (!onOwnerTask()) return;
         if (buf.length() < CAP) buf += s.substring(0, CAP - buf.length());
     }
     void append(const char *s) { append(String(s)); }
 };
+
+// serialDevice for the whole companion session (outside routeCommand, which swaps in a capture
+// device). Bruce's CLI reads its input and writes its replies through serialDevice, which is
+// USBserial -> Serial: the framed port. Code that reaches the CLI off the routed path (a script's
+// serial.cmd()/audio/badusb/subghz helpers during script_run, a module's headless error print,
+// tftLogger's mirror writer) would otherwise print raw text into the frame stream and, for commands
+// that wait for input (`storage write`, `*_from_buffer`, `storage ymodem`), consume the app's frames.
+// This device has no input and drops output.
+class CompanionNullSerialDevice : public SerialDevice {
+public:
+    size_t println(const String &) override { return 0; }
+    size_t println(size_t) override { return 0; }
+    size_t println(uint32_t) override { return 0; }
+    size_t println() override { return 0; }
+    size_t println(int, int) override { return 0; }
+    size_t print(int, int) override { return 0; }
+    size_t print(const String &) override { return 0; }
+    void vprintf(const char *, va_list) override {}
+    int read() override { return -1; }
+    size_t write(uint8_t *, size_t size) override { return size; }
+    void flush() override {}
+    int available() override { return 0; }
+    String readStringUntil(char) override { return String(); }
+};
+static CompanionNullSerialDevice g_nullSerialDevice;
+static SerialDevice *g_serialDeviceBeforeCompanion = nullptr;
+
+void companionClaimSerialDevice(bool claim) {
+    if (claim) {
+        g_serialDeviceBeforeCompanion = serialDevice;
+        serialDevice = &g_nullSerialDevice;
+    } else if (serialDevice == &g_nullSerialDevice) {
+        serialDevice = g_serialDeviceBeforeCompanion ? g_serialDeviceBeforeCompanion : &USBserial;
+        g_serialDeviceBeforeCompanion = nullptr;
+    }
+}
 
 static bool routeCommand(const String &cmd, String &out) {
     // Run the existing Bruce CLI with output captured, so the app can display the

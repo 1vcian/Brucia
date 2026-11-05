@@ -2,6 +2,7 @@
 #include "core/sd_functions.h"
 #include "helpers.h"
 #include "modules/bjs_interpreter/interpreter.h"
+#include <globals.h>
 
 static uint32_t jsCallback(cmd *c) {
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
@@ -28,6 +29,12 @@ static uint32_t jsCallback(cmd *c) {
         }
 
         char *txt = _readFileFromSerial(fileSize + 2);
+        // Brucia: companion mode has no console input, so the buffer is empty; do not start an
+        // interpreter task for an empty script (the app runs scripts with script_run).
+        if (g_companionActive && (txt == NULL || txt[0] == '\0')) {
+            free(txt);
+            return false;
+        }
         return run_bjs_script_headless(txt);
     }
 

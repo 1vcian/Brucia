@@ -20,6 +20,10 @@ void print_errorMessage(const char *msg, const char *stackTrace) {
     Serial.flush();
 
     delay(500);
+    // Brucia: companion script_run - no one at the device to press a key, so do not wait for one (a
+    // script error would otherwise keep the interpreter task, and every later script_run, blocked).
+    // A JS exception already reached the script_run output through js_log_func.
+    if (g_companionActive) return;
     while (!check(AnyKeyPress)) delay(50);
 }
 

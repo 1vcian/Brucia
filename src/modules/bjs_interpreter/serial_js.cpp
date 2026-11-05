@@ -55,6 +55,9 @@ JSValue native_serialPrintln(JSContext *ctx, JSValue *this_val, int argc, JSValu
 
 JSValue native_serialReadln(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     String line;
+    // Brucia: in companion mode (script_run) Serial carries the app's protocol frames; reading it
+    // here would consume them and desync the link. No console input exists then: return "" at once.
+    if (g_companionActive) return JS_NewString(ctx, "");
     int maxloops = 1000 * 10;
     if (argc > 0 && JS_IsNumber(ctx, argv[0])) {
         int t;

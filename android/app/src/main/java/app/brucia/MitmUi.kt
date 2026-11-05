@@ -1,5 +1,6 @@
 package app.brucia
 
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,10 +62,10 @@ private fun ArpSpoofCard(vm: app.brucia.wardrive.WardriveViewModel, connected: B
     val cs = MaterialTheme.colorScheme
     val active by vm.arpSpoofActive.collectAsState()
     val status by vm.arpSpoofStatus.collectAsState()
-    var ssid by remember { mutableStateOf("") }
+    var ssid by rememberSaveable { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
-    var target by remember { mutableStateOf("") }
-    var gw by remember { mutableStateOf("") }
+    var target by rememberSaveable { mutableStateOf("") }
+    var gw by rememberSaveable { mutableStateOf("") }
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(14.dp)) {
             Text("ARP spoof / NetCut (device)", fontWeight = FontWeight.SemiBold, color = cs.primary)
@@ -119,7 +120,7 @@ internal fun MitmScreen(vm: app.brucia.wardrive.WardriveViewModel, connected: Bo
     val error by MitmLog.error.collectAsState()
     val txns by MitmLog.txns.collectAsState()
 
-    var portText by remember { mutableStateOf(port.toString()) }
+    var portText by rememberSaveable { mutableStateOf(port.toString()) }
     var selected by remember { mutableStateOf<MitmTxn?>(null) }
 
     // The list state is remembered above the list/detail switch, so Back from a

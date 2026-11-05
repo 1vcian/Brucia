@@ -79,8 +79,11 @@ android {
     packaging {
         resources {
             // The three BouncyCastle jars each ship an identical multi-release OSGI
-            // manifest; keep the first and drop the duplicates.
+            // manifest (never read on Android); drop them.
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            // BouncyCastle 1.86 ships the same META-INF/LICENSE.md in each jar
+            // (byte-identical in bcprov/bcpkix/bcutil 1.86); keep one copy in the APK.
+            pickFirsts += "META-INF/LICENSE.md"
         }
     }
 }
@@ -103,14 +106,19 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
+    // kotlinx-serialization-core is not used by app code; savedstate/lifecycle bring 1.7.3.
+    // room-testing reads the schema JSON with 1.8 and the test APK runs on the app's classes
+    // (1.7.3 gives AbstractMethodError in MigrationTestHelper), so it is raised for every
+    // build type: release ships the same version the debug and instrumentation builds run.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1")
     implementation("com.github.mik3y:usb-serial-for-android:3.8.1")
     implementation("com.google.android.gms:play-services-location:21.4.0")
 
     // ZXing core: pure-Java QR encoder for the offline Wi-Fi QR generator in Utilities.
-    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.google.zxing:core:3.5.4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20240303")
+    testImplementation("org.json:json:20260814")
     // Instrumentation tests (emulator/device): ConnectionService lifecycle, Activity recreation.
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:rules:1.7.0")
@@ -122,10 +130,6 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.5")
     ksp("androidx.room:room-compiler:2.8.5")
     androidTestImplementation("androidx.room:room-testing:2.8.5")
-    // room-testing reads the schema JSON with kotlinx-serialization 1.8; the test APK runs on
-    // the app's classes, where lifecycle brings 1.7.3 (AbstractMethodError in
-    // MigrationTestHelper). Raised for the debug build only; release keeps 1.7.3.
-    debugImplementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1")
 
     // Map
     implementation("org.osmdroid:osmdroid-android:6.1.20")
@@ -133,6 +137,6 @@ dependencies {
     // BouncyCastle: X.509 certificate generation for the on-phone MITM proxy
     // (root CA + per-host leaf certs). jdk18on build, used directly without
     // registering the provider globally to avoid clashing with Android's "BC".
-    implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
-    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.86")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.86")
 }

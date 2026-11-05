@@ -361,6 +361,41 @@ and reply shape; everything else is "whatever the CLI prints".
 silent for more than 15s, and always on leaving companion mode, so the device
 never gets stuck dark if the app disconnects mid-session.
 
+### Console input and scripts in companion mode
+
+While companion mode is active the USB serial port carries only frames, and only the companion
+frame reader (`readFrame()`, `companionPollStop()`) reads it. There is no console input on the
+device in that state, and Brucia/Bruce commands and scripts do not read the app's frames
+(`tools/test_companion_serial_input.py`; third-party libraries are not scanned):
+
+- Bruce's CLI console `serialDevice` is replaced for the whole session by a device with no input
+  and no output (inside a routed `CMD`, by the capture device behind `ACK.d.out`, also without
+  input). The previous device (USB console, or the BLE API's) is restored on exit.
+- CLI commands that read their payload from the console (`storage write`, `ir tx_from_buffer`,
+  `subghz tx_from_buffer`, `badusb run_from_buffer`, `js run_from_buffer`,
+  `crypto encrypt_to_file`) see empty input at once and print `serial input is not available in
+  companion mode` into `ACK.d.out` (they used to wait 5 s); `js run_from_buffer` then fails
+  instead of starting an empty script. `storage ymodem`
+  fails at once without touching the target file. Upload files with `fs_upload_*`.
+
+`script_run <js source>` (not on LITE builds; ERR 501 there) runs a BruceJS script headless with
+a 15 s execution bound (20 s wall clock) and replies `ACK {ok, out}`, `out` being what the script
+printed with `print()`/`console.log()` (and any uncaught error), cut at 1800 characters; `ok:false`
+with `script timeout`, `interpreter busy`, `script too large` (over 6000 characters) or
+`failed to start interpreter`. Inside it:
+
+| Script API | In companion mode |
+|---|---|
+| `print()`, `console.log()` and errors | captured into `out` |
+| `serial.print()` / `serial.println()` | dropped (they write the USB console, which is the frame stream) |
+| `serial.readln([timeoutMs])` | returns `""` at once, without reading or flushing the port (outside companion mode it still waits up to the timeout for a line from the USB console) |
+| `serial.cmd(cmd)`, `audio.playFile()`, `audio.tone()`, `badusb.runFile()`, `subghz.transmitFile()` (CLI-backed helpers) | run the CLI command with no console: its text is dropped and console input reads as empty; the return value is the CLI result |
+| uncaught error | the device shows the error screen but does not wait for a key, so the interpreter ends and a later `script_run` is not left `interpreter busy` |
+| `keyboard()`, `dialog.*`, menus and other on-device prompts | still wait for a person at the device; the execution bound does not interrupt a native wait, so avoid them in scripts meant for `script_run` |
+
+Outside companion mode none of this applies: Bruce's console, `serial.readln` and the CLI behave
+as upstream.
+
 ### Capture artifact descriptor (`wifi_handshake` / `wifi_pmkid`, additive)
 
 Legacy capture ACKs only say `ok`/`out`, and the CLI directory listing has no completeness token, so

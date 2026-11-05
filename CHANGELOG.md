@@ -45,6 +45,35 @@ that offloads computation to the phone. Format loosely follows
   developer restriction enabled), the tool shows "Local network blocked by Android" with
   Retry instead of running a scan that can only time out. Responder is unaffected: the
   device, not the phone, answers on the LAN.
+- App libraries updated: BouncyCastle 1.78.1 -> 1.86 (MITM certificates; picks up the
+  upstream security fixes since 1.78.1, none of which were in the certificate-building code
+  the app uses), ZXing core 3.5.3 -> 3.5.4 (QR codes), and the release build now uses the same
+  kotlinx-serialization-core version as the debug and test builds (1.8.1; it was 1.7.3 in
+  release only). Release APK about 640 KB smaller. Test-only: org.json 20260814.
+- MITM: hosts with names longer than 64 characters keep working with BouncyCastle 1.86,
+  which refuses such a certificate common name (the host now goes only into the certificate's
+  alternative name when it does not fit), and a host name is no longer parsed as a
+  distinguished name.
+  Checked with JVM TLS handshake tests, not yet on a phone.
+- Wi-Fi QR generator: network names and passwords outside Latin-1 (for example Cyrillic or
+  Chinese) were encoded as question marks; they are now encoded as UTF-8. Codes for Latin-1
+  text are unchanged. Checked by decoding the generated codes in JVM tests, not yet with a
+  phone camera.
+- Text drawn directly on the screen background without its own color was black on the
+  near-black background (contrast 1.09:1): the Sub-GHz "Listen" and BLE "Scan" switch
+  labels, the Wardrive "Wardriving" label, the Wi-Fi monitor target network name, NFC
+  security finding titles and the Report preview lines. The theme now gives such text and
+  icons the regular light text color (17.1:1). Present since 0.1; checked with a JVM test
+  and screenshot tests, not yet on a phone.
+- Rotating, resizing or folding no longer loses tool state. A running Network Scan keeps
+  going (not restarted, not duplicated) and its results stay; a PCAP being parsed and its
+  packet list stay; the Files editor keeps unsaved edits; SSTV images decoded so
+  far, macro steps, the tone composer melody and the Wardrive "Found" order stay; typed
+  inputs and chosen options on most tools stay (frequencies, payloads, scripts, portal
+  HTML, durations, form fields). Remote control no longer shows "Start" with the mirror
+  still running after a rotation. Leaving a tool still stops and clears it as before.
+  Passwords and keys typed into forms are deliberately not kept. Checked with JVM tests and
+  on the API 36 emulator; not yet on a phone.
 
 ## [0.1.5] - 2026-11-05
 
@@ -55,6 +84,23 @@ that offloads computation to the phone. Format loosely follows
 - App targets Android 15 (SDK 35) and draws edge to edge; the bottom bar stays above
   the keyboard. AndroidX core, activity, lifecycle and Room updated (database schema
   unchanged).
+- Companion mode: nothing but the companion frame reader reads the USB serial port any more.
+  A script run from the app (`script_run`) that called `serial.readln()` used to read the
+  app's protocol frames and break the link; it now returns an empty string at once. Bruce's CLI
+  console (`serialDevice`) has no input and no output for the whole companion session, so a
+  script's `serial.cmd()` and the JS audio/BadUSB/Sub-GHz file helpers can no longer print into
+  or read from the frame stream; CLI commands that wait for console input (`storage write`,
+  `*_from_buffer`, `crypto encrypt_to_file`) answer at once instead of after 5 s, and
+  `storage ymodem` refuses without truncating its target file; a script error no longer waits
+  for a key press on the device, which left the interpreter (and every later `script_run`)
+  busy. Text a command routed through `CMD` prints from another task is no longer appended
+  to that command's reply. Outside companion mode Bruce behaves as before. What scripts can
+  do in companion mode is documented in proto/PROTOCOL.md. Host-tested
+  (`tools/test_companion_serial_input.py`); not yet checked on hardware.
+- All 17 `LAUNCHER_*` firmware builds measured against their 2,496 KiB app slot: 13 fit
+  (96.7-97.7%); the four Elecrow CrowPanel LAUNCHER builds compile but are over the 98% budget
+  (98.5-98.7%, 34-37 KB still free) and fail the build's size check. No change to them yet;
+  the options are in the maintenance backlog.
 - Firmware builds from a clean checkout now apply the bundled library fixes on the
   first build (the AAC decoder bounds fixes were previously skipped until a second
   build); the build stops if an expected library fix no longer applies.

@@ -63,4 +63,34 @@ class MitmCaTest {
         assertTrue(pem.startsWith("-----BEGIN CERTIFICATE-----"))
         assertTrue(pem.trimEnd().endsWith("-----END CERTIFICATE-----"))
     }
+
+    @Test
+    fun hostUpToSixtyFourCharactersIsTheCommonName() {
+        val ca = MitmCertFactory.generateCa()
+        val host = "h".repeat(55) + ".example" + "x" // 64 characters
+        assertEquals(MitmCertFactory.MAX_CN_LENGTH, host.length)
+        val leaf = MitmCertFactory.generateLeaf(host, ca)
+        assertEquals("CN=$host", leaf.cert.subjectX500Principal.name)
+    }
+
+    @Test
+    fun longerHostKeepsItsSanAndDropsTheCommonName() {
+        // BouncyCastle 1.85+ refuses a CN over 64 characters; DNS names may be up to 253.
+        val ca = MitmCertFactory.generateCa()
+        val host = "a".repeat(60) + "." + "b".repeat(60) + ".example.com"
+        val leaf = MitmCertFactory.generateLeaf(host, ca)
+        leaf.cert.verify(ca.cert.publicKey)
+        assertEquals("OU=Authorized testing only,O=Brucia", leaf.cert.subjectX500Principal.name)
+        val dns = leaf.cert.subjectAlternativeNames!!.single { (it[0] as Int) == 2 }
+        assertEquals(host, dns[1] as String)
+    }
+
+    @Test
+    fun hostIsALiteralCommonNameNotParsedAsADistinguishedName() {
+        // A CONNECT target is attacker-controlled text; DN separators must not add RDNs.
+        val subject = MitmCertFactory.leafSubject("evil.example,O=Trusted Bank+OU=x")
+        assertEquals(1, subject.rdNs.size)
+        assertEquals(1, subject.rdNs[0].size())
+        assertEquals("evil.example,O=Trusted Bank+OU=x", subject.rdNs[0].first.value.toString())
+    }
 }

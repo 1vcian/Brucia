@@ -25,7 +25,7 @@ ARTIFACTS = [
     ("org.jetbrains", "annotations", "13.0"),
     ("junit", "junit", "4.13.2"),
     ("org.hamcrest", "hamcrest-core", "1.3"),
-    ("org.json", "json", "20240303"),
+    ("org.json", "json", "20260814"),
 ]
 TESTS = [
     "ProtocolTest", "DeviceFilesTest", "FileListTest", "CapsTest", "CapsEvidenceTest", "AudioDspTest",

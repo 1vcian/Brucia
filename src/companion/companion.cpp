@@ -216,6 +216,7 @@ static void runCompanionUSB(bool headless) {
     resetFrameReader();
     diagNoteSession();
     muteNonSerialOutput(true); // stdout flushed through the old writer before the link turns framed
+    companionClaimSerialDevice(true); // CLI console (serialDevice): no input, no output from here
     g_companionActive = true;  // from here Serial is the framed protocol: mute module debug prints
     startCompanionStorage();
 
@@ -542,6 +543,7 @@ static void runCompanionUSB(bool headless) {
     stopCompanionBluetoothControls();
     companionRestoreOutputs(); // leaving companion mode: screen/LED back on
     muteNonSerialOutput(false); // before clearing the flag, so buffered stdout is dropped, not sent
+    companionClaimSerialDevice(false); // Bruce's console device back (USBserial, or BLE API's)
     g_companionActive = false;  // Serial is a normal console again
     if (serialcmdsTaskHandle) vTaskResume(serialcmdsTaskHandle);
 }

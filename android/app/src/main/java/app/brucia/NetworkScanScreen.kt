@@ -17,17 +17,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.brucia.netscan.NetworkScanViewModel
 import app.brucia.netscan.NetworkScanner
 import app.brucia.netscan.ScanHost
 import app.brucia.netscan.VulnHit
 import app.brucia.net.LocalNetworkAccess
 import app.brucia.net.LocalNetworkGateCard
 import app.brucia.net.rememberLocalNetworkGate
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.core.net.toUri
 import app.brucia.ui.BruciaButtonDefaults
 import app.brucia.ui.Button
+import app.brucia.ui.LeaveEffect
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
  * Phone-side network scanner ("nmap-lite"): discovers hosts on the local subnet, finds open ports +
@@ -42,39 +44,35 @@ internal fun NetworkScanScreen() {
 
     val base = remember { NetworkScanner.subnet24() }
     val localIp = remember { NetworkScanner.localIpv4()?.first }
-    val hosts = remember { mutableStateListOf<ScanHost>() }
-    var scanning by remember { mutableStateOf(false) }
-    var progress by remember { mutableIntStateOf(0) }
-    var total by remember { mutableIntStateOf(254) }
-    var job by remember { mutableStateOf<Job?>(null) }
+    // Results and the running scan live in an Activity-scoped ViewModel: a rotation, window resize
+    // or fold keeps them (and does not restart the scan); leaving the tool stops and clears it.
+    val session = viewModel<NetworkScanViewModel>().session
+    val state by session.state.collectAsState()
+    // The local network gate check runs before the scan starts; it belongs to this composition.
+    var checking by remember { mutableStateOf(false) }
 
-    DisposableEffect(Unit) { onDispose { job?.cancel() } }
+    LeaveEffect { session.reset() }
 
     NetworkScanContent(
         base = base,
         localIp = localIp,
-        hosts = hosts,
-        scanning = scanning,
-        progress = progress,
-        total = total,
+        hosts = state.hosts,
+        scanning = state.scanning,
+        progress = state.progress,
+        total = state.total,
         lanStatus = lan.status,
         onScan = {
-            if (base != null && job?.isActive != true) {
-                job = scope.launch {
-                    // Local network gate: permission (Android 17 + target 37) and an EPERM probe.
-                    if (!lan.checkBeforeStart(localIp)) return@launch
-                    hosts.clear(); progress = 0; scanning = true
+            if (base != null && !checking && !session.isRunning) {
+                checking = true
+                scope.launch {
                     try {
-                        NetworkScanner.scan(
-                            base = base,
-                            onProgress = { d, t -> progress = d; total = t },
-                            onHost = { h -> hosts.add(h); hosts.sortBy { ipKey(it.ip) } },
-                        )
-                    } finally { scanning = false }
+                        // Local network gate: permission (Android 17 + target 37) and an EPERM probe.
+                        if (lan.checkBeforeStart(localIp)) session.start(base)
+                    } finally { checking = false }
                 }
             }
         },
-        onStop = { job?.cancel(); scanning = false },
+        onStop = { session.stop() },
         onRequestLan = { lan.request() },
         onOpenLanSettings = { lan.openSettings() },
         onRetryLan = { scope.launch { lan.checkBeforeStart(localIp) } },
@@ -206,5 +204,3 @@ private fun VulnBadge(v: VulnHit, onOpen: (String) -> Unit) {
         Text(v.title, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
     }
 }
-
-private fun ipKey(ip: String): Int = ip.substringAfterLast('.').toIntOrNull() ?: 0

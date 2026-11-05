@@ -15,6 +15,96 @@ versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 4
 matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
 
+### Hardware run 2026-11-05 - batch 12 merge
+
+T-Embed CC1101 flashed from the Mac with the merged batch 12 firmware (dirty build on 401a94f6,
+libraries installed fresh), report hw-acceptance-20261105T172010651Z: 12/12 PASS with the
+serial device claimed for the companion session (caps, provenance, evidence, diag, ping
+200/200 median 3.01 ms p99 4.12 ms, malformed, fs list/read/upload 3072-byte chunk, streams
+clean, heap stable 102,639 B, diag counters match). Script and console-input items below
+still need the app.
+
+### Batch 12 (DEPS) - library updates, software only
+
+BouncyCastle 1.86, ZXing core 3.5.4, kotlinx-serialization-core 1.8.1 in release too,
+org.json 20260814 (test-only). JVM evidence: `QrCodesTest` 5 (generated QR decoded back
+with ZXing: escaped Wi-Fi payload, Cyrillic/CJK as UTF-8, Latin-1 bytes unchanged),
+`MitmTlsTest` 6 (in-memory TLS handshake against the MITM server context with hostname
+verification: DNS, 98-character host and IP SANs; wrong CA and wrong host refused; CA
+PKCS12 store round trip), `MitmCaTest` 7. `:app:testDebugUnitTest` 827/827 (117 suites),
+`lintDebug` 0 errors / 3 warnings, `verifyPaparazziDebug` pass, `tools/test_android_logic.py`
+182, `tools/test_*.py` 132 (2 skipped), `check_apk_identity.py` OK on debug and release.
+No emulator run in this batch: BruciaMigrationTest last passed with 1.8.1 in the debug build.
+Open phone checks:
+- [ ] MITM: CA export/install on a test phone, then an HTTPS request to a normal host and to a
+  host name longer than 64 characters is decrypted (BouncyCastle 1.86 certificates).
+- [ ] Wi-Fi QR with a Cyrillic or Chinese SSID: a phone camera joins the network; a Latin-1
+  SSID still works.
+- [ ] Donation QR codes still scan.
+
+### Batch 12 (UIFIX) - text contrast and state across rotation, software and emulator only
+
+Contrast: text and icons with no color of their own, drawn straight on the app background
+(Sub-GHz "Listen", BLE "Scan", Wardrive "Wardriving", Wi-Fi monitor target name, NFC
+finding titles, Report preview lines) were black on #0E0E10 (1.09:1); the theme now gives
+them onBackground #F3F1EF (17.12:1, WCAG AA needs 4.5:1). Rotation/resize: Network Scan
+(running or finished) and PCAP dissect live in Activity-scoped ViewModels; the Files editor,
+SSTV images, macro and tone composer steps, Wardrive found order and IR parsed buttons are
+retained; 106 tool inputs plus the Files path are saved; Remote "running" comes from the
+ViewModel. Leaving a tool still stops and clears it. Evidence: `:app:testDebugUnitTest`
+834/834 (120 suites; new `NetworkScanSessionTest` 7, `PcapDissectSessionTest` 4,
+`RetainedValuesTest` 4, `ThemeContrastTest` 4, `ContentColorScreenshotTest` 2), `lintDebug`
+0 errors / 7 warnings (same set), `verifyPaparazziDebug` pass, `assembleDebug` pass,
+`tools/test_android_logic.py` 182. Paparazzi: all 25 older snapshots re-recorded
+byte-identical; the 2 new ones (no Surface, as AppRoot; default and magenta device accent)
+reviewed, and they fail with the theme change reverted. API 36.1 emulator (phone, portrait
+<-> landscape via user_rotation, Activity recreated): Network Scan started, rotated at 7/254
+and back at 128/254, kept running to "Done: 2 hosts" (10.0.2.2, 10.0.2.3) with no restart;
+rotated after the end, results kept; Back and reopen -> empty as before. Sub-GHz "Listen"
+measured 17.12:1 on screenshots in system light and dark mode (the app has one dark
+scheme; it ignores the system mode) and in landscape, 1.09:1 on the batch 11 tablet
+screenshot. Macros: name, command and an added step kept across a rotation. Not covered:
+a connected device (accent color, Remote, Files editor on device files, SSTV with audio),
+PCAP open across a rotation (needs a file on the emulator), a real phone or tablet.
+
+- [ ] Phone, dark room brightness: Sub-GHz "Listen", BLE "Scan" and Wardrive "Wardriving"
+      labels readable; same with a device connected whose theme color is not orange.
+- [ ] Phone: start Network Scan on Wi-Fi, rotate twice mid-scan: progress continues (does
+      not restart at 0), one result list; rotate after "Done": hosts still listed; leave the
+      tool and return: empty.
+- [ ] Phone: open a .pcap in PCAP dissect, rotate while "Parsing..." and after: packet list
+      kept.
+- [ ] Phone with device: Files -> open a text file, edit, rotate: edits kept; Save to device
+      writes the edited text. Remote: Start, rotate: Stop still enabled and mirror running.
+- [ ] Phone: SSTV receive with a transmission in progress, rotate: images decoded so far
+      kept (the mic stream restarts; a skewed line around the rotation is possible).
+
+### Batch 12 (FWJS) - companion serial input, LAUNCHER flash budget; software only
+
+Nothing but the companion frame reader reads the USB serial port in companion mode: JS
+`serial.readln` returns "" at once, Bruce's CLI console (`serialDevice`) has no input and no
+output for the whole session, console-input CLI commands and `storage ymodem` answer at once, the
+JS error screen does not wait for a key (see proto/PROTOCOL.md, "Console input and scripts in
+companion mode"). Evidence, host-side only: new `test_companion_serial_input.py` (8 tests; every
+direct `Serial` read in src/include/lib is the frame reader or companion-guarded), its comment
+stripper also used by `test_companion_print_hygiene.py`; `unittest discover` 140 tests and all
+32 `tools/test_*.py` pass. Firmware builds SUCCESS with the change: T-Embed CC1101 static RAM
+156,024 B, app 4,313,744 B / 92.71%; Cardputer 158,232 B, 4,320,368 B / 84.52%; AAC noise
+bounds pass on both. All 17 `LAUNCHER_*` envs compile; 4 elecrow envs are above the 98% budget
+(table in the backlog). Nothing hardware-verified.
+
+- [ ] T-Embed, app connected (companion mode), Scripts tool: run
+      `print("start"); var l = serial.readln(3000); print("got[" + l + "]");` - the reply is
+      `start` / `got[]` at once (not after 3 s), the link stays up (ping keeps answering, the next
+      command works) and Diagnostics shows no new malformed frames or noise bytes.
+- [ ] Same session: a script with `serial.cmd("storage write /x.txt 10")` returns within a second
+      without breaking the link, `/x.txt` is not created; a script with a syntax error replies with
+      the error text and a second `script_run` right after is not `interpreter busy`.
+- [ ] Same session, app console: `storage ymodem /y.bin` answers at once with "not available in
+      companion mode" and an existing `/y.bin` is unchanged.
+- [ ] Leave companion mode, open a serial terminal: `js run_from_buffer 20` then paste a script and
+      `EOF` still runs it, and a script calling `serial.readln()` reads a typed line as before.
+
 ### Batch 11 (UI-ADAPT) - wide-window layout and local network gate, software and emulator only
 
 Wide windows: home grid columns follow the grid width (tiles >= 160dp, 2-6 columns),

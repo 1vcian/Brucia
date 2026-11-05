@@ -224,6 +224,13 @@ uint32_t ymodemReceiveCallback(cmd *c) {
     if (filepath.length() == 0) { return false; }
     if (!filepath.startsWith("/")) filepath = "/" + filepath;
 
+    // Brucia: in companion mode there is no console input (serialDevice has none and the app's frames
+    // own Serial), so the transfer could only time out, after truncating the target file. Fail at once.
+    if (g_companionActive) {
+        serialDevice->println("ymodem: not available in companion mode (the app uploads with fs_upload)");
+        return false;
+    }
+
     FS *fs;
     if (!getFsStorage(fs)) { return false; }
 

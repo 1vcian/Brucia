@@ -99,7 +99,7 @@ al momento dell'avvio: questo file non assume opzioni CLI o versioni disponibili
 Il coordinatore prepara un `run_checks` che compila esclusivamente i file del task
 e avvia i relativi test. Per i primi tre task bastano Kotlin/JVM e JUnit; il terzo
 richiede anche org.json. Usare le versioni già verificate: Kotlin 2.4.21,
-JUnit 4.13.2 e org.json 20240303, con le dipendenze pubbliche del compilatore.
+JUnit 4.13.2 e org.json 20260814, con le dipendenze pubbliche del compilatore.
 Non consegnare `tools/check_android_changes.py` o un APK come harness: danno accesso
 a dipendenze/output dell'intera applicazione e non sono necessari ai worker.
 

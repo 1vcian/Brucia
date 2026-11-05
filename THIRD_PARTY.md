@@ -240,8 +240,11 @@ Third-party libraries used by the app (each under its own license):
   mik3y and contributors (MIT).
 - **osmdroid** (`org.osmdroid:osmdroid-android`) — offline map rendering for wardrive (Apache-2.0).
 - **ZXing core** (`com.google.zxing:core`) — QR generation (Apache-2.0).
-- **Bouncy Castle** (`org.bouncycastle:bcpkix-jdk18on`, `bcprov-jdk18on`) — CA / TLS for the on-phone
-  MITM proxy (Bouncy Castle License, an MIT-style license).
+- **Bouncy Castle** (`org.bouncycastle:bcpkix-jdk18on`, `bcprov-jdk18on`, and `bcutil-jdk18on` pulled in
+  by bcpkix) — CA / TLS for the on-phone MITM proxy (Bouncy Castle License, an MIT-style license; the
+  APK carries its text as `META-INF/LICENSE.md`).
+- **kotlinx.serialization core** (`org.jetbrains.kotlinx:kotlinx-serialization-core`) — not used by app
+  code; required by AndroidX savedstate/lifecycle and Room's test helper, version pinned (Apache-2.0).
 - **Google Play services - Location** (`com.google.android.gms:play-services-location`) — fused GPS;
   Google's proprietary SDK (Android Software Development Kit License). Not bundled in source; linked
   at build time.

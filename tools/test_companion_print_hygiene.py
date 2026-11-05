@@ -11,6 +11,7 @@ lands between (or, from another task, inside) frames. The first hardware run los
     the app routed through `CMD` (when printed by it on the companion task) and dropped otherwise.
 Bare printf/stdout, esp_log and (ESP32-S3) ROM printf are muted in companion.cpp; see
 test_companion_mutes_non_serial_output.
+The input side (nothing but the frame reader reads Serial) is tools/test_companion_serial_input.py.
 
 This scans the module files whose functions src/companion/*.cpp calls (radio/NFC/IR/BLE/FM/NRF24,
 speaker/mic, Ethernet, LoRa, Evil Portal/karma, Wi-Fi join, brucegotchi, scripts), every Bruce CLI
@@ -128,10 +129,13 @@ FUNC = re.compile(r"^[A-Za-z_][\w:<>\*&\s,]*?\b([A-Za-z_]\w*(?:::~?\w+)?)\s*\(([
 GUARD = re.compile(r"!\s*g_companionActive\b")
 
 
+_TOKENS = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'', re.S)
+
+
 def strip_comments(s):
-    """Comments blanked to spaces, keeping offsets and line numbers."""
-    s = re.sub(r"/\*.*?\*/", lambda m: re.sub(r"[^\n]", " ", m.group()), s, flags=re.S)
-    return re.sub(r"//[^\n]*", lambda m: " " * len(m.group()), s)
+    """Comments blanked to spaces, keeping offsets and line numbers. One left-to-right pass, so a
+    `/*` inside a line comment (`stop/*_stop`) or a string does not open a block comment."""
+    return _TOKENS.sub(lambda m: re.sub(r"[^\n]", " ", m.group()) if m.group().startswith("/") else m.group(), s)
 
 
 def debug_lines(raw):

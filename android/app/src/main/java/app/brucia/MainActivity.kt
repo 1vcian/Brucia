@@ -1,5 +1,6 @@
 package app.brucia
 
+import app.brucia.ui.rememberRetained
 import app.brucia.R
 import android.Manifest
 import android.app.PendingIntent
@@ -559,8 +560,8 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit, onGoCrack
     val deauthActive by vm.deauthActive.collectAsState()
     val deauthTarget by vm.deauthTarget.collectAsState()
     val context = LocalContext.current
-    var view by remember { mutableStateOf(View.LIST) }
-    var sortMode by remember { mutableStateOf(ApSort.STABLE) }
+    var view by rememberSaveable { mutableStateOf(View.LIST) }
+    var sortMode by rememberSaveable { mutableStateOf(ApSort.STABLE) }
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
 
@@ -568,7 +569,7 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit, onGoCrack
     // never reorders under the user (re-sightings update timeMillis in the DB but must not move rows -
     // otherwise an expanded/opened row would jump to a different network). Explicit sorts are applied
     // to a copy for display only.
-    val foundOrder = remember { mutableStateListOf<String>() }
+    val foundOrder = rememberRetained { mutableStateListOf<String>() }
     LaunchedEffect(list) { for (ap in list) if (ap.bssid !in foundOrder) foundOrder.add(ap.bssid) }
     val displayList = remember(list, sortMode, foundOrder.size) {
         when (sortMode) {
@@ -620,21 +621,8 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit, onGoCrack
         }
         Spacer(Modifier.height(12.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text("Wardriving", fontWeight = FontWeight.SemiBold)
-                Text(
-                    "wifi.ap stream",
-                    color = cs.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Switch(checked = wardriving, enabled = connected, onCheckedChange = { vm.setWardriving(it) })
-        }
+        StreamToggleRow("Wardriving", "wifi.ap stream", checked = wardriving, enabled = connected,
+            onCheckedChange = { vm.setWardriving(it) })
         Spacer(Modifier.height(12.dp))
 
         Row(
@@ -834,8 +822,8 @@ private fun beaconSsidVariants(bases: List<String>, count: Int): List<String> {
 private fun BeaconSpamCard(vm: WardriveViewModel, connected: Boolean) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    var ssidText by remember { mutableStateOf(defaultBeaconSsids.joinToString("\n")) }
-    var copiesText by remember { mutableStateOf("128") }
+    var ssidText by rememberSaveable { mutableStateOf(defaultBeaconSsids.joinToString("\n")) }
+    var copiesText by rememberSaveable { mutableStateOf("128") }
     val active by vm.beaconActive.collectAsState()
     val status by vm.beaconStatus.collectAsState()
 
@@ -1228,8 +1216,33 @@ private fun StatsView(stats: WardriveStats, aps: List<ApObservation>, modifier: 
     }
 }
 
+/**
+ * A device stream on/off row drawn straight on the screen background (Wardriving, Sub-GHz Listen,
+ * BLE Scan). The title takes the theme's default content color (onBackground, see BruciaTheme).
+ */
 @Composable
-private fun FindingRow(f: Finding) {
+internal fun StreamToggleRow(
+    title: String,
+    stream: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(stream, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+internal fun FindingRow(f: Finding) {
     val cs = MaterialTheme.colorScheme
     val color = when (f.severity) {
         "high" -> cs.error
@@ -1929,7 +1942,7 @@ internal fun HomeDashboard(
                 }
                 // Search across every tool (there are ~45) - type to jump straight to one instead of
                 // hunting through categories.
-                var query by remember { mutableStateOf("") }
+                var query by rememberSaveable { mutableStateOf("") }
                 OutlinedTextField(
                     value = query, onValueChange = { query = it }, singleLine = true,
                     label = { Text("Search tools") },
@@ -2373,13 +2386,21 @@ private fun HelpDialog(onDismiss: () -> Unit) {
     }
 }
 
-/** State for the in-app text/HTML editor opened from the file browser or a template. */
-private data class EditorState(
+/**
+ * State for the in-app text/HTML editor opened from the file browser or a template. The edits
+ * live here (not in the editor composable) so the retained editor keeps them across a rotation.
+ */
+private class EditorState(
     val fileName: String,
     /** Device path this came from (enables a sensible "Save to device" default); null for a new/template file. */
     val devicePath: String?,
-    val initialText: String,
-)
+    initialText: String,
+) {
+    var text by mutableStateOf(initialText)
+    var viewMode by mutableStateOf(false)
+    /** "Save to device" target as edited; null until the user changes the default. */
+    var saveTarget by mutableStateOf<String?>(null)
+}
 
 @Composable
 private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
@@ -2387,7 +2408,7 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    var path by remember { mutableStateOf("/") }
+    var path by rememberSaveable { mutableStateOf("/") }
     val entries by vm.deviceEntries.collectAsState()
     val loading by vm.deviceListing.collectAsState()
     fun refresh() { if (connected) vm.listDir(path) }
@@ -2395,12 +2416,15 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
     // Per-file action sheet, the in-app editor overlay, and the new-file/folder/template dialog.
     var selected by remember { mutableStateOf<app.brucia.files.FileEntry?>(null) }
-    var editor by remember { mutableStateOf<EditorState?>(null) }
+    // Retained (not saved: it holds the whole file): an open editor and its unsaved edits survive
+    // a rotation or resize.
+    var editor by rememberRetained { mutableStateOf<EditorState?>(null) }
     var showNew by remember { mutableStateOf(false) }
 
     // SAF: let the user choose where a pulled device file is saved. The source device path is held
     // while the system document picker is up.
-    var pullPendingPath by remember { mutableStateOf<String?>(null) }
+    // Saveable: the picker is another Activity, and ours may be recreated before the result comes back.
+    var pullPendingPath by rememberSaveable { mutableStateOf<String?>(null) }
     val pullDestLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
     ) { uri ->
@@ -2607,12 +2631,10 @@ private fun FileEditorScreen(vm: WardriveViewModel, state: EditorState, currentP
     val context = LocalContext.current
     val status by vm.status.collectAsState()
     val connected = status == "Connected"
-    var text by remember(state) { mutableStateOf(state.initialText) }
-    var viewMode by remember(state) { mutableStateOf(false) }
+    var text by state::text
+    var viewMode by state::viewMode
     val isHtml = app.brucia.files.FileKinds.isHtml(state.fileName)
-    var devicePath by remember(state) {
-        mutableStateOf(state.devicePath ?: (currentPath.trimEnd('/') + "/" + state.fileName))
-    }
+    val devicePath = state.saveTarget ?: state.devicePath ?: (currentPath.trimEnd('/') + "/" + state.fileName)
 
     val saveToPhone = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
@@ -2669,7 +2691,7 @@ private fun FileEditorScreen(vm: WardriveViewModel, state: EditorState, currentP
         }
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
-            value = devicePath, onValueChange = { devicePath = it },
+            value = devicePath, onValueChange = { state.saveTarget = it },
             label = { Text("Device path") }, singleLine = true,
             textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
             modifier = Modifier.fillMaxWidth(),
@@ -2956,9 +2978,9 @@ private fun WifiMonitorScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val monitoring by vm.monitoring.collectAsState()
     val aps by vm.aps.collectAsState()
 
-    var channel by remember { mutableStateOf<Int?>(1) }
-    var targetBssid by remember { mutableStateOf<String?>(null) }
-    var targetSsid by remember { mutableStateOf("") }
+    var channel by rememberSaveable { mutableStateOf<Int?>(1) }
+    var targetBssid by rememberSaveable { mutableStateOf<String?>(null) }
+    var targetSsid by rememberSaveable { mutableStateOf("") }
     var psk by remember { mutableStateOf("") }
     var pickAp by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf<Int?>(null) }
@@ -3198,7 +3220,8 @@ private fun RemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
     val frame by vm.remoteFrame.collectAsState()
-    var running by remember { mutableStateOf(false) }
+    // From the ViewModel: survives rotation/resize with the session it describes.
+    val running by vm.remoteRunning.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -3220,8 +3243,8 @@ private fun RemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         )
         Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(enabled = connected && !running, modifier = Modifier.weight(1f), onClick = { vm.startRemote(); running = true }) { Text("Start") }
-            OutlinedButton(enabled = running, modifier = Modifier.weight(1f), onClick = { vm.stopRemote(); running = false }) { Text("Stop") }
+            Button(enabled = connected && !running, modifier = Modifier.weight(1f), onClick = { vm.startRemote() }) { Text("Start") }
+            OutlinedButton(enabled = running, modifier = Modifier.weight(1f), onClick = { vm.stopRemote() }) { Text("Stop") }
         }
         Spacer(Modifier.height(12.dp))
         // Mirrored device screen.
@@ -3304,14 +3327,14 @@ private fun IrScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val devices = remember { IrCatalog.load(context) }
-    var buttons by remember { mutableStateOf(IrParser.samples) }
-    var paste by remember { mutableStateOf("") }
-    var browsing by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-    var selCategory by remember { mutableStateOf<String?>(null) }
-    var selBrand by remember { mutableStateOf<String?>(null) }
+    var buttons by rememberRetained { mutableStateOf(IrParser.samples) }
+    var paste by rememberSaveable { mutableStateOf("") }
+    var browsing by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var selCategory by rememberSaveable { mutableStateOf<String?>(null) }
+    var selBrand by rememberSaveable { mutableStateOf<String?>(null) }
     // 0 = Remotes (on-screen telecomandini), 1 = Catalog (raw button list), 2 = Raw / device actions.
-    var irTab by remember { mutableIntStateOf(0) }
+    var irTab by rememberSaveable { mutableIntStateOf(0) }
     // The device whose on-screen remote is open; null shows the picker (quick TVs + browse).
     var selectedRemote by remember { mutableStateOf<CatalogDevice?>(null) }
     var remoteBrowse by remember { mutableStateOf(false) }
@@ -3845,7 +3868,7 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
     // A LITE firmware compiles ir_tvbgone / ir_jammer out (features.ir_cmds:false); receive and raw
     // replay fall back to Bruce's own `ir` CLI in the ViewModel, so only these two are disabled.
     val irCmdsOmitted = device?.features?.omits(app.brucia.wardrive.DeviceFeatures.IR_CMDS) == true
-    var region by remember { mutableStateOf("na") }
+    var region by rememberSaveable { mutableStateOf("na") }
     DisposableEffect(Unit) { onDispose { vm.stopIrJammer(silent = true) } }
 
     Card(
@@ -3971,8 +3994,8 @@ private fun SubGhzBruteforceCard(vm: WardriveViewModel, connected: Boolean, freq
     val cs = MaterialTheme.colorScheme
     val active by vm.subBruteActive.collectAsState()
     val status by vm.subBruteStatus.collectAsState()
-    var proto by remember { mutableIntStateOf(0) }
-    var secs by remember { mutableStateOf("20") }
+    var proto by rememberSaveable { mutableIntStateOf(0) }
+    var secs by rememberSaveable { mutableStateOf("20") }
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(14.dp)) {
             Text("Brute force", fontWeight = FontWeight.SemiBold, color = cs.primary)
@@ -4041,8 +4064,8 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     // Follows the real SUB outcome: an ERR (e.g. 503 receiver init failed) or timeout turns it off.
     val listening by vm.subghzListening.collectAsState()
     val listenError by vm.subghzRawError.collectAsState()
-    var freqHz by remember { mutableLongStateOf(433_920_000L) }
-    var craftHex by remember { mutableStateOf("") }
+    var freqHz by rememberSaveable { mutableLongStateOf(433_920_000L) }
+    var craftHex by rememberSaveable { mutableStateOf("") }
     val savedRf by vm.savedRf.collectAsState()
     val wave by vm.rfWave.collectAsState()
     val waveCompleteness by vm.rfWaveCompleteness.collectAsState()
@@ -4086,21 +4109,8 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             Text(if (connected) "Reconnect over USB" else "Connect over USB")
         }
         Spacer(Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text("Listen", fontWeight = FontWeight.SemiBold)
-                Text("subghz.raw stream", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(
-                checked = listening,
-                enabled = connected,
-                onCheckedChange = { vm.setSubghz(it) },
-            )
-        }
+        StreamToggleRow("Listen", "subghz.raw stream", checked = listening, enabled = connected,
+            onCheckedChange = { vm.setSubghz(it) })
         if (listenError.isNotEmpty() && !listening) {
             Text("Listen failed: $listenError", color = cs.error, style = MaterialTheme.typography.bodySmall)
         }
@@ -4177,8 +4187,8 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
         // De Bruijn brute force: open every fixed N-bit OOK code in minimal time.
-        var dbBits by remember { mutableIntStateOf(12) }
-        var dbTe by remember { mutableIntStateOf(400) }
+        var dbBits by rememberSaveable { mutableIntStateOf(12) }
+        var dbTe by rememberSaveable { mutableIntStateOf(400) }
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text("De Bruijn brute force", fontWeight = FontWeight.SemiBold, color = cs.primary)
@@ -4504,7 +4514,7 @@ private fun ConsoleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    var cmd by remember { mutableStateOf("") }
+    var cmd by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
     LaunchedEffect(log.size) { if (log.isNotEmpty()) listState.animateScrollToItem(log.size - 1) }
 
@@ -4536,7 +4546,7 @@ private fun ConsoleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             Spacer(Modifier.height(8.dp))
         }
         // Command palette: every device CLI group, so all the device's choices are here.
-        var group by remember { mutableIntStateOf(0) }
+        var group by rememberSaveable { mutableIntStateOf(0) }
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -4626,7 +4636,7 @@ private fun ScriptsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
     val output by vm.scriptOutput.collectAsState()
-    var src by remember { mutableStateOf(scriptExamples[0].second) }
+    var src by rememberSaveable { mutableStateOf(scriptExamples[0].second) }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -4723,11 +4733,11 @@ private fun UtilitiesScreen() {
         Spacer(Modifier.height(8.dp))
 
         UtilCard("Password generator") {
-            var length by remember { mutableStateOf("16") }
-            var lower by remember { mutableStateOf(true) }
-            var upper by remember { mutableStateOf(true) }
-            var digits by remember { mutableStateOf(true) }
-            var symbols by remember { mutableStateOf(false) }
+            var length by rememberSaveable { mutableStateOf("16") }
+            var lower by rememberSaveable { mutableStateOf(true) }
+            var upper by rememberSaveable { mutableStateOf(true) }
+            var digits by rememberSaveable { mutableStateOf(true) }
+            var symbols by rememberSaveable { mutableStateOf(false) }
             var result by remember { mutableStateOf("") }
             OutlinedTextField(
                 value = length,
@@ -4758,7 +4768,7 @@ private fun UtilitiesScreen() {
         }
 
         UtilCard("Hash calculator") {
-            var input by remember { mutableStateOf("") }
+            var input by rememberSaveable { mutableStateOf("") }
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
@@ -4780,8 +4790,8 @@ private fun UtilitiesScreen() {
         }
 
         UtilCard("Base64 encode / decode") {
-            var input by remember { mutableStateOf("") }
-            var output by remember { mutableStateOf("") }
+            var input by rememberSaveable { mutableStateOf("") }
+            var output by rememberSaveable { mutableStateOf("") }
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
@@ -4805,8 +4815,8 @@ private fun UtilitiesScreen() {
         }
 
         UtilCard("MAC vendor lookup") {
-            var mac by remember { mutableStateOf("") }
-            var vendor by remember { mutableStateOf("") }
+            var mac by rememberSaveable { mutableStateOf("") }
+            var vendor by rememberSaveable { mutableStateOf("") }
             OutlinedTextField(
                 value = mac,
                 onValueChange = { mac = it },
@@ -4835,9 +4845,9 @@ private fun UtilitiesScreen() {
         }
 
         UtilCard("Wi-Fi QR generator") {
-            var ssid by remember { mutableStateOf("") }
+            var ssid by rememberSaveable { mutableStateOf("") }
             var pass by remember { mutableStateOf("") }
-            var auth by remember { mutableStateOf("WPA") }
+            var auth by rememberSaveable { mutableStateOf("WPA") }
             var qr by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
             var payload by remember { mutableStateOf("") }
             OutlinedTextField(value = ssid, onValueChange = { ssid = it }, label = { Text("SSID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -4935,12 +4945,12 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val speakerFile by vm.speakerFilePlaying.collectAsState()
     val micStatus by vm.micStatus.collectAsState()
     val espnowStatus by vm.espnowStatus.collectAsState()
-    var hex by remember { mutableStateOf("") }
-    var toneFreq by remember { mutableStateOf("1000") }
-    var toneMs by remember { mutableStateOf("500") }
-    var playPath by remember { mutableStateOf("") }
-    var recSecs by remember { mutableStateOf("5") }
-    var espnowMsg by remember { mutableStateOf("") }
+    var hex by rememberSaveable { mutableStateOf("") }
+    var toneFreq by rememberSaveable { mutableStateOf("1000") }
+    var toneMs by rememberSaveable { mutableStateOf("500") }
+    var playPath by rememberSaveable { mutableStateOf("") }
+    var recSecs by rememberSaveable { mutableStateOf("5") }
+    var espnowMsg by rememberSaveable { mutableStateOf("") }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -5169,7 +5179,7 @@ private fun BleHidScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val hid by vm.bleHidStatus.collectAsState()
     val connected = status == "Connected"
-    var text by remember { mutableStateOf("") }
+    var text by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(connected) { if (connected) vm.bleHidRefresh() }
     val on = hid == "connected" || hid == "advertising"
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -5234,7 +5244,7 @@ private fun ResponderScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val rStatus by vm.responderStatus.collectAsState()
     val connected = status == "Connected"
     val durations = listOf(30, 60, 120, 300)
-    var secs by remember { mutableIntStateOf(60) }
+    var secs by rememberSaveable { mutableIntStateOf(60) }
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Image(painter = painterResource(R.drawable.ic_flame), colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(cs.primary), contentDescription = null, modifier = Modifier.size(26.dp))
@@ -5292,7 +5302,7 @@ private fun KarmaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val kStatus by vm.karmaStatus.collectAsState()
     val connected = status == "Connected"
     val durations = listOf(30, 60, 120, 300)
-    var secs by remember { mutableIntStateOf(60) }
+    var secs by rememberSaveable { mutableIntStateOf(60) }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
@@ -5354,7 +5364,7 @@ private fun BrucegotchiScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val gStatus by vm.brucegotchiStatus.collectAsState()
     val connected = status == "Connected"
     val durations = listOf(30, 60, 120, 300)
-    var secs by remember { mutableIntStateOf(60) }
+    var secs by rememberSaveable { mutableIntStateOf(60) }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
@@ -5430,7 +5440,7 @@ private fun WifiJoinScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val joinStatus by vm.wifiJoinStatus.collectAsState()
     val connected = status == "Connected"
-    var ssid by remember { mutableStateOf("") }
+    var ssid by rememberSaveable { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
     LaunchedEffect(connected) { if (connected) vm.wifiStatus() }
     Column(
@@ -5502,7 +5512,7 @@ private fun MacScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val wifiMac by vm.wifiMac.collectAsState()
     val connected = status == "Connected"
-    var macField by remember { mutableStateOf("") }
+    var macField by rememberSaveable { mutableStateOf("") }
     // Pull the current MAC once when the device is connected.
     LaunchedEffect(connected) { if (connected) vm.getWifiMac() }
     Column(
@@ -5677,7 +5687,7 @@ private fun EspnowScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val espnowStatus by vm.espnowStatus.collectAsState()
     val connected = status == "Connected"
-    var espnowMsg by remember { mutableStateOf("") }
+    var espnowMsg by rememberSaveable { mutableStateOf("") }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
@@ -5805,15 +5815,15 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    var analyze by remember { mutableStateOf(false) }
-    var ndefUrl by remember { mutableStateOf("") }
+    var analyze by rememberSaveable { mutableStateOf(false) }
+    var ndefUrl by rememberSaveable { mutableStateOf("") }
     val mifare by vm.mifare.collectAsState()
     val mifareUserKeys by vm.mifareUserKeys.collectAsState()
     val ndefStatus by vm.nfcNdefStatus.collectAsState()
     val emvStatus by vm.nfcEmvStatus.collectAsState()
     val uidStatus by vm.nfcUidStatus.collectAsState()
     val advStatus by vm.nfcAdvStatus.collectAsState()
-    var uidHex by remember { mutableStateOf("") }
+    var uidHex by rememberSaveable { mutableStateOf("") }
     val keyImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) { vm.importMifareKeys(uri); Toast.makeText(context, "Importing keys...", Toast.LENGTH_SHORT).show() }
     }
@@ -6114,8 +6124,8 @@ private fun NfcNdefPushCard(
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val types = listOf("url", "text", "contact")
-    var type by remember { mutableStateOf("url") }
-    var payload by remember { mutableStateOf("") }
+    var type by rememberSaveable { mutableStateOf("url") }
+    var payload by rememberSaveable { mutableStateOf("") }
     val label = when (type) {
         "url" -> "URL (e.g. https://1vcian.me)"
         "text" -> "Text"
@@ -6246,7 +6256,7 @@ private fun BadUsbScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 private fun BleMediaCard(vm: WardriveViewModel, connected: Boolean) {
     val cs = MaterialTheme.colorScheme
     val status by vm.bleMediaStatus.collectAsState()
-    var mac by remember { mutableStateOf("") }
+    var mac by rememberSaveable { mutableStateOf("") }
     Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(14.dp)) {
             Text("Media control hijack", fontWeight = FontWeight.SemiBold, color = cs.primary)
@@ -6267,7 +6277,7 @@ private fun BleIbeaconCard(vm: WardriveViewModel, connected: Boolean) {
     val cs = MaterialTheme.colorScheme
     val active by vm.ibeaconActive.collectAsState()
     val status by vm.ibeaconStatus.collectAsState()
-    var uuid by remember { mutableStateOf("") }
+    var uuid by rememberSaveable { mutableStateOf("") }
     Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(14.dp)) {
             Text("iBeacon", fontWeight = FontWeight.SemiBold, color = cs.primary)
@@ -6326,13 +6336,8 @@ private fun BleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             }
         }
         item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("Scan", fontWeight = FontWeight.SemiBold)
-                    Text("ble.scan stream", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                }
-                Switch(checked = scanning, enabled = connected, onCheckedChange = { scanning = it; vm.setBleScan(it) })
-            }
+            StreamToggleRow("Scan", "ble.scan stream", checked = scanning, enabled = connected,
+                onCheckedChange = { scanning = it; vm.setBleScan(it) })
         }
         // BLE spam (Apple ProximityPair popups) - authorized testing only. Continuous, abortable:
         // Start launches the short-burst loop, Stop ends it (shared BlePlatformSpamCard).
@@ -6502,7 +6507,7 @@ private fun BadBleSection(vm: WardriveViewModel, connected: Boolean) {
     val context = LocalContext.current
     val scripts = remember { DuckyLibrary.load(context) }
     val status by vm.badbleStatus.collectAsState()
-    var script by remember { mutableStateOf("") }
+    var script by rememberSaveable { mutableStateOf("") }
     var pickerOpen by remember { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -6684,7 +6689,7 @@ private fun BlePlatformSpamCard(
 ) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    var copiesText by remember { mutableStateOf(DEFAULT_SPAM_COPIES.toString()) }
+    var copiesText by rememberSaveable { mutableStateOf(DEFAULT_SPAM_COPIES.toString()) }
     Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold, color = cs.primary)
@@ -6744,9 +6749,9 @@ private fun Nrf24Screen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val mjRunning by vm.nrf24MjRunning.collectAsState()
     val mjStatus by vm.nrf24MjStatus.collectAsState()
     val mjDevices by vm.nrf24MjDevices.collectAsState()
-    var jammerSecsText by remember { mutableStateOf("10") }
-    var mjSecsText by remember { mutableStateOf("10") }
-    var mjText by remember { mutableStateOf("") }
+    var jammerSecsText by rememberSaveable { mutableStateOf("10") }
+    var mjSecsText by rememberSaveable { mutableStateOf("10") }
+    var mjText by rememberSaveable { mutableStateOf("") }
     // Clear the local run flags when leaving the tab.
     DisposableEffect(Unit) { onDispose { vm.stopNrf24Scan(); vm.stopNrf24Sniff(); vm.stopNrf24Jammer(); vm.stopNrf24MouseJack() } }
 
@@ -7016,12 +7021,12 @@ private fun LoRaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val packets by vm.loraPackets.collectAsState()
     val loraStatus by vm.loraStatus.collectAsState()
     val receiving by vm.loraReceiving.collectAsState()
-    var freqText by remember { mutableStateOf("868.0") }
-    var bwText by remember { mutableStateOf("") }
-    var sfText by remember { mutableStateOf("") }
-    var crText by remember { mutableStateOf("") }
-    var sendText by remember { mutableStateOf("") }
-    var recvSecsText by remember { mutableStateOf("20") }
+    var freqText by rememberSaveable { mutableStateOf("868.0") }
+    var bwText by rememberSaveable { mutableStateOf("") }
+    var sfText by rememberSaveable { mutableStateOf("") }
+    var crText by rememberSaveable { mutableStateOf("") }
+    var sendText by rememberSaveable { mutableStateOf("") }
+    var recvSecsText by rememberSaveable { mutableStateOf("20") }
     DisposableEffect(Unit) { onDispose { vm.stopLoraRecv() } }
 
     LazyColumn(
@@ -7184,7 +7189,7 @@ private fun EthernetScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val ethStatus by vm.ethStatus.collectAsState()
     val ethMessage by vm.ethMessage.collectAsState()
-    var configText by remember { mutableStateOf("") }
+    var configText by rememberSaveable { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -7289,10 +7294,10 @@ private fun MacroScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val macroStatus by vm.macroStatus.collectAsState()
     val running by vm.macroRunning.collectAsState()
 
-    var name by remember { mutableStateOf("") }
-    var cmd by remember { mutableStateOf("") }
-    var delayMs by remember { mutableStateOf("500") }
-    var steps by remember { mutableStateOf(listOf<app.brucia.automation.MacroStep>()) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var cmd by rememberSaveable { mutableStateOf("") }
+    var delayMs by rememberSaveable { mutableStateOf("500") }
+    var steps by rememberRetained { mutableStateOf(listOf<app.brucia.automation.MacroStep>()) }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -7394,9 +7399,9 @@ private fun FmScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val level by vm.fmLevel.collectAsState()
     val elapsedMs by vm.fmElapsedMs.collectAsState()
 
-    var freqText by remember { mutableStateOf("90000") }
-    var toneText by remember { mutableStateOf("440") }
-    var source by remember { mutableStateOf(FmSource.TONE) }
+    var freqText by rememberSaveable { mutableStateOf("90000") }
+    var toneText by rememberSaveable { mutableStateOf("440") }
+    var source by rememberSaveable { mutableStateOf(FmSource.TONE) }
 
     // Stop any transmission when the user leaves the tab.
     DisposableEffect(Unit) { onDispose { vm.fmStop() } }
@@ -7985,8 +7990,8 @@ private fun CrackScreen(vm: WardriveViewModel) {
     val crack by vm.crack.collectAsState()
     val target by vm.handshakeInfo.collectAsState()
     val rules by vm.rules.collectAsState()
-    var pmkidText by remember { mutableStateOf("") }
-    var pullPath by remember { mutableStateOf("/BrucePCAP/handshakes/") }
+    var pmkidText by rememberSaveable { mutableStateOf("") }
+    var pullPath by rememberSaveable { mutableStateOf("/BrucePCAP/handshakes/") }
     LaunchedEffect(Unit) { vm.refreshWordlists() }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->

@@ -34,6 +34,13 @@ char *_readFileFromSerial(size_t fileSizeChar) {
     size_t bufSize = 0;
     buf[0] = '\0';
 
+    // Brucia: in companion mode there is no console input (serialDevice has none and the app's frames
+    // own Serial). Return the same empty buffer the 5 s no-data timeout gives, without the wait.
+    if (g_companionActive) {
+        serialDevice->println("serial input is not available in companion mode");
+        return buf;
+    }
+
     unsigned long lastData = millis();
 
     String currLine = "";

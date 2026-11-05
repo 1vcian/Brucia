@@ -44,7 +44,12 @@ the ST25R3916-before-PN532 include ordering where both libraries are needed.
    the incoming request ID and keep every JSON frame within the advertised MTU.
    Module code the handler calls must not write to `Serial` in companion mode: guard
    such prints with `if (!g_companionActive)` (`tools/test_companion_print_hygiene.py`
-   lists the scanned files; add the module's file there).
+   lists the scanned files; add the module's file there). Nothing but the frame reader may
+   read `Serial` either: code that could wait for console input returns at once
+   `if (g_companionActive)`, and `serialDevice` has no input for the whole session
+   (`companionClaimSerialDevice`; `tools/test_companion_serial_input.py` scans src/,
+   include/ and lib/). What scripts can do under `script_run` is in
+   [proto/PROTOCOL.md](../../proto/PROTOCOL.md) ("Console input and scripts in companion mode").
 3. Register a new service handler only when a new subsystem is warranted. For a
    stream, add explicit start/service/stop hooks and cleanup on session exit.
 4. Gate the app from confirmed capabilities; update the protocol reference and
@@ -56,7 +61,8 @@ Host checks: `python3 tools/test_firmware_framing.py`,
 `python3 tools/test_firmware_codec.py`, `python3 tools/test_firmware_storage.py`,
 `python3 tools/test_firmware_upload.py`, `python3 tools/test_firmware_capability_evidence.py`,
 `python3 tools/test_firmware_diag.py`, `python3 tools/test_lite_companion.py`,
-`python3 tools/test_firmware_serial_rx.py`, `python3 tools/test_companion_print_hygiene.py`
+`python3 tools/test_firmware_serial_rx.py`, `python3 tools/test_companion_print_hygiene.py`,
+`python3 tools/test_companion_serial_input.py`
 and `python3 tools/test_protocol_e2e.py`.
 These cover the real reader/codec with host shims and simulated protocol traffic;
 they do not validate electrical timing, chip probes or the Android USB stack.

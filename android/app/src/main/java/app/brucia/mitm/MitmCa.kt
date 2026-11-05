@@ -44,7 +44,7 @@ object MitmCa {
         return result
     }
 
-    private fun load(file: File): MitmCertFactory.CertAndKey {
+    internal fun load(file: File): MitmCertFactory.CertAndKey {
         val ks = KeyStore.getInstance("PKCS12")
         file.inputStream().use { ks.load(it, STORE_PASS) }
         val key = ks.getKey("ca", STORE_PASS) as java.security.PrivateKey
@@ -53,7 +53,7 @@ object MitmCa {
         return MitmCertFactory.CertAndKey(cert, java.security.KeyPair(pub, key))
     }
 
-    private fun save(ca: MitmCertFactory.CertAndKey, file: File) {
+    internal fun save(ca: MitmCertFactory.CertAndKey, file: File) {
         val ks = KeyStore.getInstance("PKCS12")
         ks.load(null, null)
         ks.setKeyEntry("ca", ca.keyPair.private, STORE_PASS, arrayOf(ca.cert))
@@ -92,7 +92,11 @@ object MitmCa {
 
     private fun buildServerContext(ctx: Context, host: String): SSLContext {
         val root = ensureCa(ctx)
-        val leaf = MitmCertFactory.generateLeaf(host, root)
+        return serverContext(MitmCertFactory.generateLeaf(host, root), root)
+    }
+
+    /** TLS server context presenting [leaf] with the chain leaf, [root]. Context-free. */
+    internal fun serverContext(leaf: MitmCertFactory.CertAndKey, root: MitmCertFactory.CertAndKey): SSLContext {
         val ks = KeyStore.getInstance("PKCS12")
         ks.load(null, null)
         ks.setKeyEntry("leaf", leaf.keyPair.private, STORE_PASS, arrayOf(leaf.cert, root.cert))

@@ -1,5 +1,6 @@
 package app.brucia
 
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -40,7 +41,7 @@ internal fun RfFingerprintScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val fingerprints by vm.rfFingerprints.collectAsState()
     val fmt = remember { SimpleDateFormat("dd MMM HH:mm", Locale.US) }
 
-    var name by remember { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
     var compareWith by remember { mutableStateOf<RfFingerprint?>(null) }
     var bleStartedHere by remember { mutableStateOf(false) }
 

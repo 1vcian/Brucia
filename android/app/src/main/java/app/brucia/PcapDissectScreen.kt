@@ -16,12 +16,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.brucia.wardrive.WardriveViewModel
 import app.brucia.wifi.PcapDissector
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import app.brucia.ui.Button
+import app.brucia.ui.LeaveEffect
+import app.brucia.wifi.PcapDissectViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
  * On-phone PCAP dissection - a Wireshark-lite for the 802.11 captures the device records in monitor
@@ -33,34 +31,22 @@ import app.brucia.ui.Button
 internal fun PcapDissectScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-
-    var fileName by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var summary by remember { mutableStateOf<PcapDissector.Summary?>(null) }
-    var rows by remember { mutableStateOf<List<PcapDissector.Row>>(emptyList()) }
-    var error by remember { mutableStateOf("") }
+    // The decoded capture and a parse in progress live in an Activity-scoped ViewModel: a rotation
+    // or resize keeps them; leaving the tool cancels and clears them (as before).
+    val session = viewModel<PcapDissectViewModel>().session
+    val state by session.state.collectAsState()
+    val fileName = state.fileName
+    val loading = state.loading
+    val summary = state.summary
+    val rows = state.rows
+    val error = state.error
+    LeaveEffect { session.reset() }
 
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        loading = true; error = ""; summary = null; rows = emptyList()
-        fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "capture.pcap"
-        scope.launch {
-            try {
-                val bytes = withContext(Dispatchers.IO) {
-                    context.contentResolver.openInputStream(uri)?.use { PcapDissector.readBounded(it) } ?: ByteArray(0)
-                }
-                val result = withContext(Dispatchers.Default) { PcapDissector.dissect(bytes) { ensureActive() } }
-                if (result == null) error = "Not a classic pcap, or no frames found."
-                summary = result?.summary
-                rows = result?.rows ?: emptyList()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error = "Failed to read: ${e.message}"
-            } finally {
-                loading = false
-            }
+        val resolver = context.applicationContext.contentResolver
+        session.open(uri.lastPathSegment?.substringAfterLast('/') ?: "capture.pcap") {
+            resolver.openInputStream(uri)?.use { PcapDissector.readBounded(it) } ?: ByteArray(0)
         }
     }
 

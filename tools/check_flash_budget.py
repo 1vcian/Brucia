@@ -31,8 +31,10 @@ ENV_THRESHOLDS = {
     # LAUNCHER_* share custom_4Mb.csv (2,496 KiB app slot so M5Launcher can coexist).
     # Batch 7 LITE compile-outs: LAUNCHER_CYD-2432S028 98.17% -> 97.38% (67,056 B free), so
     # the fail ceiling drops from 99% to the default 98% (~15.8 KB of growth left on CYD).
-    # Kept as an override, warn 95%, because CYD is still above the 92% default warn and
-    # the other 16 LAUNCHER_* envs have not been measured.
+    # Kept as an override, warn 95%, because CYD is still above the 92% default warn.
+    # Batch 12 measured all 17 LAUNCHER_* envs (table in the maintenance backlog): 13 at
+    # 96.69-97.74%, the 4 elecrow envs at 98.54-98.66% (FAIL). Not tightened: the fail line
+    # would fail CYD-3248S035C (97.74%) too, and every env is above 95%.
     'LAUNCHER_*': (95.0, 98.0),
 }
 

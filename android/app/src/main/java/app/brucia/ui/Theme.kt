@@ -1,10 +1,12 @@
 package app.brucia.ui
 
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
@@ -55,19 +57,32 @@ private fun ColorScheme.withBruciaContainers(): ColorScheme = copy(
     onSecondaryContainer = OnDark,
 )
 
+/**
+ * The Brucia color scheme, optionally with the device accent as primary/secondary/tertiary.
+ * Internal so tests can check its contrast without composing.
+ */
+internal fun bruciaColorScheme(accent: Color? = null): ColorScheme {
+    val base = if (accent == null) BruciaColors else BruciaColors.copy(
+        primary = accent,
+        secondary = accent,
+        tertiary = accent,
+    )
+    return base.withBruciaContainers()
+}
+
 @Composable
 fun BruciaTheme(accent: Color? = null, content: @Composable () -> Unit) {
     // When connected, the device's UI theme wins: its primary color becomes the app accent so the
     // whole UI (buttons, titles, the flame) matches the device (e.g. a pink device -> a pink app).
-    val scheme = remember(accent) {
-        val base = if (accent == null) BruciaColors else BruciaColors.copy(
-            primary = accent,
-            secondary = accent,
-            tertiary = accent,
-        )
-        base.withBruciaContainers()
+    val scheme = remember(accent) { bruciaColorScheme(accent) }
+    MaterialTheme(colorScheme = scheme) {
+        // Screens draw straight on the app background (AppRoot is a Column with a background, not
+        // a Surface), so a Text or Icon without an explicit color outside a Card/Surface/Button read
+        // LocalContentColor's default, black: e.g. the Sub-GHz "Listen" label was black on #0E0E10.
+        // Default content color for everything under the theme is the scheme's onBackground;
+        // Surface, Card, Button and friends still provide their own on top of it.
+        CompositionLocalProvider(LocalContentColor provides scheme.onBackground, content = content)
     }
-    MaterialTheme(colorScheme = scheme, content = content)
 }
 
 /** Convert an RGB565 color (as the device reports priColor) to a Compose Color, or null if 0. */

@@ -1,5 +1,7 @@
 package app.brucia
 
+import androidx.compose.runtime.saveable.rememberSaveable
+import app.brucia.ui.rememberRetained
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -340,15 +342,15 @@ internal fun ScopePanel(vm: WardriveViewModel, pcm: ShortArray) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
 
-    var scopeMode by remember { mutableIntStateOf(0) } // 0=Time, 1=XY mono, 2=XY 2-mic
+    var scopeMode by rememberSaveable { mutableIntStateOf(0) } // 0=Time, 1=XY mono, 2=XY 2-mic
 
     // Time-mode controls.
-    var timebase by remember { mutableFloatStateOf(1024f) }  // samples per screen
-    var gain by remember { mutableFloatStateOf(1.5f) }
-    var triggerLevel by remember { mutableFloatStateOf(0f) }
-    var triggerMode by remember { mutableIntStateOf(0) }   // 0=rising, 1=falling, 2=auto
+    var timebase by rememberSaveable { mutableFloatStateOf(1024f) }  // samples per screen
+    var gain by rememberSaveable { mutableFloatStateOf(1.5f) }
+    var triggerLevel by rememberSaveable { mutableFloatStateOf(0f) }
+    var triggerMode by rememberSaveable { mutableIntStateOf(0) }   // 0=rising, 1=falling, 2=auto
     // XY-mono control.
-    var xyDelay by remember { mutableFloatStateOf(24f) }     // samples of delay for the phase plot
+    var xyDelay by rememberSaveable { mutableFloatStateOf(24f) }     // samples of delay for the phase plot
 
     // Rolling ESP buffer (shared by Time and XY-mono).
     var buf by remember { mutableStateOf(ShortArray(0)) }
@@ -566,6 +568,15 @@ private val SSTV_MODES = listOf(
     "Scottie S2" to Sstv.Mode.SCOTTIE_S2,
 )
 
+/** Decoder state of [SstvCascadePanel]: one stream decoder, frame buffer and image per mode. */
+private class SstvCascade {
+    val decoders = SSTV_MODES.map { Sstv.StreamDecoder(it.second) }
+    val fbs = SSTV_MODES.map { IntArray(it.second.mWidth * it.second.mHeight) }
+    val bmps = mutableStateListOf<Bitmap?>(null, null, null, null, null, null)
+    val rows = mutableStateListOf(0, 0, 0, 0, 0, 0)
+    var lastFed: ShortArray? = null
+}
+
 /**
  * Continuous, always-listening SSTV receive. One [Sstv.StreamDecoder] per mode runs in parallel on
  * the same incoming PCM, so whichever mode a transmission uses decodes without the user pre-selecting
@@ -575,13 +586,19 @@ private val SSTV_MODES = listOf(
 @Composable
 internal fun SstvCascadePanel(pcm: ShortArray) {
     val cs = MaterialTheme.colorScheme
-    val decoders = remember { SSTV_MODES.map { Sstv.StreamDecoder(it.second) } }
-    val fbs = remember { SSTV_MODES.map { IntArray(it.second.mWidth * it.second.mHeight) } }
-    val bmps = remember { mutableStateListOf<Bitmap?>(null, null, null, null, null, null) }
-    val rows = remember { mutableStateListOf(0, 0, 0, 0, 0, 0) }
+    // Retained: the decoders and the images decoded so far survive a rotation or resize (an SSTV
+    // frame takes 36 s to 4 min to arrive); leaving the tool starts clean as before.
+    val cascade = rememberRetained { SstvCascade() }
+    val decoders = cascade.decoders
+    val fbs = cascade.fbs
+    val bmps = cascade.bmps
+    val rows = cascade.rows
 
     LaunchedEffect(pcm) {
         if (pcm.isEmpty()) return@LaunchedEffect
+        // The same chunk is delivered again to the recreated panel after a configuration change.
+        if (cascade.lastFed === pcm) return@LaunchedEffect
+        cascade.lastFed = pcm
         withContext(Dispatchers.Default) {
             for (i in SSTV_MODES.indices) {
                 val mode = SSTV_MODES[i].second
@@ -658,7 +675,7 @@ internal fun SstvScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val pcm by vm.micPcm.collectAsState() // single mic subscription; fanned to the all-modes decoders
     val tx by vm.sstvTx.collectAsState()
 
-    var txMode by remember { mutableStateOf(Sstv.Mode.ROBOT36) }
+    var txMode by rememberSaveable { mutableStateOf(Sstv.Mode.ROBOT36) }
 
     DisposableEffect(connected, device?.caps?.mic) {
         if (connected && device?.caps?.mic == true) vm.startMicPcm()
@@ -763,8 +780,8 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val toneHz = remember(pcm) { if (pcm.size >= 256) Fft.dominantFreq(pcm, AUDIO_FS, 2048) else 0.0 }
     val level = remember(pcm) { Fft.rms(pcm) }
 
-    var genFreq by remember { mutableFloatStateOf(1000f) }
-    var genMs by remember { mutableFloatStateOf(500f) }
+    var genFreq by rememberSaveable { mutableFloatStateOf(1000f) }
+    var genMs by rememberSaveable { mutableFloatStateOf(500f) }
 
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         AudioHeader("Tone", "Decode DTMF from the ESP mic; generate tones / DTMF on the speaker", connected, onConnect)
@@ -895,11 +912,11 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
 
-                var steps by remember { mutableStateOf(listOf<String>()) }
-                var dur by remember { mutableIntStateOf(8) }
-                var oct by remember { mutableIntStateOf(5) }
-                var bpm by remember { mutableFloatStateOf(120f) }
-                var songName by remember { mutableStateOf("") }
+                var steps by rememberRetained { mutableStateOf(listOf<String>()) }
+                var dur by rememberSaveable { mutableIntStateOf(8) }
+                var oct by rememberSaveable { mutableIntStateOf(5) }
+                var bpm by rememberSaveable { mutableFloatStateOf(120f) }
+                var songName by rememberSaveable { mutableStateOf("") }
                 val customSongs by vm.customSongs.collectAsState()
                 val composerPlaying by vm.songPlaying.collectAsState()
 

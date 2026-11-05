@@ -1,5 +1,6 @@
 package app.brucia
 
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -84,16 +85,16 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val aps by vm.aps.collectAsState()
     val scanning by vm.wardriving.collectAsState()
     val savedPortals by vm.savedPortals.collectAsState()
-    var ssid by remember { mutableStateOf("Free Wifi") }
-    var templateIdx by remember { mutableIntStateOf(0) }
-    var deauth by remember { mutableStateOf(false) }
-    var channel by remember { mutableStateOf("1") }
+    var ssid by rememberSaveable { mutableStateOf("Free Wifi") }
+    var templateIdx by rememberSaveable { mutableIntStateOf(0) }
+    var deauth by rememberSaveable { mutableStateOf(false) }
+    var channel by rememberSaveable { mutableStateOf("1") }
     var showTargets by remember { mutableStateOf(false) }
     // Custom captive page authored in-app: index just past the built-ins selects it.
     val customIdx = PORTAL_TEMPLATES.size
-    var customHtml by remember { mutableStateOf(DEFAULT_CUSTOM_PORTAL) }
+    var customHtml by rememberSaveable { mutableStateOf(DEFAULT_CUSTOM_PORTAL) }
     var previewHtml by remember { mutableStateOf(false) }
-    var tplName by remember { mutableStateOf("") }
+    var tplName by rememberSaveable { mutableStateOf("") }
     // Stop a target scan when leaving the screen.
     DisposableEffect(Unit) { onDispose { if (vm.wardriving.value) vm.setWardriving(false) } }
 
