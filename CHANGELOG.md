@@ -7,6 +7,56 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- De Bruijn (backlog F01-F02): fix the T-Embed reboot on "Transmit de Bruijn". The phone's
+  generator produces a hex key far longer than one 64-bit code (order 12 = 1024 hex characters); the
+  CLI parsed it with `std::stoull`, which threw `std::out_of_range`. That code is Bruce CLI
+  (exceptions enabled) and nothing on the companion routing path catches it, so the throw reached
+  `std::terminate` and aborted the device (host-reproduced natively for n=8/10/12). Firmware now
+  parses `subghz tx`/`subghz txp` keys with `rfhex::parseKey64` (`src/modules/rf/rf_hexkey.h`): a
+  key that is empty, non-hex or longer than 16 hex digits is rejected with a clear error, no
+  exception, device state preserved, next command accepted. The device transmit path is unchanged
+  (still one fixed code of at most 64 bits); nothing larger goes on air. The app no longer offers
+  orders the path cannot carry: the custom field is bounded to the generator range (1-22, was 4-24
+  which threw in the generator at 23/24), presets drop 24, and `transmitDeBruijn` refuses with a
+  clear reason and transmits NOTHING instead of showing a false "Transmitting" and sending a
+  key the device cannot carry. Host-native parser tests with a mutation check, app JVM tests for the
+  UI bounds and the rejection message, and protocol e2e/mock coverage of the rejected key.
+
+- BLE advertising tools (BLE spam / Apple-style advertisements, iBeacon, Fast Pair / Swift Pair /
+  Samsung) now report the device's real result and no longer promise an effect on a receiver
+  (not yet checked on hardware):
+  - The headless bounded advertisers check every NimBLE call that can fail (stack init, TX power,
+    `getAdvertising`, the iBeacon MAC address change, and each advertisement set / start / stop)
+    and return success or failure. The companion answers `ACK` only when the whole run succeeded,
+    otherwise `ERR 500 "ble advertise failed"` - it used to answer success unconditionally.
+  - The advertisers share the single BLE radio with the `ble.scan` stream and the BLE HID
+    presenter. Starting one while a scan or HID session owns the stack now returns `ERR 409`
+    (busy) instead of tearing that session down and reporting a false success; `ble_hid_begin`
+    likewise refuses while a scan runs, and BadBLE / media hijack refuse while a HID session is
+    active. The app's tool surfaces the busy/error status instead of a generic success.
+  - The app texts (Spam BLE, the native BLE cards, the Spam hub tiles, iBeacon) describe what is
+    broadcast (advertisements of a given type) and state that whether a receiver shows a pairing
+    popup or prompt depends on its OS version and settings and has not been verified. The earlier
+    "pairing popups to nearby devices" / "will see it" effect claims are removed.
+- Scripts: Stop now stops the script on the device. While a script runs, the Scripts screen shows
+  Stop instead of Run; Stop sends `script_stop` once (direct, unlogged, as the Responder/Karma
+  stops) and keeps waiting for the run's own reply, which shows the outcome: `Script stopped.`, or
+  the output with a note when the script ended before the stop took effect (or the firmware does
+  not read stops during a script; after 3 s the screen says the stop is still pending). A new run
+  starts only after that reply and after the stop frame is written, so a stop can never reach a
+  later script; Stop with nothing running, a second Stop and a Stop after the end send nothing.
+  Stop all sends the stop too; disconnecting drops the wait and says the output is lost. Before,
+  Stop only stopped waiting while the device ran the script on. Firmware: after a stopped or
+  bounded run the abort flag was left set (the last poll copied it in after the interpreter task
+  had cleared it) until the next script started; script_run now drops it once the task is gone.
+  The next script was not affected (every start resets the flag). `tools/hw_acceptance.py --only
+  script_stop` (opt-in) runs a looping script, stops it and runs a short one; the mock models
+  script_run/script_stop. JVM and host tests only; not yet checked on hardware.
+- Scripts that end on an uncaught error now fail: `script_run` replies `ok:false` with the captured
+  output, which ends with the error (for example `ReferenceError: variable 'print' is not
+  defined`, or `interrupted` when the 15 s bound stopped the script); it used to reply `ok:true`.
+  `exit()` is still a success. The app's script examples used `print()`, which BruceJS does not
+  define (found on hardware); they now use `console.log()`, the output script_run returns.
 - `tools/hw_acceptance.py --soak <minutes>`: an opt-in passive soak for long-session evidence.
   Each interval repeats PINGs (sequential and a pipelined burst), `storage list /`, a CRC-checked
   `fs_read` of a small existing file, the scratch upload/read-back/remove cycle and one
@@ -18,6 +68,18 @@ that offloads computation to the phone. Format loosely follows
   above max(2048 B/h, 4096 B over the run) FAILs it; Ctrl-C cleans up and still writes the
   reports. Same allowlist, nothing new is sent. Simulated with `tools/mock_device.py` only (new
   `reboot` fault and companion idle exit); not yet run on hardware.
+- Phone flashing keeps device replies that arrive in the same USB read. The flasher used to
+  decode one read, return at the reply it was waiting for and throw the rest of that read away,
+  so the esptool stub's "OHAI" greeting was lost when it came in the same read as the MEM_END
+  reply (or before it, or with no MEM_END reply at all). The flash then went on against the
+  stub as if the ROM loader were still running: the ROM form of SPI_ATTACH, which the stub
+  rejects, and an MD5 that could not be read. Replies now go through a receive buffer that
+  persists across reads and commands: frames are taken one at a time, bytes after a frame
+  (including a partial frame or a split escape) stay for the next read, and a greeting seen
+  while waiting for MEM_END still counts. A frame left unfinished (junk after a stray 0xC0) no
+  longer swallows the next reply. Status lengths are unchanged (ROM 4 bytes until OHAI, stub 2).
+  The 0.1.5 hardware session, replayed byte for byte, sends the same requests as before. JVM
+  tests only; not yet checked on hardware.
 - Fixes found while closing unit-test gaps (JVM tests only; not yet checked on hardware):
   - Phone flashing read the ESP32-S3 ROM loader's replies as if they ended in two status bytes;
     the ROM sends four (status, error, two reserved zeros), so every ROM-side error read as

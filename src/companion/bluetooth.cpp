@@ -324,6 +324,22 @@ void stopCompanionBluetoothControls() {
 #endif
 }
 
+// The NimBLE controller is a single shared resource. The bounded advertisers below
+// (ble_spam / ble_ibeacon / ble_fastpair_spam / ble_spam_platform) each init the stack and
+// deinit() it on the way out, so running one while another owner holds the stack would tear that
+// owner down mid-flight (a live ble.scan stream left with a dangling NimBLEScan*, or a paired BLE
+// HID presenter whose stack vanishes while ble_hid_status still reports "advertising"). Rather than
+// silently kill the other owner and report a misleading success, refuse with a 409 busy/conflict
+// (the existing device-busy convention). Returns the conflict reason, or nullptr when the stack is
+// free for an exclusive advertiser run.
+static const char *bleAdvertiserConflict() {
+    if (subBle) return "ble scan active (stop the scan first)";
+#if !defined(LITE_VERSION)
+    if (g_companionHid) return "ble hid session active (ble_hid_end first)";
+#endif
+    return nullptr;
+}
+
 bool dispatchBluetoothCommand(const CommandRequest &request) {
     const String &cmdStr = request.command;
     const uint32_t id = request.id;
@@ -335,8 +351,15 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
             if (secs < 1) secs = 8;
             if (secs > 60) secs = 60;
 #if !defined(LITE_VERSION)
-            runBleSpamBounded((uint32_t)secs * 1000);
-            sendAck(id, true);
+            {
+                const char *busy = bleAdvertiserConflict();
+                if (busy) {
+                    sendErr(id, 409, busy);
+                    break;
+                }
+            }
+            if (runBleSpamBounded((uint32_t)secs * 1000)) sendAck(id, true);
+            else sendErr(id, 500, "ble advertise failed");
 #else
             sendErr(id, 501, "ble_spam not available in this (lite) build");
 #endif
@@ -354,12 +377,22 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
             uuid.trim();
             if (secs < 1) secs = 8;
             if (secs > 60) secs = 60;
-            runIbeaconBounded(
-                (uint32_t)secs * 1000,
-                "Bruce iBeacon",
-                uuid.length() ? uuid.c_str() : "8ec76ea3-6668-48da-9866-75be8bc86f4d"
-            );
-            companionAckMsg(id, true, "ibeacon done");
+            {
+                const char *busy = bleAdvertiserConflict();
+                if (busy) {
+                    sendErr(id, 409, busy);
+                    break;
+                }
+            }
+            if (runIbeaconBounded(
+                    (uint32_t)secs * 1000,
+                    "Bruce iBeacon",
+                    uuid.length() ? uuid.c_str() : "8ec76ea3-6668-48da-9866-75be8bc86f4d"
+                )) {
+                companionAckMsg(id, true, "ibeacon done");
+            } else {
+                sendErr(id, 500, "ibeacon advertise failed");
+            }
             break;
         }
 
@@ -371,9 +404,19 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
             if (secs < 1) secs = 8;
             if (secs > 60) secs = 60; // clamp 1..60
 #if !defined(LITE_VERSION)
-            runBleFastPairSpamBounded((uint32_t)secs * 1000);
-            String out = "fast pair spam done (" + String(secs) + "s)";
-            companionAckMsg(id, true, out.c_str());
+            {
+                const char *busy = bleAdvertiserConflict();
+                if (busy) {
+                    sendErr(id, 409, busy);
+                    break;
+                }
+            }
+            if (runBleFastPairSpamBounded((uint32_t)secs * 1000)) {
+                String out = "fast pair spam done (" + String(secs) + "s)";
+                companionAckMsg(id, true, out.c_str());
+            } else {
+                sendErr(id, 500, "ble advertise failed");
+            }
 #else
             sendErr(id, 501, "ble_fastpair_spam not available in this (lite) build");
 #endif
@@ -412,19 +455,28 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
                 copies = (uint8_t)c;
             }
 #if !defined(LITE_VERSION)
+            {
+                const char *busy = bleAdvertiserConflict();
+                if (busy) {
+                    sendErr(id, 409, busy);
+                    break;
+                }
+            }
             bool known = true;
+            bool ok = true;
             uint32_t ms = (uint32_t)secs * 1000;
             if (target == "ios") {
-                runBleSpamBounded(ms, copies);
+                ok = runBleSpamBounded(ms, copies);
             } else if (target == "android") {
-                runBleFastPairSpamBounded(ms, copies);
+                ok = runBleFastPairSpamBounded(ms, copies);
             } else if (target == "windows") {
-                runBleSwiftPairSpamBounded(ms, copies);
+                ok = runBleSwiftPairSpamBounded(ms, copies);
             } else if (target == "samsung") {
-                runBleSamsungSpamBounded(ms, copies);
+                ok = runBleSamsungSpamBounded(ms, copies);
             } else if (target == "all") {
-                // Cycle through every platform in 1s slices for the duration.
-                static void (*const allFns[])(uint32_t, uint8_t) = {
+                // Cycle through every platform in 1s slices for the duration. A single
+                // failing slice fails the whole run (so the app sees ERR, not a success).
+                static bool (*const allFns[])(uint32_t, uint8_t) = {
                     runBleSpamBounded,
                     runBleFastPairSpamBounded,
                     runBleSwiftPairSpamBounded,
@@ -432,21 +484,23 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
                 };
                 uint32_t endAll = millis() + ms;
                 int idx = 0;
-                while ((int32_t)(millis() - endAll) < 0) {
+                while (ok && (int32_t)(millis() - endAll) < 0) {
                     if (check(EscPress)) break;
                     uint32_t rem = endAll - millis();
                     uint32_t slice = rem < 1000 ? rem : 1000;
-                    allFns[idx & 3](slice, copies);
+                    ok = allFns[idx & 3](slice, copies);
                     idx++;
                 }
             } else {
                 known = false;
             }
-            if (known) {
+            if (!known) {
+                sendErr(id, 400, "bad target (use ios|android|windows|samsung|all)");
+            } else if (ok) {
                 String out = target + " spam done (" + String(secs) + "s)";
                 companionAckMsg(id, true, out.c_str());
             } else {
-                sendErr(id, 400, "bad target (use ios|android|windows|samsung|all)");
+                sendErr(id, 500, "ble advertise failed");
             }
 #else
             (void)copies; // parsed for the full build only
@@ -483,6 +537,11 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
         // AUTHORIZED / LAB USE ONLY.   ble_badble <ducky script text>
         if (cmdStr.startsWith("ble_badble ")) {
 #if !defined(LITE_VERSION)
+            if (g_companionHid) {
+                // BadBLE brings up its own BLE HID keyboard; a live HID presenter already owns it.
+                sendErr(id, 409, "ble hid session active (ble_hid_end first)");
+                break;
+            }
             runBleBadble(cmdStr.substring(11), id);
 #else
             sendErr(id, 501, "ble_badble not available in this (lite) build");
@@ -497,7 +556,11 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
 #if !defined(LITE_VERSION)
             String mac = cmdStr.substring(10);
             mac.trim();
-            if (mac.length() < 11) {
+            if (g_companionHid) {
+                // The media hijack drives the shared stack as a central; refuse while a BLE HID
+                // presenter owns it rather than tearing that session down underneath it.
+                sendErr(id, 409, "ble hid session active (ble_hid_end first)");
+            } else if (mac.length() < 11) {
                 sendErr(id, 400, "usage: ble_media <mac>");
             } else {
                 NimBLEAddress target(std::string(mac.c_str()), BLE_ADDR_PUBLIC);
@@ -519,6 +582,13 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
         if (cmdStr.startsWith("ble_hid_")) {
 #if !defined(LITE_VERSION)
             if (cmdStr == "ble_hid_begin") {
+                // A live ble.scan stream owns the shared stack, and BleKeyboard::end() later calls
+                // BLEDevice::deinit(true), which would tear that scan down and leave a dangling
+                // NimBLEScan*. Refuse rather than corrupt the running scan.
+                if (!g_companionHid && subBle) {
+                    sendErr(id, 409, "ble scan active (stop the scan first)");
+                    break;
+                }
                 if (!g_companionHid) {
                     if (!NimBLEDevice::isInitialized()) NimBLEDevice::init("Brucia");
                     g_companionHid = new BleKeyboard(BRUCIA_PRODUCT_NAME, BRUCIA_MANUFACTURER, 100);

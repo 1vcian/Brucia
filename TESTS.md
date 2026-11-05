@@ -103,6 +103,8 @@ bytes, the reserved zeros: S3 successes were accepted, ROM failures too.
 session (8 SYNC replies, READ_REG, stub upload, OHAI, SPI_ATTACH/SET_PARAMS, FLASH_BEGIN/DATA/END,
 stub MD5) and passes on both the old and the new code; every reply also passes the old 2-byte
 reading.
+Found here and fixed in batch 16 (FLASHREAD, above): the reply reader dropped the rest of a USB
+read after the reply it waited for, so an "OHAI" sharing a read with the MEM_END reply was lost.
 
 Still uncovered and why: `EspFlasher` reset sequences, SYNC failure and timeouts sleep in real
 time (seconds per case) and are not exercised; the flash flow is not hardware-verified by these
@@ -130,6 +132,194 @@ versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 4
 25.8% of chip), Cardputer, core4mb (LITE), LAUNCHER_CYD, nesso-n1; 12 envs compiled in the
 matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
+
+### Batch 16 (FLASHREAD) - flash replies that share or split USB reads, software only
+
+The coverage work (batch 15, section "Unit-test coverage") found that `EspFlasher.readResponse`
+decoded one USB read, returned at the reply it was waiting for and dropped the rest of that read.
+The esptool stub's "OHAI" greeting was then lost whenever it shared a read with the MEM_END reply,
+came before it, or arrived without one (it was skipped as a non-response while waiting for
+MEM_END); the flash went on as if the ROM loader were still running. Now `SlipCodec.Receiver` (in
+`EspProtocol.kt`, pure) keeps one receive buffer across reads and commands: frames are taken one at
+a time, the bytes after a frame stay buffered, a partial frame or an escape split between reads is
+completed by the next read, and a greeting seen during the MEM_END wait is remembered for the stub
+check. Frames are parsed when taken, so the batch 15 status lengths hold (ROM 4 bytes until OHAI,
+stub 2; short replies read from their start). `FrameReader` now treats the END that closes a frame
+as a possible opening of the next one, so junk after a stray 0xC0 that never completes is closed
+by the next reply instead of swallowing it.
+
+Evidence: `SlipReceiverTest` 12 (two replies in one read, reply + OHAI, OHAI + next reply, byte by
+byte, every split point of an escaped reply plus the following frame, DB DC / DB DD split across
+reads, boot text before a frame, a partial frame left at a timeout, an abandoned junk frame,
+clear, buffer growth/compaction); `EspFlasherTest` +8 against the scripted fakes (now also handing
+out everything in one read or 1..24-byte reads; the fake stub rejects the ROM form of SPI_ATTACH
+as the real one does): reply + OHAI in one read, OHAI before the MEM_END reply (one read and
+separate reads), OHAI with no MEM_END reply, every read size with an image whose stub MD5 holds
+0xC0 and 0xDB, the ROM fallback and ROM FLASH_BEGIN error at several read sizes, boot text before
+the first reply, a SYNC reply cut at a timeout and completed by the retry's read, and the byte-exact
+0.1.5 S3 session at every read size (same requests, MD5 match). Kept and rerun unchanged in
+substance: `byteExactS3RomThenStubSessionSucceedsAsBefore` (per-reply reads, as on hardware) and
+`romErrorStatusIsNotMaskedByTheReservedBytes`. Mutations: the base `EspFlasher.kt` (drop after
+reply) fails 6 of the 8 new flasher tests (all the read-sharing ones; the two passing are the
+per-read-safe ROM error and partial-SYNC cases), and passes both kept tests; a `Receiver` that drops
+the rest of a read fails 7 receiver and 3 flasher tests; the old frame-close rule fails
+`abandonedJunkFrameDoesNotSwallowTheNextReply` only. Counts: `:app:testDebugUnitTest` 941/941 (921 + 20), `lintDebug` 0 errors (2 warnings: OldTargetApi,
+AndroidGradlePluginVersion), `assembleDebug` OK, `python3 tools/test_android_logic.py` 247 OK (now also
+runs SlipReceiverTest with `update/EspProtocol.kt`). No device connected.
+
+- [ ] Phone flash recheck (T-Embed CC1101, ESP32-S3): flash a release from the app over USB. Expected
+      as with 0.1.5: the flash log shows the stub started (no "command 0x0D failed"), every block
+      written, **verified OK (MD5 matches)**, and the device boots the flashed version.
+
+### Batch 16 (DEBRUIJN) - De Bruijn transmit crash fixed and bounded, software only
+
+Backlog F01-F02. Reproduced the defect on the base before fixing, host-only:
+`tools/test_firmware_debruijn.py` compiles the single-code key parser natively with an independent
+De Bruijn generator that mirrors `android/.../subghz/DeBruijn.kt`; order 8/10/12 produce 64/256/1,024
+hex characters, and the original `std::stoull(key, …, 16)` throws `std::out_of_range` for all three.
+The throwing path is Bruce CLI, not companion: `rfTxCallback` is in
+`src/core/serial_commands/rf_commands.cpp` (exceptions enabled; only `src/companion/**` is built
+`-fno-exceptions`) and `src/companion/commands.cpp` has no try/catch around `serialCli.parse`, so the
+throw reaches `std::terminate` and aborts — consistent with the owner's reboot. (The host harness
+cannot emulate the ESP32 panic; the physical reset trace is still unobtained.)
+
+Fix. Firmware: `src/modules/rf/rf_hexkey.h` `rfhex::parseKey64` parses `subghz tx`/`subghz txp`
+keys and rejects empty, non-hex or over-16-hex-digit input with a clear error and `return false`
+(no throw, device state preserved, next command accepted). Transmit capability is unchanged — one
+fixed code of at most 64 bits, nothing larger on air. App: the custom order field is bounded to the
+generator range (1-22; was 4-24, which threw at 23/24), presets drop 24, and `transmitDeBruijn`
+refuses with a reason and transmits nothing instead of dispatching an uncarriable key plus a false
+"Transmitting" toast.
+
+Evidence, software only:
+- `tools/test_firmware_debruijn.py` 3/3 (valid short/max/0x keys parse; empty/null/non-hex/17-digit
+  and the exact app-generated De Bruijn keys for every offered order rejected without throwing; a
+  mutation of the length guard `> 16` -> `> 17` is caught — the test then fails).
+- App JVM `DeBruijnTest` (added cases): offered orders within 1..22, transmit refused for every
+  offered order with a reason naming the sweep size and "Nothing was transmitted", out-of-range
+  orders rejected with the bounds, and every offered sweep exceeds the 64-bit device code.
+- `tools/test_protocol_e2e.py` and `tools/mock_device.py`: a valid single code is accepted, an
+  over-long sweep key gets an error ACK (ok:False, "invalid key"), and the device is still
+  responsive (diag) afterwards.
+- Totals: Android `:app:testDebugUnitTest` 925/925, `lintDebug` 0 errors, `assembleDebug` OK;
+  `unittest discover -s tools` 188 OK; 35/35 `tools/test_*.py` (incl. `test_audio_noise_bounds.py
+  -e lilygo-t-embed-cc1101`); T-Embed CC1101 build OK, eh-catch-guard OK (9 sites), RAM 47.6%,
+  flash 25.7% (firmware.bin 4,318,928 bytes).
+- Not changed here (backlog F03): `std::stoul` on frequency/te/count/bits in the same callbacks can
+  still throw on malformed numbers; the app never sends those for De Bruijn any more.
+
+Nothing hardware-verified. Owner check below uses rejection-only inputs (nothing transmits).
+
+- [ ] T-Embed CC1101 in companion mode, rejection-only (NOTHING should go on air): in the app's
+      Sub-GHz screen, De Bruijn card, press "Transmit de Bruijn" at the default order 12 (and at 8,
+      10, 16, 20, 22). Expected each time: a toast/console line saying the device cannot carry the
+      sweep and nothing was transmitted, NO reboot, the screen stays in companion mode, and the next
+      action (e.g. a frequency change or `diag`) still works. The device must NOT transmit; any check
+      that would put a signal on air is out of scope for this task.
+
+### Batch 16 (BLEADV) - BLE advertiser error checking, shared-stack ownership, honest texts; software only
+
+Closes the two BLE-advertiser gaps the 2026-11-05 functional-contract investigation named: the
+dispatcher reported success unconditionally after the (void) bounded wrappers returned, and the
+advertisers shared the single NimBLE controller with the `ble.scan` stream and the BLE HID presenter
+with no ownership guard.
+
+Firmware (`src/modules/ble/ble_spam.cpp`, `src/companion/bluetooth.cpp`): the five bounded runners
+(`runBleSpamBounded`, `runBleFastPairSpamBounded`, `runBleSwiftPairSpamBounded`,
+`runBleSamsungSpamBounded`, `runIbeaconBounded`) now return `bool` and check every NimBLE call that
+can fail - `BLEDevice::init`, `esp_ble_tx_power_set`, `getAdvertising()` (null), the iBeacon
+`esp_iface_mac_addr_set` address change, and every `setAdvertisementData` / `start` / `stop` - so a
+driver failure returns `false` and the stack is still torn down on every exit path. The dispatcher
+turns that into `ACK` only on success and `ERR 500 "ble advertise failed"` otherwise (was always a
+success `ACK`). Ownership: a new `bleAdvertiserConflict()` refuses `ble_spam` / `ble_ibeacon` /
+`ble_fastpair_spam` / `ble_spam_platform` with `ERR 409` when a scan (`subBle`) or a BLE HID
+presenter (`g_companionHid`) already owns the stack, rather than deinit it mid-flight and report a
+false success; `ble_hid_begin` refuses (409) while a scan runs (its `end()` calls
+`BLEDevice::deinit(true)`), and `ble_badble` / `ble_media` refuse (409) while a HID presenter owns
+the stack. No Bruce menu path changed (the on-device `ibeacon()` / spam menu are untouched).
+
+App: the BLE spam / iBeacon / Spam-hub texts no longer promise a popup or prompt on a receiver.
+They describe what is broadcast (advertisements of type X) and state that a receiver's reaction
+depends on its OS version and settings and has not been verified. The burst loop already surfaces a
+command's `ERR` text, so the firmware 409/500 now shows as the tool's status instead of a silent
+success.
+
+Evidence, host-side only: new `tools/test_firmware_ble_adv.py` (11 cases: every advertiser call
+checked, no bare advertise statement, bool returns, 409 scan/HID conflict guards, ACK gated on the
+bool result, the all-platforms loop aggregates failures, HID/BadBLE/media HID guards); new app JVM
+`BleSpamTextTest` (banned effect-promise phrasings absent, honest wording present, a firmware busy
+reply surfaced via `BurstLoop` not reported as success). `tools/test_firmware_ble_adv.py` 11/11;
+`test_companion_prompts.py`, `test_companion_print_hygiene.py`, `test_companion_serial_input.py`,
+`test_lite_companion.py` still pass. Firmware builds SUCCESS: T-Embed CC1101 app 4,319,344 B / 92.83% (+656 B against the
+batch 15 figure 4,318,688 B); core4mb (LITE) app 2,662,736 B / 67.72% (+192 B against 2,662,544 B);
+AAC noise bounds pass on both. Android: `:app:testDebugUnitTest` 925/925, `lintDebug` 0 errors,
+`verifyPaparazziDebug` unchanged, `assembleDebug` OK; `unittest discover -s tools` 196 tests OK.
+Nothing hardware-verified.
+
+Owner checks (do not overclaim: observing a receiver's reaction is optional and recorded as
+observed, never promised):
+
+- [ ] T-Embed CC1101, app connected, BLE tool: turn the Scan stream ON, then press Start on "BLE
+      spam (Apple ProximityPair)". Expected: the tile shows a busy error (the device's 409 "ble
+      scan active" message), not "Sending..."; the scan list keeps updating. Turn Scan OFF, press
+      Start again: it runs (status "Sending ios...").
+- [ ] Normal start/stop does not break the scan: with Scan OFF, Start then Stop the Apple spam a few
+      times; then turn Scan ON. Expected: the scan still lists devices (the advertiser's init/deinit
+      left the stack clean); no reboot, the app stays connected.
+- [ ] BLE HID presenter active (`ble_hid_begin`, pair "Brucia"): press Start on any BLE spam target
+      and run BadBLE. Expected: both show a busy error ("ble hid session active"), the HID presenter
+      stays paired and usable; `ble_hid_end` afterwards still stops cleanly.
+- [ ] iBeacon: Broadcast for a few seconds, then Stop. Expected: status "ibeacon done" on success,
+      or the device's error text on failure - never a success when the radio refused.
+- [ ] Optional, recorded as observed only (not a pass/fail): with a nearby Mac/iPhone/Android in
+      range and its Bluetooth settings open, note whether any pairing prompt appears while a spam
+      target runs. Record the receiver OS version and the observation; absence of a prompt is not a
+      firmware failure.
+
+### Batch 16 (SCRIPTSTOP) - the app's script Stop stops the device script; software only
+
+App: on the Scripts screen Run turns into Stop while a script runs. Stop sends `script_stop` once
+(direct and unlogged, like the Responder/Karma stops; preflight lets every stop through) and keeps
+waiting for the `script_run` reply, which shows the outcome (`Script stopped.`; the output plus a
+note when the script ended before the stop took effect or the firmware ignores it; after 3 s a
+"still waiting" text). No new run until that reply arrived and the stop frame was written; Stop
+when idle, twice, or after the end sends nothing; Stop all sends the stop; disconnect drops the wait.
+Firmware (source review): every interpreter exit runs bjs_task_finished (deadline, abort, task
+handle, state -1); `script stopped` is sent only after the task ended, so an immediate `script_run`
+is accepted. Gap fixed: the poll that saw the task end copied the abort in again, leaving
+`g_bjsAbort` set until the next start (benign: every start clears it); script_run now drops it once
+the task is gone. Evidence, host-side only: `ScriptServiceTest` 12 tests (GateRunner and the real
+CommandSession on a recording transport with the virtual clock: exact CMD envelopes
+`script_run <src>` / `script_stop`, one stop per run, no stop when idle/after the end, Run refused
+until the reply and the stop write, late replies to the run and to the stop ignored, local timeout,
+disconnect while stopping), `DeviceOperationTest` +1; `test_firmware_script_abort.py` stop-then-new-
+run model (stopped reply within a few polls, handle/abort/deadline cleared, next run accepted and
+not aborted, late stop harmless; the old wiring left the abort set) plus wiring checks;
+`test_hw_acceptance.py` +7 (script_stop PASS on the mock, FAIL when the firmware ignores the stop or
+stays busy, SKIP on LITE, allowlist). `unittest discover` 185 tests, `test_hw_acceptance.py`
+108/108, `test_android_logic.py` 235 tests, Gradle unit tests, lint and assembleDebug pass. Firmware
+builds SUCCESS: T-Embed CC1101 app 4,318,704 B / 92.81% (+16 B against the batch 15 FWMENUS
+figure), static RAM 156,040 B (unchanged). Nothing hardware-verified.
+
+- [ ] T-Embed CC1101 in companion mode, app disconnected (pyserial):
+      `python3 tools/hw_acceptance.py --port <port> --only caps,script_stop,diag_counters`.
+      Expected: exit 0, `script_stop` PASS: no reply for 2 s, PONG while the script runs,
+      `ok:false` `script stopped` within 2 s of `script_stop`, no reply to the stop itself, then
+      `script_run console.log('brucia-after-stop');` answers `ok:true` `brucia-after-stop` (not
+      `interpreter busy`); `diag_counters` PASS. The runner sends only the two fixed scripts (a
+      loop of `delay(100)`, one `console.log`) and `script_stop`; the script screen shows on the
+      device. First run (batch 15 firmware, check then using `print`): stop part PASS on hardware
+      (`script stopped` 0.564 s after the stop, next run accepted after 1.05 s), FAIL only on the
+      follow-up's `ReferenceError: variable 'print' is not defined` (reported `ok:true`).
+- [ ] With this batch's firmware: `--cmd "script_run print(1)"` answers `ok:false` with the
+      ReferenceError text; `--cmd "script_run console.log(1)"` answers `ok:true` `1`;
+      `--cmd "script_run exit()"` answers `ok:true`; a loop of delay()s left to the 15 s bound
+      answers `ok:false` ending in `interrupted`. App Scripts: the three examples print their lines.
+      Firmware from before batch 15 FAILs it (the run ends at the 15 s bound).
+- [ ] App, Scripts: run `for (var i = 0; i < 300; i++) { delay(100); }`, tap Stop after 2 s:
+      the button reads Stopping..., then the output `Script stopped.` within about a second and
+      Run returns; Run `console.log("hi")` right after answers `hi`. Stop in the command log dialog
+      during a run ends it the same way. Unplug during a run: the output says it was lost, no crash.
 
 ### Hardware run 2026-11-05 - batch 15 merge, first soak
 
@@ -189,12 +379,15 @@ RAM 99,624 B (+8 B); AAC noise bounds pass on both. Nothing hardware-verified.
 
 `companion_test.py` below means `python3 tools/companion_test.py <port>` (pyserial) with the device
 in companion mode and the app disconnected.
+Note (batch 16): BruceJS has no global `print()` (a ReferenceError); use `console.log()` in the
+scripts below. With batch 16 firmware a script stopped by the 15 s bound replies `ok:false` (output
+ending in `interrupted`) instead of `ok:true`.
 
-- [ ] T-Embed, app connected, Scripts tool: `print("hi")` replies `hi` within about a second (it
+- [ ] T-Embed, app connected, Scripts tool: `console.log("hi")` replies `hi` within about a second (it
       used to take 20 s and say `script timeout`); a second run right after works.
-- [ ] `--cmd 'script_run delay(60000); print("never")' --wait 25`: `ok:true` with an `interrupted`
-      error (no `never`) after 15-16 s; then `--cmd 'script_run print(1)'` answers `1` at once.
-- [ ] `--cmd 'script_run setInterval(function(){print(1)}, 1000)' --wait 25`: ends at about 15 s
+- [ ] `--cmd 'script_run delay(60000); console.log("never")' --wait 25`: `ok:true` with an `interrupted`
+      error (no `never`) after 15-16 s; then `--cmd 'script_run console.log(1)'` answers `1` at once.
+- [ ] `--cmd 'script_run setInterval(function(){console.log(1)}, 1000)' --wait 25`: ends at about 15 s
       with the printed lines; the next `script_run` is not `interpreter busy`.
 - [ ] `--cmd 'script_run delay(60000)' --wait 25 --then script_stop --after 2 --ping-after 1`:
       PONG at about 1 s, `ok:false` `script stopped` at about 2 s, no reply to `script_stop` itself;

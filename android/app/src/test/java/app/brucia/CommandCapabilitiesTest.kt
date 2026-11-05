@@ -49,7 +49,7 @@ class CommandCapabilitiesTest {
 
     @Test fun cleanupAndNonRadioCommandsRemainUsableWithoutCaps() {
         for (cmd in listOf("fm_audio_stop", "speaker_stop", "spkr_pcm_stop", "ble_hid_end",
-            "evil_portal_stop", "wifi_disconnect", "responder_stop", "karma_stop", "brucegotchi_stop",
+            "evil_portal_stop", "wifi_disconnect", "responder_stop", "karma_stop", "brucegotchi_stop", "script_stop",
             "clock_get", "storage list /", "fs_read /a", "theme_set ffff", "companion_exit", "script_run print('x')")) {
             CommandCapabilities.check(cmd, null)
         }

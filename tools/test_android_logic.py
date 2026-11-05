@@ -33,6 +33,7 @@ TESTS = [
     "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
     "StreamRotationTest", "ParkedLeavesTest", "DeviceOutputsTest",
     "FrameBudgetTest", "HandshakeParserTest", "PcapReaderTest", "SubFileTest",
+    "SlipReceiverTest",
 ]
 # Test-only files without a test class (compiled, not run).
 TEST_HELPERS = ["DeviceJson", "VirtualTime"]
@@ -54,6 +55,7 @@ SOURCES = [
     "wifi/CaptureWorkflow.kt", "wifi/CaptureDescriptor.kt",
     "wifi/HandshakeParser.kt", "wifi/WpaCracker.kt", "wifi/Pmkid.kt",
     "wifi/PcapReader.kt", "wifi/PcapWriter.kt", "wifi/Dot11Frame.kt", "subghz/SubFile.kt",
+    "update/EspProtocol.kt",
 ]
 
 

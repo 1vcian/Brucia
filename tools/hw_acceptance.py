@@ -8,6 +8,7 @@ firmware build/provenance, timestamps, a PASS/FAIL/SKIP per check and the raw ev
     python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101
     python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101 --only caps,ping,diag_counters
     python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101 --dry-run
+    python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101 --only caps,script_stop
     python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101 --soak 20 --streams wifi.probe,wifi.sta,subghz.raw
 
 Soak (`--soak <minutes>`, opt-in): repeats intervals of the same passive operations (PINGs,
@@ -26,6 +27,9 @@ requests) and `ble.scan` (active scan requests) are not receive-only and are not
 the stream check uses promiscuous `wifi.probe` / `wifi.sta` or CC1101 `subghz.raw` receive.
 The `busy` check (receive-only `jam_detect`) is opt-in because its Wi-Fi setup calls
 esp_wifi_disconnect(), which sends a disassociation if the device is joined to an AP.
+The `script_stop` check (opt-in) runs exactly two fixed scripts (SCRIPT_LONG: a loop of delay()s;
+SCRIPT_SHORT: one console.log) and `script_stop`: no radio, no file access; the device shows the script
+screen while it runs.
 
 Link handling: frames sent never exceed CAPS `rx_max` (768 bytes for firmware without it) and
 the reader resyncs after device text in the framed stream (a 4-byte length in range followed
@@ -92,6 +96,14 @@ def _safe_read_path(path):
             and not any(ord(c) < 0x20 or c in '\\:*?"<>|' for c in path))
 
 
+# The only two scripts the opt-in script_stop check runs (the allowlist takes no other source): a
+# loop of delay()s that outlasts the 15 s execution bound (no I/O, no radio), and one console.log.
+# BruceJS has no global print(); console.log() is what script_run captures into ACK out.
+SCRIPT_LONG = "for (var i = 0; i < 300; i++) { delay(100); }\nconsole.log('brucia-loop-ended');"
+SCRIPT_SHORT = "console.log('brucia-after-stop');"
+SCRIPT_SHORT_OUT = "brucia-after-stop"
+SCRIPT_SOURCES = (SCRIPT_LONG, SCRIPT_SHORT)
+
 # (name, regex, extra validator on the match) for CMD bodies.
 COMMAND_RULES = (
     ("diag", re.compile(r"^diag$"), None),
@@ -106,6 +118,8 @@ COMMAND_RULES = (
     ("storage remove", re.compile(r"^storage remove (\S+)$"), lambda m: SCRATCH_RE.match(m.group(1))),
     ("jam_detect", re.compile(r"^jam_detect ([1-9]|[12]\d|30)$"), None),
     ("stop", re.compile(r"^stop$"), None),
+    ("script_run", re.compile(r"^script_run (.*)$", re.S), lambda m: m.group(1) in SCRIPT_SOURCES),
+    ("script_stop", re.compile(r"^script_stop$"), None),
 )
 
 
@@ -588,6 +602,7 @@ CHECKS = (
     ("fs_upload", "Transactional upload of a scratch file, read-back, remove", True),
     ("streams", "Receive-only stream on/off, no events after OFF", True),
     ("busy", "Busy handling during receive-only jam_detect (opt-in)", False),
+    ("script_stop", "script_stop ends a running script_run; the next script_run runs (opt-in)", False),
     ("soak", "Long-session soak: heap, link counters, latency, reboots (--soak)", False),
     ("heap", "Heap not trending down across repeated diag", True),
     ("diag_counters", "diag link counters match the runner's traffic", True),
@@ -601,7 +616,8 @@ DIAG_USERS = {"diag_shape", "malformed", "heap", "diag_counters", "busy", "soak"
 # TESTS.md items this runner helps with; everything else in "Batches 1-4" stays manual.
 COVERAGE_NOTE = (
     "Automates (passive part only): `diag` card counters/reset/heap (link counters rising with "
-    "traffic, busy 409 with --only busy); Hardware evidence card (CAPS evidence levels and pin "
+    "traffic, busy 409 with --only busy); script Stop on the device (script_run ended by script_stop, "
+    "next script_run accepted) with --only script_stop; Hardware evidence card (CAPS evidence levels and pin "
     "conflicts are recorded; plausibility vs the real board is a human judgement); Files "
     "list/read/upload transport. Manual: Wi-Fi capture descriptor, Mifare, speaker, Sub-GHz "
     "Listen/Spectrum UI, Stop all/unplug in the app, USB permission/flash/wake lock, in-app "
@@ -635,6 +651,7 @@ class Runner:
         self.active_subs = set()
         self.upload = None        # {"token", "path", "committed", "removed"}
         self.busy_mid = None
+        self.script_mid = None    # a script_run still waiting for its reply (cleanup stops it)
         self.soak = None          # soak working state (check_soak)
         self.soak_report = None   # soak summary, series, ops and findings for the report
         self._ping_outstanding = set()
@@ -732,6 +749,7 @@ class Runner:
         self._run("fs_upload", self.check_fs_upload)
         self._run("streams", self.check_streams)
         self._run("busy", self.check_busy)
+        self._run("script_stop", self.check_script_stop)
         self._run("soak", self.check_soak)
         self._run("heap", self.check_heap)
         self._run("diag_counters", self.check_diag_counters)
@@ -752,6 +770,10 @@ class Runner:
                 self.link.send(CMD, {"cmd": "stop"})
                 actions.append(("stop busy op", self.link.reply(self.busy_mid, t) is not None))
                 self.busy_mid = None
+            if self.script_mid is not None:
+                self.link.send(CMD, {"cmd": "script_stop"})
+                actions.append(("stop script_run", self.link.reply(self.script_mid, t) is not None))
+                self.script_mid = None
             for stream in sorted(self.active_subs):
                 mid = self.link.send(SUB, {"stream": stream, "on": False})
                 actions.append((f"SUB {stream} off", self.link.reply(mid, t) is not None))
@@ -1206,6 +1228,82 @@ class Runner:
                 problems.append("stop did not end the operation early")
         r.evidence = steps
         self.verdict(r, problems, f"PONG and ERR 409 while busy; stop ended it in {steps['stop_to_ack_s']} s")
+
+    def check_script_stop(self, r):
+        """script_run of SCRIPT_LONG, PING while it runs, script_stop after --script-stop-after s: the
+        run must end with ok:false `script stopped` within --script-stop-bound s, the stop itself
+        must get no reply, and an immediate script_run of SCRIPT_SHORT must print its text (not
+        `interpreter busy`)."""
+        steps, problems, stop_ids, stop_replies, run_end = {}, [], set(), [], []
+
+        def other(f):
+            if f.get("t") not in (ACK, ERR):
+                return
+            if f.get("id") in stop_ids:
+                stop_replies.append(f.get("d"))
+            elif self.script_mid is not None and f.get("id") == self.script_mid:
+                run_end.append(f)  # the run ended while we waited for something else (e.g. the PONG)
+
+        t0 = time.time()
+        self.script_mid = self.link.send(CMD, {"cmd": f"script_run {SCRIPT_LONG}"})
+        early = self.link.reply(self.script_mid, self.o.script_stop_after, other)
+        if early is not None:
+            self.script_mid = None
+            d = early.get("d") or {}
+            r.evidence = {"script_run_reply": d, "after_s": round(time.time() - t0, 3)}
+            if early.get("t") == ERR and d.get("code") == 501:
+                r.status, r.reason = "SKIP", "script_run not in this build (ERR 501)"
+            else:
+                r.status, r.reason = "FAIL", f"the looping script ended before the stop: {d}"
+            return
+        pm = self.link.send(PING, {})
+        pong = self.link.reply(pm, self.o.timeout, other)
+        steps["ping_while_running"] = pong is not None and pong.get("t") == PONG
+        if not steps["ping_while_running"]:
+            problems.append("no PONG while the script ran")
+        ts = time.time()
+        if run_end:
+            self.script_mid = None
+            r.evidence = {**steps, "run_reply": run_end[0].get("d")}
+            r.status, r.reason = "FAIL", f"the looping script ended before the stop: {run_end[0].get('d')}"
+            return
+        stop_ids.add(self.link.send(CMD, {"cmd": "script_stop"}))
+        # Wait past the bound (up to the 20 s wall clock) so a slow or missing stop shows its real outcome.
+        end = self.link.reply(self.script_mid, 20 + self.o.timeout, other)
+        end = end or (run_end[0] if run_end else None)
+        steps["stop_to_reply_s"] = round(time.time() - ts, 3)
+        steps["run_reply"] = end.get("d") if end else None
+        if end is None:
+            problems.append("the script_run never answered after script_stop")
+            r.evidence = steps
+            return self.verdict(r, problems, "")
+        self.script_mid = None
+        d = end.get("d") or {}
+        if not (end.get("t") == ACK and d.get("ok") is False and d.get("out") == "script stopped"):
+            problems.append(f"script_run did not end with ok:false 'script stopped': {d}")
+        if steps["stop_to_reply_s"] > self.o.script_stop_bound:
+            problems.append(f"the run ended {steps['stop_to_reply_s']} s after script_stop "
+                            f"(bound {self.o.script_stop_bound} s)")
+        tn = time.time()
+        nm = self.link.send(CMD, {"cmd": f"script_run {SCRIPT_SHORT}"})
+        nxt = self.link.reply(nm, self.o.timeout + 5, other)
+        steps["next_run_s"] = round(time.time() - tn, 3)
+        steps["next_run_reply"] = nxt.get("d") if nxt else None
+        nd = (nxt or {}).get("d") or {}
+        if nxt is None:
+            problems.append("the next script_run did not answer")
+        elif nd.get("out") == "interpreter busy":
+            problems.append("the next script_run was refused: interpreter busy")
+        elif not (nxt.get("t") == ACK and nd.get("ok") is True and SCRIPT_SHORT_OUT in str(nd.get("out", ""))):
+            problems.append(f"the next script_run did not print {SCRIPT_SHORT_OUT!r}: {nd}")
+        self.link.wait(lambda f: False, 0.5, other)  # a reply to the stop would arrive by now
+        steps["stop_replies"] = stop_replies
+        if stop_replies:
+            problems.append(f"script_stop was answered instead of consumed by the run: {stop_replies}")
+        steps["total_s"] = round(time.time() - t0, 3)
+        r.evidence = steps
+        self.verdict(r, problems, f"script stopped {steps['stop_to_reply_s']} s after script_stop; "
+                                  f"the next script_run printed {SCRIPT_SHORT_OUT!r}")
 
     # -- soak ------------------------------------------------------------------------------
     def check_soak(self, r):
@@ -1680,6 +1778,12 @@ def dry_run_plan(opts):
     if "busy" in sel:
         plan += [("busy", CMD, {"cmd": f"jam_detect {opts.busy_secs}"}), ("busy", PING, {}),
                  ("busy", CMD, {"cmd": "diag"}), ("busy", CMD, {"cmd": "stop"})]
+    if "script_stop" in sel:
+        plan += [("script_stop", CMD, {"cmd": f"script_run {SCRIPT_LONG}"}),
+                 ("script_stop", None, f"... {opts.script_stop_after} s after script_run:"),
+                 ("script_stop", PING, {}), ("script_stop", CMD, {"cmd": "script_stop"}),
+                 ("script_stop", None, "... once the run answered `script stopped`:"),
+                 ("script_stop", CMD, {"cmd": f"script_run {SCRIPT_SHORT}"})]
     if "soak" in sel:
         plan += [("soak", CMD, {"cmd": "diag"}),
                  ("soak", None, f"... every {opts.soak_interval} s for {opts.soak} min:"),
@@ -1878,6 +1982,10 @@ def parse_args(argv):
     ap.add_argument("--read-path", help="file for fs_read (default: smallest file at / up to --read-max)")
     ap.add_argument("--read-max", type=int, default=65536)
     ap.add_argument("--busy-secs", type=int, default=8, help="jam_detect duration for --only busy (1..30)")
+    ap.add_argument("--script-stop-after", type=float, default=2.0,
+                    help="--only script_stop: seconds the looping script runs before script_stop (0.2..10)")
+    ap.add_argument("--script-stop-bound", type=float, default=2.0,
+                    help="--only script_stop: seconds within which the run must answer `script stopped` (0.1..15)")
     ap.add_argument("--diag-repeats", type=int, default=20)
     ap.add_argument("--heap-tolerance", type=int, default=4096)
     ap.add_argument("--heap-run-tolerance", type=int, default=32768)
@@ -1922,6 +2030,8 @@ def parse_args(argv):
         ap.error(f"not a receive-only stream: {bad} (allowed: {', '.join(RECEIVE_ONLY_STREAMS)})")
     if not 1 <= o.busy_secs <= 30:
         ap.error("--busy-secs must be 1..30")
+    if not (0.2 <= o.script_stop_after <= 10 and 0.1 <= o.script_stop_bound <= 15):
+        ap.error("--script-stop-after must be 0.2..10 s and --script-stop-bound 0.1..15 s")
     if o.pings < 1 or o.diag_repeats < 3:
         ap.error("--pings >= 1 and --diag-repeats >= 3")
     return o

@@ -109,13 +109,23 @@ class DeviceOperation(
         }
     }
 
-    /** Cancel the in-flight command, if any; its late reply is ignored. */
-    fun stop() {
+    /** Cancel the in-flight command, if any, showing [text]; its late reply is ignored. */
+    fun stop(text: String = "Stopped.") {
         synchronized(lock) {
             val running = _busy.value
             val gen = supersede()
-            if (running) publish(gen, "Stopped.")
+            if (running) publish(gen, text)
         }
+    }
+
+    /**
+     * Replace the waiting text of the in-flight command without superseding it (its reply still
+     * maps through the result as usual). False, and nothing changes, when no command waits.
+     */
+    fun updateRunning(text: String): Boolean = synchronized(lock) {
+        if (!_busy.value) return false
+        _status.value = text
+        true
     }
 
     /** Show a local [text] (no command, no connection check), superseding any pending reply. */

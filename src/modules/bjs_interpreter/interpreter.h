@@ -27,7 +27,8 @@ extern volatile uint32_t g_bjsDeadlineMs;
 
 // Brucia companion: stop a headless script that sits in a native wait (see bjs_abort_core.h).
 // g_bjsAbort is set by script_run (execution bound passed, wall clock out, or a stop CMD) and
-// cleared only by the interpreter task when it ends, together with g_bjsDeadlineMs.
+// cleared by the interpreter task when it ends, together with g_bjsDeadlineMs (script_run also
+// drops it once the task is gone, as its last poll may copy it in again after the task cleared it).
 //   bjs_abort_requested(): g_bjsAbort, or the deadline passed (the interrupt handler's test)
 //   bjs_sleep_ms(ms): delay() for natives; while a deadline is set it sleeps in 10 ms slices and
 //     returns false once an abort is requested; with no deadline (interactive use) it is a plain
@@ -37,6 +38,10 @@ extern volatile uint32_t g_bjsDeadlineMs;
 //     Bruce loops a native is in end the way ESC at the device ends them, and wait-for-release
 //     loops still end. Other tasks (the companion loop) never see it.
 extern volatile bool g_bjsAbort;
+// Set by js_fatal_error_handler when the script ended on an uncaught error (not exit()), including
+// the `interrupted` error of the execution bound; cleared when a run starts. script_run then
+// replies ok:false with the captured output (which holds the error text).
+extern volatile bool g_bjsThrew;
 bool bjs_abort_requested();
 bool bjs_sleep_ms(int32_t ms);
 

@@ -145,8 +145,11 @@ static void runScriptRun(const String &src, uint32_t id) {
     }
     bool finished = (interpreter_state <= 0);
     bjs_capture_end(); // stop capturing BEFORE the buffer goes out of scope
-    // g_bjsDeadlineMs / g_bjsAbort are not cleared here: a task still running keeps its bound and
-    // the abort, and clears both itself when it ends (bjs_task_finished in interpreter.cpp).
+    // g_bjsDeadlineMs / g_bjsAbort are not cleared here while the task still runs: it keeps its bound
+    // and the abort, and clears both itself when it ends (bjs_task_finished in interpreter.cpp). Once
+    // the task is gone, drop the abort the last step copied in after the task had cleared it (the
+    // step that sees the end still copies abortRequested), so a stopped run leaves no abort set.
+    if (interpreterTaskHandler == NULL) g_bjsAbort = false;
 
     if (captured.length() > 1800) {
         captured = captured.substring(0, 1800);
@@ -155,6 +158,12 @@ static void runScriptRun(const String &src, uint32_t id) {
     const char *failure = bjsRunFailure(finished, watch.stopRequested);
     if (failure != nullptr) {
         companionAckMsg(id, false, failure);
+        return;
+    }
+    // An uncaught error (ReferenceError, the bound's `interrupted`, ...) is not a success: ok:false
+    // with the captured output, which ends with the error text. exit() is not an error.
+    if (g_bjsThrew) {
+        companionAckMsg(id, false, captured.length() ? captured.c_str() : "script error");
         return;
     }
     companionAckMsg(id, true, captured.c_str());

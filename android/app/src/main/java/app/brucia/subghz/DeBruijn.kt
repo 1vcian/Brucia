@@ -6,9 +6,37 @@ package app.brucia.subghz
  * in minimal time. Computed on the phone; the device transmits it.
  */
 object DeBruijn {
+    /** Largest order the generator supports (sequence length 2^22). */
+    const val MAX_ORDER = 22
+
+    /**
+     * Bits a single device `subghz tx` key can carry: one fixed code of at most 64 bits (16 hex
+     * digits). A De Bruijn B(2,n) sweep is 2^n bits and is not a single fixed code, so this path
+     * cannot carry it. Named here so the UI, the transmit guard and the tests agree.
+     */
+    const val DEVICE_TX_KEY_BITS = 64
+
+    /** Orders the UI offers as presets. Every entry must be in 1..[MAX_ORDER] (asserted by tests). */
+    val OFFERED_ORDERS = listOf(8, 10, 12, 16, 20, 22)
+
+    /**
+     * Why the device cannot transmit a B(2,[n]) De Bruijn sweep over `subghz tx`, phrased for the
+     * user. Always a rejection today: `subghz tx` sends one fixed code, not a sweep, so there is no
+     * order the phone could hand it without silently truncating or sending the wrong bits. The
+     * caller must NOT dispatch any command when this returns; nothing is transmitted.
+     */
+    fun transmitRejection(n: Int): String {
+        if (n < 1 || n > MAX_ORDER) {
+            return "De Bruijn order must be 1..$MAX_ORDER; $n is out of range. Nothing was transmitted."
+        }
+        val bits = 1L shl n
+        return "the device subghz tx sends a single fixed code (max $DEVICE_TX_KEY_BITS bits); " +
+            "it cannot carry a $n-bit De Bruijn sweep ($bits bits). Nothing was transmitted."
+    }
+
     /** Lexicographically-smallest de Bruijn sequence over {0,1} of order [n] (length 2^n). */
     fun sequence(n: Int): String {
-        require(n in 1..22) { "n out of range" }
+        require(n in 1..MAX_ORDER) { "n out of range" }
         val k = 2
         val a = IntArray(k * n)
         val sb = StringBuilder()

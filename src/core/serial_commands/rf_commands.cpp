@@ -7,6 +7,7 @@
 #include "modules/rf/protocols/rf_encoder.h"  // rf_tx_protocol, rf_encoder_selftest
 #include "modules/rf/protocols/rf_keeloq.h"   // rf_keeloq_selftest
 #include "modules/rf/protocols/rf_registry.h" // rf_find_protocol
+#include "modules/rf/rf_hexkey.h"             // rfhex::parseKey64 (safe, no-throw hex key parse)
 #include "modules/rf/rf_scan.h"
 #include "modules/rf/rf_send.h"
 #include "modules/rf/rf_utils.h"
@@ -59,7 +60,15 @@ uint32_t rfTxCallback(cmd *c) {
     String strTe = teArg.getValue();
     String strCount = cntArg.getValue();
 
-    uint64_t key = std::stoull(strKey.c_str(), nullptr, 16);
+    // Safe parse: a key longer than 16 hex digits (e.g. a phone-computed De Bruijn sweep) would make
+    // std::stoull throw std::out_of_range, which is uncaught on the companion routing path and
+    // aborts/reboots the device. Reject it instead; this does not change what `subghz tx` can send
+    // (one fixed code of at most 64 bits).
+    uint64_t key = 0;
+    if (!rfhex::parseKey64(strKey.c_str(), key)) {
+        serialDevice->println("invalid key: expected up to 16 hex digits (one 64-bit code)");
+        return false;
+    }
     unsigned long frequency = std::stoul(strFrequency.c_str());
     unsigned int te = std::stoul(strTe.c_str());
     unsigned int count = std::stoul(strCount.c_str());
@@ -96,7 +105,11 @@ uint32_t rfTxByNameCallback(cmd *c) {
         return false;
     }
 
-    uint64_t key = std::stoull(strKey.c_str(), nullptr, 16);
+    uint64_t key = 0;
+    if (!rfhex::parseKey64(strKey.c_str(), key)) {
+        serialDevice->println("invalid key: expected up to 16 hex digits (one 64-bit code)");
+        return false;
+    }
     unsigned long frequency = std::stoul(strFrequency.c_str());
     unsigned int bits = std::stoul(strBits.c_str());
     int te = strTe.length() ? (int)std::stoul(strTe.c_str()) : 0;

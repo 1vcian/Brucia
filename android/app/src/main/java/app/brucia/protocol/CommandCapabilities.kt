@@ -10,7 +10,8 @@ import app.brucia.wardrive.DeviceFeatures
  */
 object CommandCapabilities {
     private val stops = setOf("fm_stop", "fm_audio_stop", "speaker_stop", "spkr_pcm_stop",
-        "ble_hid_end", "evil_portal_stop", "wifi_disconnect", "responder_stop", "karma_stop", "brucegotchi_stop")
+        "ble_hid_end", "evil_portal_stop", "wifi_disconnect", "responder_stop", "karma_stop", "brucegotchi_stop",
+        "script_stop")
 
     fun required(command: String): Set<String> {
         val words = command.trim().split(Regex("\\s+"), limit = 4)

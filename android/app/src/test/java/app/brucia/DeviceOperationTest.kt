@@ -174,4 +174,24 @@ class DeviceOperationTest {
         assertTrue(op.showIfIdle("after"))
         assertEquals("after" to false, op.state())
     }
+
+    @Test fun updateRunningKeepsTheWaitAndStopTakesItsText() = runVirtual {
+        val op = op()
+        assertFalse(op.updateRunning("idle"))
+        assertEquals("" to false, op.state())
+        op.go()
+        assertTrue(op.updateRunning("Stopping..."))
+        assertEquals("Stopping..." to true, op.state())
+        assertEquals("ok:x", op.answer(0, true, "x")) // the reply still maps through the result
+        assertFalse(op.updateRunning("late"))
+        op.go()
+        until { runner.calls.size == 2 }
+        op.stop("Gone.")
+        assertEquals("Gone." to false, op.state())
+        op.stop("Again.") // idle: keeps the text
+        assertEquals("Gone." to false, op.state())
+        runner.reply(1, true, "late")
+        settle()
+        assertEquals("Gone." to false, op.state())
+    }
 }

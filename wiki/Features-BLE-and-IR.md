@@ -24,7 +24,8 @@ A BLE presenter and keyboard that controls a PC over Bluetooth from the phone - 
 legitimate HID remote, not an attack tool.
 
 ## iBeacon advertiser
-Advertises a configurable iBeacon payload (`ble_ibeacon`).
+Advertises a configurable iBeacon payload (`ble_ibeacon`). Whether any app or OS reacts to the
+frame depends on the receiver's settings and has not been verified here.
 
 ## Media-control hijack
 Sends BLE media-control commands to nearby devices (`ble_media`). Authorized testing only.
@@ -35,6 +36,13 @@ ProximityPair (`ble_spam`), **Android** Google Fast Pair (`ble_fastpair_spam`), 
 Swift Pair, **Samsung**, or **all** platforms cycled (`ble_spam_platform
 <ios|android|windows|samsung|all>`). Wi-Fi **beacon spam** (`wifi_beacon_spam`) is reachable
 from the same hub. Authorized testing only.
+
+Each of these broadcasts advertisements of the named type. Whether a receiver actually shows a
+pairing prompt or popup depends on its OS version and settings, and the effect on any receiver has
+not been verified here. The advertisers share the single BLE radio with the `ble.scan` stream and
+the BLE HID presenter: a device that is scanning or running a HID session already owns the stack,
+so the advertiser replies with a busy error (409) instead of tearing that session down and
+reporting a false success. Stop the scan / HID session first.
 
 ## IR catalog
 A bundled universal catalog of ~1648 remote models across ~808 brands and 45 categories,

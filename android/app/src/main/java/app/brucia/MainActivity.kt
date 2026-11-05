@@ -4200,10 +4200,11 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         var dbTe by rememberSaveable { mutableIntStateOf(400) }
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
             Column(modifier = Modifier.padding(14.dp)) {
-                Text("De Bruijn brute force", fontWeight = FontWeight.SemiBold, color = cs.primary)
+                Text("De Bruijn sequence", fontWeight = FontWeight.SemiBold, color = cs.primary)
                 Text(
-                    "Transmit every ${dbBits}-bit code on ${freqHz / 1_000_000.0} MHz (fixed-code OOK gates/remotes). " +
-                        "Computed on the phone, sent via the device.",
+                    "Compute the shortest ${dbBits}-bit De Bruijn sweep on the phone. Note: the device " +
+                        "subghz tx sends a single fixed code and cannot carry a full sweep, so Transmit " +
+                        "refuses with a reason and sends nothing.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
@@ -4214,13 +4215,13 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text("Code length (bits)", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(8, 10, 12, 16, 20, 24).forEach { n -> SegButton("$n", dbBits == n, Modifier) { dbBits = n } }
+                    DeBruijn.OFFERED_ORDERS.forEach { n -> SegButton("$n", dbBits == n, Modifier) { dbBits = n } }
                 }
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
                     value = dbBits.toString(),
-                    onValueChange = { s -> s.toIntOrNull()?.let { dbBits = it.coerceIn(4, 24) } },
-                    label = { Text("Custom bits (4-24)") },
+                    onValueChange = { s -> s.toIntOrNull()?.let { dbBits = it.coerceIn(1, DeBruijn.MAX_ORDER) } },
+                    label = { Text("Custom order (1-${DeBruijn.MAX_ORDER})") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -4237,28 +4238,27 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                // Sequence size + estimated transmit time so the limit is clear.
+                // Sequence size, so the scale (and why the device cannot carry it) is clear.
                 val seqBits = 1L shl dbBits
-                val estMs = seqBits * dbTe / 1000
-                val estStr = if (estMs < 1000) "${estMs} ms" else "${estMs / 1000}.${(estMs % 1000) / 100} s"
+                val fitsDeviceKey = seqBits <= DeBruijn.DEVICE_TX_KEY_BITS
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "= $seqBits bits, ~$estStr to transmit" +
-                        if (dbBits >= 20) "  (long - large keys may exceed the device buffer)" else "",
+                    "= $seqBits bits" +
+                        if (!fitsDeviceKey) "  (exceeds the ${DeBruijn.DEVICE_TX_KEY_BITS}-bit device code - not transmittable)" else "",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (dbBits >= 20) Amber else cs.onSurfaceVariant,
+                    color = if (!fitsDeviceKey) Amber else cs.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(10.dp))
                 Button(
                     enabled = connected,
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
-                        val cmd = vm.transmitDeBruijn(dbBits, freqHz, dbTe, 1)
-                        Toast.makeText(context, "Transmitting de Bruijn (${dbBits}-bit)...", Toast.LENGTH_SHORT).show()
+                        val reason = vm.transmitDeBruijn(dbBits, freqHz, dbTe, 1)
+                        Toast.makeText(context, reason, Toast.LENGTH_LONG).show()
                     }
                 ) { Text("Transmit de Bruijn") }
                 Text(
-                    "Authorized testing only - transmits on the selected frequency.",
+                    "The device transmit path cannot carry a De Bruijn sweep; Transmit refuses and sends nothing.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 )
             }
@@ -4632,11 +4632,12 @@ private fun ConsoleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     }
 }
 
-// Example JS snippets offered on the Scripts screen; loaded into the editor on tap.
-private val scriptExamples = listOf(
-    "Hello" to "print(\"Hello from Brucia\");",
-    "Loop" to "for (var i = 0; i < 5; i++) {\n  print(\"line \" + i);\n}",
-    "Device" to "print(\"board: \" + deviceName());\nprint(\"free heap: \" + freeHeap());",
+// Example JS snippets offered on the Scripts screen; loaded into the editor on tap. BruceJS has no
+// global print(): console.log() is what script_run returns as output.
+internal val scriptExamples = listOf(
+    "Hello" to "console.log(\"Hello from Brucia\");",
+    "Loop" to "for (var i = 0; i < 5; i++) {\n  console.log(\"line \" + i);\n}",
+    "Device" to "console.log(\"board: \" + device.getName());\nconsole.log(\"free heap: \" + device.getFreeHeapSize());",
 )
 
 @Composable
@@ -4645,6 +4646,8 @@ private fun ScriptsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
     val output by vm.scriptOutput.collectAsState()
+    val running by vm.scriptBusy.collectAsState()
+    val stopping by vm.scriptStopping.collectAsState()
     var src by rememberSaveable { mutableStateOf(scriptExamples[0].second) }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -4684,11 +4687,21 @@ private fun ScriptsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         )
         Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                enabled = connected && src.isNotBlank(),
-                onClick = { vm.scriptRun(src) },
-                modifier = Modifier.weight(1f),
-            ) { Text("Run") }
+            // While a script runs, Run turns into Stop: the device ends the script and the run's
+            // reply shows the outcome; a new run is possible only after that reply.
+            if (running || stopping) {
+                Button(
+                    enabled = connected && running && !stopping,
+                    onClick = { vm.scriptStop() },
+                    modifier = Modifier.weight(1f),
+                ) { Text(if (stopping) "Stopping..." else "Stop") }
+            } else {
+                Button(
+                    enabled = connected && src.isNotBlank(),
+                    onClick = { vm.scriptRun(src) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("Run") }
+            }
             OutlinedButton(
                 onClick = { vm.clearScriptOutput() },
                 modifier = Modifier.weight(1f),
@@ -6290,7 +6303,7 @@ private fun BleIbeaconCard(vm: WardriveViewModel, connected: Boolean) {
     Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(14.dp)) {
             Text("iBeacon", fontWeight = FontWeight.SemiBold, color = cs.primary)
-            Text("Broadcast an Apple iBeacon advertisement (apps/OS that watch for beacons will see it). Leave the UUID blank for a default.",
+            Text("Broadcasts an Apple iBeacon advertisement frame. Whether any app or OS reacts to it depends on the receiver's settings and has not been verified here. Leave the UUID blank for a default.",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(uuid, { uuid = it }, label = { Text("Proximity UUID (optional)") },
@@ -6353,21 +6366,21 @@ private fun BleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             StreamToggleRow("Scan", "ble.scan stream", checked = scanning, enabled = connected,
                 onCheckedChange = { vm.setBleScan(it) })
         }
-        // BLE spam (Apple ProximityPair popups) - authorized testing only. Continuous, abortable:
-        // Start launches the short-burst loop, Stop ends it (shared BlePlatformSpamCard).
+        // BLE spam (Apple ProximityPair advertisements) - authorized testing only. Continuous,
+        // abortable: Start launches the short-burst loop, Stop ends it (shared BlePlatformSpamCard).
         item {
             BlePlatformSpamCard(
-                title = "BLE spam (Apple popups)",
-                desc = "Broadcasts fake Apple ProximityPair pairing popups to nearby devices continuously until you Stop. Authorized testing only.",
+                title = "BLE spam (Apple ProximityPair)",
+                desc = "Broadcasts fake Apple ProximityPair advertisements continuously until you Stop. Whether a nearby device shows a pairing prompt depends on its OS version and settings and has not been verified. Authorized testing only.",
                 target = "ios", connected = connected, spamStatus = spamStatus, active = spamActive,
                 onStart = vm::startBleSpam, onStop = { vm.stopBleSpam() },
             )
         }
-        // BLE Fast Pair spam (Android pairing popups) - authorized testing only.
+        // BLE Fast Pair spam (Android) - authorized testing only.
         item {
             BlePlatformSpamCard(
-                title = "Fast Pair spam (Android popups)",
-                desc = "Broadcasts fake Google Fast Pair advertisements to trigger pairing popups on nearby Android devices continuously until you Stop. Authorized testing only.",
+                title = "Fast Pair spam (Android)",
+                desc = "Broadcasts fake Google Fast Pair advertisements continuously until you Stop. Whether a nearby Android device shows a pairing popup depends on its OS version and settings and has not been verified. Authorized testing only.",
                 target = "android", connected = connected, spamStatus = spamStatus, active = spamActive,
                 onStart = vm::startBleSpam, onStop = { vm.stopBleSpam() },
             )
@@ -6622,28 +6635,28 @@ private fun SpamScreen(vm: WardriveViewModel, onConnect: () -> Unit, filter: Str
             item {
                 BlePlatformSpamCard(
                     title = "Apple / iOS / Mac",
-                    desc = "BLE Continuity / ProximityPair: fake AirPods, AppleTV and Setup-new-device prompts.",
+                    desc = "BLE Continuity / ProximityPair advertisements (fake AirPods, AppleTV, Setup-new-device). Receiver reaction depends on OS version and settings; not verified.",
                     target = "ios", connected = connected, spamStatus = spamStatus, active = spamActive, onStart = vm::startBleSpam, onStop = { vm.stopBleSpam() },
                 )
             }
             item {
                 BlePlatformSpamCard(
                     title = "Android",
-                    desc = "BLE Fast Pair: Google pairing popups.",
+                    desc = "BLE Fast Pair advertisements. Receiver reaction depends on OS version and settings; not verified.",
                     target = "android", connected = connected, spamStatus = spamStatus, active = spamActive, onStart = vm::startBleSpam, onStop = { vm.stopBleSpam() },
                 )
             }
             item {
                 BlePlatformSpamCard(
                     title = "Windows / PC",
-                    desc = "BLE Swift Pair popups.",
+                    desc = "BLE Swift Pair advertisements. Receiver reaction depends on OS version and settings; not verified.",
                     target = "windows", connected = connected, spamStatus = spamStatus, active = spamActive, onStart = vm::startBleSpam, onStop = { vm.stopBleSpam() },
                 )
             }
             item {
                 BlePlatformSpamCard(
                     title = "Samsung",
-                    desc = "BLE EasySetup / Buds popups.",
+                    desc = "BLE EasySetup / Buds advertisements. Receiver reaction depends on OS version and settings; not verified.",
                     target = "samsung", connected = connected, spamStatus = spamStatus, active = spamActive, onStart = vm::startBleSpam, onStop = { vm.stopBleSpam() },
                 )
             }

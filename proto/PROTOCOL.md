@@ -408,8 +408,12 @@ device in that state, and Brucia/Bruce commands and scripts do not read the app'
 
 `script_run <js source>` (not on LITE builds; ERR 501 there) runs a BruceJS script headless with
 a 15 s execution bound (20 s wall clock) and replies `ACK {ok, out}`, `out` being what the script
-printed with `print()`/`console.log()` (and any uncaught error, e.g. `interrupted` when the bound
-stopped it), cut at 1800 characters; `ok:false` with `script timeout`, `script stopped`,
+logged with `console.log()` (BruceJS has no global `print()`; calling it is a ReferenceError) and
+any uncaught error, cut at 1800 characters. A script that ends on an uncaught error (a
+ReferenceError, or `interrupted` when the bound stopped it) replies `ok:false` with that output,
+which ends with the error text (`script error` when nothing was captured); `exit()` is not an error.
+Firmware before batch 16 replied `ok:true` for these, so a host should not read `ok:true` as "no
+error" from older firmware. Other `ok:false` replies: `script timeout`, `script stopped`,
 `interpreter busy`, `script too large` (over 6000 characters) or `failed to start interpreter`.
 
 While it waits for the script the device behaves as during every blocking operation (see
@@ -417,7 +421,12 @@ While it waits for the script the device behaves as during every blocking operat
 device busy`, and a `stop` / `*_stop` `CMD` (`script_stop` reads best) stops the script; it is not
 ACKed itself, the `script_run` reply is `ok:false`, `script stopped`. Older firmware did not read
 the link during `script_run` (frames waited until it ended), so an app should send the stop only
-on a direct channel and treat a missing effect as old firmware. Stopping, like the execution bound
+on a direct channel and treat a missing effect as old firmware. The `script stopped` reply is sent
+once the interpreter task has ended (task handle cleared, abort flag and deadline dropped), so a
+`script_run` sent right after it is accepted, not `interpreter busy`. The Brucia app sends
+`script_stop` once per run, only while a `script_run` awaits its reply, and starts no new script
+until that reply arrived and the stop frame was written (a stop that reaches an idle device gets
+an ordinary reply, which the app ignores). Stopping, like the execution bound
 and the wall clock, ends the script promptly also when it sits in a native wait: `delay()`,
 timers, `wifi.connect()`, `nrf24.receive()`, `notify` blink, and the Bruce loops that end on ESC
 (`subghz.read`, `ir.read`, `rfid.read`/`readUID`/`write`, `audio.playFile()`/`tone()`, CLI
@@ -431,7 +440,7 @@ state change nothing makes); it now starts at once. Inside it:
 
 | Script API | In companion mode |
 |---|---|
-| `print()`, `console.log()` and errors | captured into `out` |
+| `console.log()` and uncaught errors | captured into `out` (an uncaught error makes the reply `ok:false`); there is no global `print()` |
 | `serial.print()` / `serial.println()` | dropped (they write the USB console, which is the frame stream) |
 | `serial.readln([timeoutMs])` | returns `""` at once, without reading or flushing the port (outside companion mode it still waits up to the timeout for a line from the USB console) |
 | `serial.cmd(cmd)`, `audio.playFile()`, `audio.tone()`, `badusb.runFile()`, `subghz.transmitFile()` (CLI-backed helpers) | run the CLI command with no console: its text is dropped and console input reads as empty; the return value is the CLI result |

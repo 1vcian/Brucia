@@ -38,8 +38,16 @@ class EspFlasher(private val io: SerialIo) {
         fun setBaudRate(baud: Int)
     }
 
-    private val reader = SlipCodec.FrameReader()
+    /**
+     * Receive buffer that persists across reads and commands: one USB read can carry a reply plus
+     * the stub's "OHAI" greeting (or the eight SYNC replies), and a reply can be split over many
+     * reads. Frames are taken one at a time and whatever follows stays for the next call.
+     */
+    private val rx = SlipCodec.Receiver()
     private val readBuf = ByteArray(4096)
+
+    /** The stub's "OHAI" greeting was received (possibly while still waiting for the MEM_END reply). */
+    private var stubGreeted = false
 
     /**
      * Status bytes that end every response: the ESP32-family ROM loader sends four (status, error,
@@ -150,6 +158,7 @@ class EspFlasher(private val io: SerialIo) {
      */
     fun connect(doReset: Boolean = true): Boolean {
         statusLen = ROM_STATUS_LEN
+        stubGreeted = false
         // Native-USB ESP32-S3 (USB-Serial-JTAG): a reset to enter download mode resets the whole
         // chip, so the USB peripheral re-enumerates and the open handle dies. For that case the
         // caller resets + re-opens the re-enumerated ROM device itself and passes doReset=false; we
@@ -187,6 +196,7 @@ class EspFlasher(private val io: SerialIo) {
         uploadSegment(data, EspStub.DATA_START)
         // MEM_END runs the stub at its entrypoint; the ROM may not reply (it jumps away), so ignore.
         val end = EspProtocol.le32(if (EspStub.ENTRY == 0L) 1L else 0L) + EspProtocol.le32(EspStub.ENTRY)
+        stubGreeted = false // only a greeting after MEM_END is this stub's
         try { command(EspProtocol.CMD_MEM_END, end, timeoutMs = 500, checkStatus = false) } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "MEM_END no reply (expected): ${e.message}") }
         waitForOhai(3000).also { if (it) statusLen = STUB_STATUS_LEN }
     } catch (_: Exception) {
@@ -211,20 +221,18 @@ class EspFlasher(private val io: SerialIo) {
         }
     }
 
-    /** Read raw SLIP frames until one is the stub's "OHAI" greeting, or [timeoutMs] elapses. */
+    /**
+     * True once the stub's "OHAI" greeting frame has arrived, waiting up to [timeoutMs]. The greeting
+     * may already have been taken while waiting for the MEM_END reply (same read, or before it);
+     * frames after it stay buffered for the next command.
+     */
     private fun waitForOhai(timeoutMs: Int): Boolean {
-        reader.reset()
-        val deadline = (System.nanoTime() / 1_000_000L) + timeoutMs
-        while ((System.nanoTime() / 1_000_000L) < deadline) {
-            val n = io.read(readBuf, (deadline - (System.nanoTime() / 1_000_000L)).toInt().coerceIn(1, timeoutMs))
-            for (i in 0 until n) {
-                val frame = reader.offer(readBuf[i].toInt() and 0xFF) ?: continue
-                if (frame.size >= 4 && frame[0].toInt() == 'O'.code && frame[1].toInt() == 'H'.code &&
-                    frame[2].toInt() == 'A'.code && frame[3].toInt() == 'I'.code
-                ) return true
-            }
+        if (stubGreeted) return true
+        val deadline = nowMs() + timeoutMs
+        while (true) {
+            val frame = nextFrame(deadline) ?: return false
+            if (EspProtocol.isStubGreeting(frame)) { stubGreeted = true; return true }
         }
-        return false
     }
 
     /** True only if the ROM bootloader really answers (READ_REG of a ROM address succeeds). */
@@ -288,12 +296,12 @@ class EspFlasher(private val io: SerialIo) {
 
     /** Read and discard any buffered bytes so SYNC starts from a clean frame. */
     private fun drainInput() {
-        reader.reset()
-        val t = (System.nanoTime() / 1_000_000L)
-        while ((System.nanoTime() / 1_000_000L) - t < 100) {
+        rx.clear()
+        val t = nowMs()
+        while (nowMs() - t < 100) {
             if (io.read(readBuf, 20) <= 0) break
         }
-        reader.reset()
+        rx.clear()
     }
 
     /**
@@ -317,19 +325,36 @@ class EspFlasher(private val io: SerialIo) {
         return resp
     }
 
-    /** Read SLIP frames until one echoes [command], or [timeoutMs] elapses. */
+    /**
+     * Read SLIP frames until one echoes [command], or [timeoutMs] elapses. Frames are parsed when
+     * taken, so the status length in force then applies (ROM 4 until OHAI, stub 2). A greeting
+     * seen here is remembered for [waitForOhai]; other non-matching frames are skipped.
+     */
     private fun readResponse(command: Int, timeoutMs: Int): EspProtocol.Response? {
-        val deadline = (System.nanoTime() / 1_000_000L) + timeoutMs
-        while ((System.nanoTime() / 1_000_000L) < deadline) {
-            val n = io.read(readBuf, (deadline - (System.nanoTime() / 1_000_000L)).toInt().coerceIn(1, timeoutMs))
-            for (i in 0 until n) {
-                val frame = reader.offer(readBuf[i].toInt() and 0xFF) ?: continue
-                val resp = EspProtocol.parseResponse(frame, statusLen) ?: continue
-                if (resp.command == command) return resp
-            }
+        val deadline = nowMs() + timeoutMs
+        while (true) {
+            val frame = nextFrame(deadline) ?: return null
+            if (EspProtocol.isStubGreeting(frame)) { stubGreeted = true; continue }
+            val resp = EspProtocol.parseResponse(frame, statusLen) ?: continue
+            if (resp.command == command) return resp
         }
-        return null
     }
+
+    /**
+     * The next complete frame: one already buffered first, otherwise read until one completes or
+     * [deadline] passes. A partial frame left at the deadline stays buffered for the next call.
+     */
+    private fun nextFrame(deadline: Long): ByteArray? {
+        while (true) {
+            rx.nextFrame()?.let { return it }
+            val left = deadline - nowMs()
+            if (left <= 0) return null
+            val n = io.read(readBuf, left.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+            if (n > 0) rx.feed(readBuf, n.coerceAtMost(readBuf.size))
+        }
+    }
+
+    private fun nowMs(): Long = System.nanoTime() / 1_000_000L
 
     private fun sleep(ms: Long) {
         try { Thread.sleep(ms) } catch (_: InterruptedException) {}

@@ -19,16 +19,52 @@ import java.security.MessageDigest
  */
 private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
+/** [Wire] chunking: one queued reply per read (how the 0.1.5 hardware session is replayed). */
+private const val PER_REPLY = 0
+/** [Wire] chunking: everything the device has sent so far arrives in one read. */
+private const val ALL = -1
+
+/**
+ * Device-to-phone bytes handed out per read: one queued reply per read ([PER_REPLY]), everything
+ * pending at once ([ALL]), or at most [chunk] bytes per read regardless of frame boundaries.
+ */
+private class Wire(private val chunk: Int) {
+    private val queue = ArrayDeque<ByteArray>()
+    fun send(bytes: ByteArray) { queue += bytes }
+    fun read(buf: ByteArray): Int {
+        if (queue.isEmpty()) return 0
+        val out = if (chunk == PER_REPLY) queue.removeFirst() else {
+            val pending = queue.fold(ByteArray(0)) { acc, b -> acc + b }
+            queue.clear()
+            val n = if (chunk == ALL) pending.size else minOf(chunk, pending.size)
+            if (n < pending.size) queue += pending.copyOfRange(n, pending.size)
+            pending.copyOf(n)
+        }
+        out.copyInto(buf)
+        return out.size
+    }
+}
+
 class EspFlasherTest {
 
     private class Packet(val command: Int, val checksum: Long, val data: ByteArray)
 
-    /** Fake download-mode device: decodes the app's SLIP requests and queues one reply frame per read. */
+    /**
+     * Fake download-mode device: decodes the app's SLIP requests and queues reply frames, handed out
+     * per read as [chunk] says. [greetFirst] sends "OHAI" before the MEM_END reply, [memEndReply]
+     * false leaves MEM_END unanswered (the ROM jumped into the stub), [bootJunk] precedes the first
+     * reply, and [splitFirstSync] cuts the first SYNC reply there and sends the rest with the next one.
+     */
     private class FakeEsp(
         private val stubGreets: Boolean = true,
         private val failInRom: Set<Int> = emptySet(),
         private val failInStub: Set<Int> = emptySet(),
         private val md5Override: ByteArray? = null,
+        chunk: Int = PER_REPLY,
+        private val greetFirst: Boolean = false,
+        private val memEndReply: Boolean = true,
+        private var bootJunk: ByteArray? = null,
+        private var splitFirstSync: Int? = null,
     ) : EspFlasher.SerialIo {
         val packets = mutableListOf<Packet>()
         val lines = mutableListOf<String>()
@@ -37,17 +73,14 @@ class EspFlasherTest {
             private set
         private var flashOffset = 0
         private val inbound = SlipCodec.FrameReader()
-        private val outbound = ArrayDeque<ByteArray>()
+        private val outbound = Wire(chunk)
+        private var heldTail: ByteArray? = null
 
         override fun write(bytes: ByteArray) {
             for (b in bytes) inbound.offer(b.toInt() and 0xFF)?.let { handle(it) }
         }
 
-        override fun read(buf: ByteArray, timeoutMs: Int): Int {
-            val chunk = outbound.removeFirstOrNull() ?: return 0
-            chunk.copyInto(buf)
-            return chunk.size
-        }
+        override fun read(buf: ByteArray, timeoutMs: Int): Int = outbound.read(buf)
 
         override fun setDtr(value: Boolean) { lines += "dtr=$value" }
         override fun setRts(value: Boolean) { lines += "rts=$value" }
@@ -62,6 +95,8 @@ class EspFlasherTest {
             packets += Packet(command, EspProtocol.readLe32(frame, 4), data)
             val failing = if (stubRunning) failInStub else failInRom
             if (command in failing) { reply(command, status = 1, error = 5); return }
+            // The stub rejects the ROM form of SPI_ATTACH (extra zero word) with status 1.
+            if (stubRunning && command == EspProtocol.CMD_SPI_ATTACH && data.size != 4) { reply(command, status = 1); return }
             when (command) {
                 EspProtocol.CMD_FLASH_BEGIN -> flashOffset = EspProtocol.readLe32(data, 12).toInt()
                 EspProtocol.CMD_FLASH_DATA -> {
@@ -78,11 +113,15 @@ class EspFlasherTest {
                     reply(command, body = body); return
                 }
             }
-            reply(command)
             if (command == EspProtocol.CMD_MEM_END && stubGreets) {
+                val ohai = SlipCodec.encode("OHAI".toByteArray(Charsets.US_ASCII))
+                if (greetFirst) outbound.send(ohai)
+                if (memEndReply) reply(command)
+                if (!greetFirst) outbound.send(ohai)
                 stubRunning = true
-                outbound += SlipCodec.encode("OHAI".toByteArray(Charsets.US_ASCII))
+                return
             }
+            reply(command)
         }
 
         private fun reply(command: Int, body: ByteArray = ByteArray(0), status: Int = 0, error: Int = 0) {
@@ -90,7 +129,16 @@ class EspFlasherTest {
                 else byteArrayOf(status.toByte(), error.toByte(), 0, 0)
             val data = body + tail
             val head = byteArrayOf(0x01, command.toByte()) + EspProtocol.le16(data.size) + EspProtocol.le32(0)
-            outbound += SlipCodec.encode(head + data)
+            var frame = SlipCodec.encode(head + data)
+            heldTail?.let { frame = it + frame; heldTail = null }
+            bootJunk?.let { frame = it + frame; bootJunk = null }
+            val cut = splitFirstSync
+            if (cut != null && command == EspProtocol.CMD_SYNC) {
+                splitFirstSync = null
+                heldTail = frame.copyOfRange(cut, frame.size)
+                frame = frame.copyOf(cut)
+            }
+            outbound.send(frame)
         }
 
         fun sent(command: Int) = packets.filter { it.command == command }
@@ -219,6 +267,35 @@ class EspFlasherTest {
      * pins that the ROM length change keeps the success path the hardware flash (0.1.5) took.
      */
     @Test fun byteExactS3RomThenStubSessionSucceedsAsBefore() {
+        val (requests, replies) = s3Session(PER_REPLY)
+        val c = EspProtocol
+        // ROM phase: SYNC, READ_REG, then the stub's text and data segments (runs collapsed).
+        val romPhase = requests.takeWhile { it != c.CMD_MEM_END }
+            .fold(mutableListOf<Int>()) { acc, x -> if (acc.lastOrNull() != x) acc += x; acc }
+        assertEquals(listOf(c.CMD_SYNC, c.CMD_READ_REG, c.CMD_MEM_BEGIN, c.CMD_MEM_DATA, c.CMD_MEM_BEGIN, c.CMD_MEM_DATA), romPhase)
+        assertEquals(
+            listOf(c.CMD_MEM_END, c.CMD_SPI_ATTACH, c.CMD_SPI_SET_PARAMS, c.CMD_FLASH_BEGIN,
+                c.CMD_FLASH_DATA, c.CMD_FLASH_DATA, c.CMD_FLASH_END, c.CMD_SPI_FLASH_MD5),
+            requests.dropWhile { it != c.CMD_MEM_END },
+        )
+        // The old fixed 2-byte reading accepted every one of these replies too.
+        val reader = SlipCodec.FrameReader()
+        for (r in replies) for (b in r) reader.offer(b.toInt() and 0xFF)?.let { frame ->
+            EspProtocol.parseResponse(frame, statusLen = 2)?.let { assertTrue("old reading of 0x%02X".format(it.command), it.ok) }
+        }
+    }
+
+    @Test fun byteExactS3SessionIsTheSameForAnyReadSize() {
+        // The same device bytes, with the eight SYNC replies and the MEM_END reply + "OHAI" sharing
+        // reads, or cut at every position by small reads: identical requests and an MD5 match.
+        val expected = s3Session(PER_REPLY).first
+        for (chunk in listOf(ALL) + (1..16) + listOf(23, 64)) {
+            assertEquals("read size $chunk", expected, s3Session(chunk).first)
+        }
+    }
+
+    /** Replays the 0.1.5 ESP32-S3 session with [chunk] read sizing; returns (requests, replies). */
+    private fun s3Session(chunk: Int): Pair<List<Int>, List<ByteArray>> {
         fun hex(s: String) = s.split(' ').filter { it.isNotEmpty() }.map { it.toInt(16).toByte() }.toByteArray()
         fun slip(body: ByteArray): ByteArray { // independent RFC 1055 escaper for the variable MD5 bytes
             val out = mutableListOf<Byte>(0xC0.toByte())
@@ -241,7 +318,7 @@ class EspFlasherTest {
         val replies = mutableListOf<ByteArray>()
         val io = object : EspFlasher.SerialIo {
             private val inbound = SlipCodec.FrameReader()
-            private val out = ArrayDeque<ByteArray>()
+            private val out = Wire(chunk)
             private var stubUp = false
             override fun write(bytes: ByteArray) {
                 for (b in bytes) {
@@ -259,34 +336,89 @@ class EspFlasherTest {
                         else -> listOf(rom(cmdHex))
                     }
                     replies += queued
-                    out += queued
+                    queued.forEach(out::send)
                 }
             }
-            override fun read(buf: ByteArray, timeoutMs: Int): Int {
-                val chunk = out.removeFirstOrNull() ?: return 0
-                chunk.copyInto(buf); return chunk.size
-            }
+            override fun read(buf: ByteArray, timeoutMs: Int): Int = out.read(buf)
             override fun setDtr(value: Boolean) {}
             override fun setRts(value: Boolean) {}
             override fun setBaudRate(baud: Int) {}
         }
 
-        assertEquals(EspFlasher.Verify.MATCH, EspFlasher(io).flash(img, flashSize = 16 * 1024 * 1024, doReset = false))
-        val c = EspProtocol
-        // ROM phase: SYNC, READ_REG, then the stub's text and data segments (runs collapsed).
-        val romPhase = requests.takeWhile { it != c.CMD_MEM_END }
-            .fold(mutableListOf<Int>()) { acc, x -> if (acc.lastOrNull() != x) acc += x; acc }
-        assertEquals(listOf(c.CMD_SYNC, c.CMD_READ_REG, c.CMD_MEM_BEGIN, c.CMD_MEM_DATA, c.CMD_MEM_BEGIN, c.CMD_MEM_DATA), romPhase)
-        assertEquals(
-            listOf(c.CMD_MEM_END, c.CMD_SPI_ATTACH, c.CMD_SPI_SET_PARAMS, c.CMD_FLASH_BEGIN,
-                c.CMD_FLASH_DATA, c.CMD_FLASH_DATA, c.CMD_FLASH_END, c.CMD_SPI_FLASH_MD5),
-            requests.dropWhile { it != c.CMD_MEM_END },
-        )
-        // The old fixed 2-byte reading accepted every one of these replies too.
-        val reader = SlipCodec.FrameReader()
-        for (r in replies) for (b in r) reader.offer(b.toInt() and 0xFF)?.let { frame ->
-            EspProtocol.parseResponse(frame, statusLen = 2)?.let { assertTrue("old reading of 0x%02X".format(it.command), it.ok) }
+        assertEquals("read size $chunk", EspFlasher.Verify.MATCH,
+            EspFlasher(io).flash(img, flashSize = 16 * 1024 * 1024, doReset = false))
+        return requests to replies
+    }
+
+    // --- Replies that share a USB read, or are split over several (persistent receive buffer) ---
+
+    /** An image whose MD5 holds both 0xC0 and 0xDB, so the stub's raw-digest reply carries both escapes. */
+    private val escapingImage: ByteArray by lazy {
+        generateSequence(0) { it + 1 }.map { k -> ByteArray(256) { it.toByte() } + EspProtocol.le32(k) }.first { img ->
+            val d = MessageDigest.getInstance("MD5").digest(img)
+            0xC0.toByte() in d && 0xDB.toByte() in d
         }
+    }
+
+    private fun assertStubFlash(esp: FakeEsp, img: ByteArray, label: String) {
+        assertEquals(label, EspFlasher.Verify.MATCH, EspFlasher(esp).flash(img, doReset = false))
+        assertArrayEquals(label, img, esp.flash.copyOf(img.size))
+        assertEquals("$label: stub form of SPI_ATTACH", 4, esp.sent(EspProtocol.CMD_SPI_ATTACH).single().data.size)
+    }
+
+    @Test fun memEndReplyAndGreetingInOneReadStillStartTheStub() {
+        assertStubFlash(FakeEsp(chunk = ALL), image(300), "reply + OHAI in one read")
+    }
+
+    @Test fun greetingAheadOfTheMemEndReplyIsNotLost() {
+        assertStubFlash(FakeEsp(chunk = ALL, greetFirst = true), image(300), "OHAI + reply in one read")
+        assertStubFlash(FakeEsp(greetFirst = true), image(300), "OHAI, then reply")
+    }
+
+    @Test fun greetingWithoutAMemEndReplyIsKeptFromTheMemEndWait() {
+        // The ROM may jump into the stub without answering MEM_END; "OHAI" then arrives while the
+        // flasher is still waiting for that reply and must still count as the greeting.
+        assertStubFlash(FakeEsp(memEndReply = false), image(300), "no MEM_END reply")
+    }
+
+    @Test fun everyReadSizeFlashesTheSameIncludingSplitEscapes() {
+        val img = escapingImage
+        for (chunk in listOf(ALL) + (1..24) + listOf(100)) {
+            assertStubFlash(FakeEsp(chunk = chunk), img, "stub, read size $chunk")
+        }
+        // ROM fallback (stub upload refused): 4-byte ROM status throughout, ASCII MD5.
+        for (chunk in listOf(ALL, 1, 2, 3, 5, 7)) {
+            val esp = FakeEsp(chunk = chunk, failInRom = setOf(EspProtocol.CMD_MEM_BEGIN))
+            assertEquals("rom, read size $chunk", EspFlasher.Verify.MATCH, EspFlasher(esp).flash(img, doReset = false))
+            assertEquals(8, esp.sent(EspProtocol.CMD_SPI_ATTACH).single().data.size)
+        }
+    }
+
+    @Test fun romErrorIsStillReportedWhenRepliesShareOrSplitReads() {
+        for (chunk in listOf(ALL, 1, 3)) {
+            val esp = FakeEsp(chunk = chunk, failInRom = setOf(EspProtocol.CMD_MEM_BEGIN, EspProtocol.CMD_FLASH_BEGIN))
+            try {
+                EspFlasher(esp).flash(image(1024), doReset = false)
+                fail("read size $chunk: ROM FLASH_BEGIN failure was reported as success")
+            } catch (e: EspFlasher.FlashException) {
+                assertEquals("Command 0x02 failed (status=1 error=5)", e.message)
+            }
+            assertTrue(esp.sent(EspProtocol.CMD_FLASH_DATA).isEmpty())
+        }
+    }
+
+    @Test fun bootTextBeforeTheFirstReplyIsSkipped() {
+        val boot = "ESP-ROM:esp32s3-20210327\r\nwaiting for download\r\n".toByteArray(Charsets.US_ASCII)
+        assertStubFlash(FakeEsp(bootJunk = boot), image(300), "boot text, per reply")
+        assertStubFlash(FakeEsp(bootJunk = boot, chunk = 5), image(300), "boot text, 5-byte reads")
+    }
+
+    @Test fun partialSyncReplyLeftAtATimeoutIsCompletedByTheNextRead() {
+        // The first SYNC reply stops after 6 bytes, so that SYNC times out with a partial frame
+        // buffered; its tail arrives in the same read as the retry's reply and completes it.
+        val esp = FakeEsp(splitFirstSync = 6)
+        assertStubFlash(esp, image(300), "split first SYNC")
+        assertEquals(2, esp.sent(EspProtocol.CMD_SYNC).size)
     }
 
     @Test fun emptyImageIsRejectedBeforeTouchingTheLink() {

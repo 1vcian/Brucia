@@ -58,7 +58,8 @@ struct BjsStopKeys {
 //   wallDeadline: the wall clock (20 s); passing it requests the abort and gives up waiting.
 //   a stop (`stop` / `*_stop` CMD consumed by companionPollStop) requests the abort at once.
 // The caller copies abortRequested into the interpreter's flag after every step and never clears
-// it while the task still runs; the task clears it when it ends.
+// it while the task still runs; the task clears it when it ends, and the caller drops the copy the
+// last step made once the task is gone (so no abort outlives the run).
 struct BjsRunWatch {
     enum Step { WAIT, DONE, GAVE_UP };
     uint32_t execDeadline;

@@ -53,6 +53,7 @@ DISPATCH = [
     ("system.cpp", "runDiagCommand(", "diag not available in this (lite) build"),
     ("nrf24.cpp", "runNrf24Scan(", "nrf24 not available in this (lite) build"),
     ("nrf24.cpp", "runNrf24Mousejack(", "nrf24 not available in this (lite) build"),
+    ("system.cpp", "runScriptRun(", "script_run not available in this (lite) build"),
 ]
 
 
@@ -201,6 +202,7 @@ class MockLiteProfileTest(unittest.TestCase):
             ("ir_jammer 3", DISPATCH[1][2]), ("ble_gatt_connect AA:BB:CC:DD:EE:FF", DISPATCH[3][2]),
             ("ble_gatt_read AA:BB:CC:DD:EE:FF 2a00", DISPATCH[3][2]), ("diag", DISPATCH[5][2]),
             ("nrf24_scan 5", DISPATCH[6][2]), ("nrf24_mousejack 5", DISPATCH[6][2]),
+            ("script_run print('x');", DISPATCH[8][2]),
         ]:
             reply = self.request(mock_device.CMD, {"cmd": cmd})
             self.assertEqual((mock_device.ERR, 501, message), (reply["t"], reply["d"]["code"], reply["d"]["msg"]), cmd)

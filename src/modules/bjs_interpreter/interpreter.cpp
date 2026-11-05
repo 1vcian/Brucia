@@ -8,6 +8,7 @@
 String *g_bjsCaptureBuf = nullptr;
 volatile uint32_t g_bjsDeadlineMs = 0;
 volatile bool g_bjsAbort = false;
+volatile bool g_bjsThrew = false;
 
 bool bjs_abort_requested() {
     if (g_bjsAbort) return true;
@@ -234,6 +235,7 @@ bool run_bjs_script_headless(char *code) {
 
     returnToMenu = true;
     g_bjsAbort = false; // Brucia: an abort belongs to the run it was requested for
+    g_bjsThrew = false; // and so does an uncaught error
     interpreter_state = 1;
     startInterpreterTask();
     return true;
@@ -253,6 +255,7 @@ bool run_bjs_script_headless(FS &fs, const String &filename) {
     }
     returnToMenu = true;
     g_bjsAbort = false; // Brucia: an abort belongs to the run it was requested for
+    g_bjsThrew = false; // and so does an uncaught error
     interpreter_state = 1;
     startInterpreterTask();
     return true;

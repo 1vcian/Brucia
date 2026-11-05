@@ -12,7 +12,10 @@ with the firmware's key set and real link counters of this mock), and SUB stream
 gets ERR 400 and an invalid length prefix is counted and drops the buffered bytes, as on
 the device. A small in-memory file system backs `storage list|remove`, `fs_read` and the
 transactional `fs_upload_*` commands; `jam_detect <secs>` behaves as a blocking operation
-(PING answered, `stop` ends it, other CMDs get ERR 409 "device busy"). `MockDevice` can be
+(PING answered, `stop` ends it, other CMDs get ERR 409 "device busy"), and so does `script_run` of
+a script with a loop and delay() (until a `script_stop` -> `script stopped`, or the 15 s bound;
+other scripts log their console.log('...') literals; print() and other unknown globals are a
+ReferenceError, ok:false, as on the device). `MockDevice` can be
 served from a thread (tools/test_hw_acceptance.py) and accepts optional injected faults
 (see FAULTS, including a simulated reboot) and `idle_exit`: leave companion mode after that many
 seconds without a host frame, as the firmware does after 60 s (soak keepalive tests).
@@ -39,6 +42,7 @@ import base64
 import json
 import os
 import pty
+import re
 import struct
 import sys
 import time
@@ -98,6 +102,7 @@ LITE_501 = (
     (lambda c: any(c == v or c.startswith(v + " ") for v in ("nrf24_scan", "nrf24_sniff", "nrf24_jammer",
                                                              "nrf24_mousejack")),
      "nrf24 not available in this (lite) build"),
+    (lambda c: c.startswith("script_run "), "script_run not available in this (lite) build"),
 )
 PROFILES = ("full", "lite")
 
@@ -221,7 +226,14 @@ STA_SAMPLES = [
 #   no_transactional_uploads CAPS does not advertise features.transactional_uploads
 #   reboot                   the 5th diag call finds a rebooted device: uptime and link counters
 #                            start again from zero (the reset reason stays the same)
-FAULTS = ("rx_undercount", "heap_leak", "event_after_off", "no_transactional_uploads", "reboot")
+FAULTS = ("rx_undercount", "heap_leak", "event_after_off", "no_transactional_uploads", "reboot",
+          "script_stop_ignored", "script_busy_after_stop")
+SCRIPT_BUSY_AFTER_STOP_S = 1.0  # script_busy_after_stop: the interpreter stays busy this long
+# Globals (and keywords) the mock's scripts may call; anything else called is a ReferenceError, as
+# BruceJS defines no print() (src/modules/bjs_interpreter/mqjs_stdlib.c).
+SCRIPT_GLOBALS = {"for", "while", "if", "function", "return", "delay", "now", "random", "setTimeout",
+                  "setInterval", "clearTimeout", "clearInterval", "parseInt", "parseFloat", "require",
+                  "exit", "to_string", "parse_int", "assert"}
 REBOOT_AT_DIAG = 4  # diag calls answered before the simulated reboot
 UPLOAD_MAX_CHUNK = 3072
 
@@ -245,13 +257,25 @@ def _dir_of(path):
     return path.rsplit("/", 1)[0] or "/"
 
 
+def _valid_hex_key_64(key):
+    """True if `key` is a valid single-code RF key (mirrors firmware rfhex::parseKey64):
+    non-empty, all hex, at most 16 hex digits (one 64-bit code). Optional 0x/0X prefix."""
+    s = key.strip()
+    if s[:2] in ("0x", "0X"):
+        s = s[2:]
+    if not s or len(s) > 16:
+        return False
+    return all(c in "0123456789abcdefABCDEF" for c in s)
+
+
 class MockDevice:
     """One mock device serving the companion protocol on a PTY master fd.
 
     main() runs one on a fresh PTY; tests run one in a thread with a stop event."""
 
     def __init__(self, faults=(), counters=None, poll_interval=0.02, emit_interval=1.0, profile="full",
-                 noise=(), rx_queue=None, caps_rx_max="auto", legacy_outputs=False, idle_exit=None):
+                 noise=(), rx_queue=None, caps_rx_max="auto", legacy_outputs=False, idle_exit=None,
+                 script_bound=15.0):
         unknown = set(faults) - set(FAULTS)
         if unknown:
             raise ValueError(f"unknown mock faults: {sorted(unknown)}")
@@ -293,6 +317,10 @@ class MockDevice:
         self.idle_exit = idle_exit
         self.exited = False
         self._hello_seen = False
+        # script_run model: a script containing a loop with delay() runs until the execution bound
+        # (script_bound seconds) or a stop; any other script logs its console.log('...') literals.
+        self.script_bound = script_bound
+        self._interp_busy_until = 0.0
 
     def _send(self, fd, kind, msg_id, d):
         if not self.noise:
@@ -443,6 +471,27 @@ class MockDevice:
             self.screen_on = True  # a visible level ends a `scr 0` hold
         return {"ok": True, "out": f"screen {v}%"}
 
+    def _rf_tx(self, cmd):
+        """Single-code RF transmit (`rf/subghz tx <key> ...`, `txp <proto> <freq> <bits> <key> ...`).
+
+        Mirrors the firmware's rfhex::parseKey64 (src/modules/rf/rf_hexkey.h): a key that is empty,
+        non-hex or longer than 16 hex digits (a phone De Bruijn sweep is far longer) is REJECTED with
+        an error ACK (ok:False), never a false "sent" and never a crash. Returns the ACK body, or
+        None if this is not an RF tx command. No RF is emitted by the mock regardless.
+        """
+        parts = cmd.split()
+        if len(parts) < 2 or parts[0] not in ("rf", "subghz"):
+            return None
+        if parts[1] == "tx":
+            key = parts[2] if len(parts) > 2 else ""
+        elif parts[1] == "txp":
+            key = parts[5] if len(parts) > 5 else ""  # txp <proto> <freq> <bits> <key> ...
+        else:
+            return None
+        if not _valid_hex_key_64(key):
+            return {"ok": False, "out": "invalid key: expected up to 16 hex digits (one 64-bit code)\n"}
+        return {"ok": True, "out": "mock tx accepted\n"}
+
     def _restore_outputs_if_silent(self):
         if (not self.screen_on or not self.led_on) and time.time() - self._last_frame > 15:
             self._outputs("scr 1")
@@ -523,10 +572,12 @@ class MockDevice:
                                              "crc32": up["crc"], "committed": True, "cleanup_pending": False})
         return self._send(fd, ERR, mid, {"code": 400, "msg": "invalid upload command"})
 
-    def _blocking_op(self, fd, mid, secs, stop):
-        """A receive-only blocking command (`jam_detect`): drains one frame per poll as
-        companionPollStop does - PING answered, stop/*_stop ends it, other CMDs get ERR 409."""
+    def _blocking_op(self, fd, mid, secs, stop, reply=None):
+        """A blocking command (`jam_detect`, a looping `script_run`): drains one frame per poll as
+        companionPollStop does - PING answered, stop/*_stop ends it, other CMDs get ERR 409.
+        reply(stopped) sends the final reply (default: jam_detect's ACK)."""
         deadline = time.time() + secs
+        stopped = False
         while time.time() < deadline and not (stop and stop.is_set()):
             self._read(fd)
             raw = self._next_frame()
@@ -547,10 +598,52 @@ class MockDevice:
                 cs = d.get("cmd", "") if isinstance(d, dict) else ""
                 self.received_cmds.append(cs)
                 if cs == "stop" or cs.endswith("_stop"):
+                    stopped = True
                     break
                 self.counters.note("busy_409")
                 self._send(fd, ERR, cid, {"code": 409, "msg": "device busy"})
+        if reply is not None:
+            return reply(stopped)
         self._send(fd, ACK, mid, {"ok": True, "out": "deauth=0 total=0"})
+
+    def _script_run(self, fd, mid, src, stop):
+        """script_run (src/companion/system.cpp): size/busy refusals, a looping script waits like a
+        blocking op until the bound (ok, `interrupted`) or a stop (`script stopped`); a short one
+        prints its console.log('...') literals; a call of an unknown global (print(), ...) is an
+        uncaught ReferenceError (ok:false). Faults: script_stop_ignored (firmware before batch 15
+        did not read the link during the run: the stop waits until the run ends, then gets the
+        idle reply); script_busy_after_stop (the interpreter stays busy after a stopped run)."""
+        src = src.strip()
+        if not src:
+            return self._send(fd, ERR, mid, {"code": 400, "msg": "usage: script_run <js source>"})
+        if len(src.encode()) > 6000:
+            return self._send(fd, ACK, mid, {"ok": False, "out": "script too large"})
+        if time.time() < self._interp_busy_until:
+            return self._send(fd, ACK, mid, {"ok": False, "out": "interpreter busy"})
+        # Like the device: a call of a global BruceJS does not define (e.g. print()) is an uncaught
+        # ReferenceError, reported ok:false with the error as the output.
+        for name in re.findall(r"(?<![\w.$])([A-Za-z_$][\w$]*)\s*\(", src):
+            if name not in SCRIPT_GLOBALS:
+                return self._send(fd, ACK, mid, {"ok": False, "out": f"ReferenceError: variable '{name}' is "
+                                                 "not defined\n    at <eval> (index.js:1:1)"})
+        if not ("delay(" in src and ("for" in src or "while" in src)):
+            out = "".join(m + "\n" for m in re.findall(r"console\.log\('([^']*)'\)", src))
+            return self._send(fd, ACK, mid, {"ok": True, "out": out})
+        # The bound interrupts the script: an uncaught `interrupted` error, ok:false since batch 16.
+        interrupted = {"ok": False, "out": "InternalError: interrupted\n"}
+        if "script_stop_ignored" in self.faults:  # firmware before batch 15 (also ok:true on errors)
+            end = time.time() + self.script_bound
+            while time.time() < end and not (stop and stop.is_set()):
+                time.sleep(self.poll_interval)
+            return self._send(fd, ACK, mid, {**interrupted, "ok": True})
+
+        def reply(stopped):
+            if not stopped:
+                return self._send(fd, ACK, mid, interrupted)
+            if "script_busy_after_stop" in self.faults:
+                self._interp_busy_until = time.time() + SCRIPT_BUSY_AFTER_STOP_S
+            return self._send(fd, ACK, mid, {"ok": False, "out": "script stopped"})
+        self._blocking_op(fd, mid, self.script_bound, stop, reply)
 
     def _handle(self, fd, msg, stop):
         t, mid, d = msg.get("t"), msg.get("id", 0), msg.get("d", {})
@@ -583,6 +676,8 @@ class MockDevice:
                 self._upload(fd, mid, cmd)
             elif cmd.startswith("storage "):
                 self._storage(fd, mid, cmd)
+            elif cmd.startswith("script_run "):
+                self._script_run(fd, mid, cmd[len("script_run "):], stop)
             elif cmd.startswith("jam_detect"):
                 secs = cmd[len("jam_detect"):].strip()
                 self._blocking_op(fd, mid, min(max(int(secs) if secs.isdigit() else 5, 1), 120), stop)
@@ -590,6 +685,8 @@ class MockDevice:
                 pmkid = cmd.startswith("wifi_pmkid")
                 desc = _capture_descriptor(cmd, pmkid)
                 self._send(fd, ACK, mid, {"ok": True, "out": "mock capture written", "desc": desc})
+            elif (reply := self._rf_tx(cmd)) is not None:
+                self._send(fd, ACK, mid, reply)
             else:
                 self._send(fd, ACK, mid, {"ok": True, "out": f"mock output for: {cmd}"})
         elif t == SUB:

@@ -185,6 +185,14 @@ def mock_serve(master, stop):
                     out({"v": 0, "t": ACK, "id": mid, "d": {"ok": True, "size": len(content), "crc32": zlib.crc32(content) & 0xFFFFFFFF}})
                 elif cmd.startswith("wifi_handshake") or cmd.startswith("wifi_pmkid"):
                     out({"v": 0, "t": ACK, "id": mid, "d": {"ok": True, "out": "mock capture", "desc": e2e_capture_descriptor(cmd)}})
+                elif cmd.startswith("subghz tx ") or cmd.startswith("rf tx "):
+                    # Single-code RF tx: mirror the firmware's safe key parse (rfhex::parseKey64).
+                    # A De Bruijn sweep key is far longer than 16 hex digits -> reject (ok:False),
+                    # never a false "sent" and never a crash.
+                    key = cmd.split()[2] if len(cmd.split()) > 2 else ""
+                    ok_key = bool(key) and len(key) <= 16 and all(c in "0123456789abcdefABCDEF" for c in key)
+                    out({"v": 0, "t": ACK, "id": mid, "d": {"ok": ok_key,
+                         "out": ("ok:" + cmd) if ok_key else "invalid key: expected up to 16 hex digits (one 64-bit code)\n"}})
                 else:
                     out({"v": 0, "t": ACK, "id": mid, "d": {"ok": True, "out": "ok:" + cmd}})
             elif t == SUB:
@@ -457,6 +465,20 @@ def main():
                    and after["err"]["400"] == before["err"]["400"] + 1
                    and after["rx_frames"] == before["rx_frames"] + 2
                    and after["tx_frames"] >= before["tx_frames"] + 2))
+    # De Bruijn (F01-F02): a valid single code is accepted; an over-long sweep key is rejected with
+    # an error ACK (ok:False) - no false "sent", no crash, and the next command still works.
+    send(CMD, 13, {"cmd": "subghz tx 445533 433920000 174 10"})
+    good_tx = await_reply(13, ACK)
+    long_key = "A" * 1024  # like a De Bruijn order-12 hex key
+    send(CMD, 14, {"cmd": f"subghz tx {long_key} 433920000 174 10"})
+    bad_tx = await_reply(14, ACK)
+    send(CMD, 15, {"cmd": "diag"})  # device still responsive after the rejected tx
+    after_tx = await_reply(15, ACK)
+    checks.append(("subghz tx valid code accepted", good_tx is not None and good_tx["d"].get("ok") is True))
+    checks.append(("subghz tx over-long key rejected (no false sent)",
+                   bad_tx is not None and bad_tx["d"].get("ok") is False and "invalid key" in bad_tx["d"].get("out", "")))
+    checks.append(("device responsive after rejected tx", after_tx is not None and diag_valid(after_tx["d"])))
+
     stop.set()
     ser.close()
 

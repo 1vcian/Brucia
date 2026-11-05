@@ -13,7 +13,8 @@ findings that FAIL the soak; Ctrl-C during a stream or an upload cleans up and s
 Link tests: the reader resyncs after device text between/inside frames (counted, reported as a
 warning, never fatal) and upload chunks follow CAPS rx_max (legacy 768 without it) so they fit a
 simulated small RX queue that drops bytes, while oversized chunks reproduce the hardware loss.
-This proves the runner, not the device.
+The opt-in script_stop check PASSes on a mock that stops the run and FAILs on mocks whose firmware
+ignores the stop or stays `interpreter busy` after it (SKIP on LITE). This proves the runner, not the device.
 
     python3 tools/test_hw_acceptance.py
 """
@@ -34,7 +35,8 @@ import hw_acceptance as hw  # noqa: E402
 from mock_device import MockDevice  # noqa: E402
 
 FAST = ["--pings", "40", "--ping-burst", "10", "--stream-secs", "1.5", "--quiet-secs", "1.0",
-        "--diag-repeats", "8", "--timeout", "2", "--fs-timeout", "5", "--busy-secs", "6"]
+        "--diag-repeats", "8", "--timeout", "2", "--fs-timeout", "5", "--busy-secs", "6",
+        "--script-stop-after", "0.5"]
 ALL = ",".join(c for c in hw.CHECK_IDS if c != "soak")  # every check a plain run can select
 # Short soak: intervals of 1 s, keepalive 0.3 s, short streams (later options override FAST).
 SOAK = ["--soak", "0.07", "--soak-interval", "1.0", "--soak-keepalive", "0.3", "--soak-pings", "5",
@@ -168,6 +170,10 @@ def test_allowlist():
         (hw.CMD, {"cmd": "diag; ble_spam 5"}),
         (hw.CMD, {"cmd": "diag", "extra": 1}),
         (hw.CMD, {"cmd": "jam_detect 120"}),
+        (hw.CMD, {"cmd": "script_run print('x');"}),
+        (hw.CMD, {"cmd": "script_run " + hw.SCRIPT_SHORT + " ble.advertise()"}),
+        (hw.CMD, {"cmd": "script_run  " + hw.SCRIPT_SHORT}),
+        (hw.CMD, {"cmd": "script_stop now"}),
         (hw.SUB, {"stream": "wifi.ap", "on": True}),
         (hw.SUB, {"stream": "ble.scan", "on": True}),
         (hw.SUB, {"stream": "subghz.spectrum", "on": True}),
@@ -188,7 +194,9 @@ def test_allowlist():
     check("AllowlistViolation is an AssertionError (programming error)", issubclass(hw.AllowlistViolation, AssertionError))
     allowed = [(hw.CMD, {"cmd": "diag"}), (hw.CMD, {"cmd": "storage list /"}), (hw.PING, {}),
                (hw.SUB, {"stream": "wifi.probe", "on": False}),
-               (hw.CMD, {"cmd": "storage remove /brucia-acceptance-20261105T101010Z-0a1b2c.txt"})]
+               (hw.CMD, {"cmd": "storage remove /brucia-acceptance-20261105T101010Z-0a1b2c.txt"}),
+               (hw.CMD, {"cmd": "script_run " + hw.SCRIPT_LONG}), (hw.CMD, {"cmd": "script_run " + hw.SCRIPT_SHORT}),
+               (hw.CMD, {"cmd": "script_stop"})]
     for kind, d in allowed:
         link.send(kind, d)
     check("allowlisted frames are written", link.sent == len(allowed) and len(rec.written) > 0)
@@ -387,6 +395,62 @@ def test_interrupt(tmp):
         hw.Runner = original
 
 
+def script_stop_of(rep):
+    return next(c for c in rep["checks"] if c["id"] == "script_stop")
+
+
+def test_script_stop(tmp):
+    with mock() as (dev, path):
+        code, rep, _, log = run_runner(path, ["--only", "caps,script_stop,diag_counters"], tmp)
+        c = script_stop_of(rep)
+        ev = c["evidence"]
+        check("script_stop: PASS on a mock that stops the run", code == 0 and c["status"] == "PASS",
+              f"code={code} {c}\n{log}")
+        check("script_stop: stopped reply, PONG while running, next run printed, stop not answered",
+              ev.get("run_reply") == {"ok": False, "out": "script stopped"} and ev.get("ping_while_running")
+              and ev.get("next_run_reply") == {"ok": True, "out": hw.SCRIPT_SHORT_OUT + "\n"}
+              and ev.get("stop_replies") == [] and ev.get("stop_to_reply_s", 9) <= 2.0, str(ev))
+        check("script_stop: exactly the frames of the check, in order",
+              dev.received_cmds[-4:] == ["diag", "script_run " + hw.SCRIPT_LONG, "script_stop",
+                                         "script_run " + hw.SCRIPT_SHORT] or
+              [x for x in dev.received_cmds if x.startswith("script_")] ==
+              ["script_run " + hw.SCRIPT_LONG, "script_stop", "script_run " + hw.SCRIPT_SHORT], str(dev.received_cmds))
+        check("script_stop: diag counters still match", statuses(rep).get("diag_counters") == "PASS", str(statuses(rep)))
+    # Firmware that does not read the link during script_run: over a PTY the PING write itself waits
+    # until the run ends at its bound, so the run is seen ending without a stop.
+    with mock(faults=("script_stop_ignored",), script_bound=3.0) as (dev, path):
+        code, rep, _, _ = run_runner(path, ["--only", "script_stop"], tmp)
+        c = script_stop_of(rep)
+        check("script_stop: firmware that does not read the stop FAILs",
+              code == 1 and c["status"] == "FAIL" and "ended before the stop" in c["reason"]
+              and c["evidence"].get("run_reply", {}).get("ok") is True, c["reason"])
+    with mock(faults=("script_busy_after_stop",)) as (dev, path):
+        code, rep, _, _ = run_runner(path, ["--only", "script_stop"], tmp)
+        c = script_stop_of(rep)
+        check("script_stop: interpreter busy after the stop FAILs", code == 1 and c["status"] == "FAIL"
+              and "interpreter busy" in c["reason"], c["reason"])
+    # The device has no global print(): a check using it must fail on the mock too (it did on hardware).
+    saved = (hw.SCRIPT_SHORT, hw.SCRIPT_SOURCES)
+    hw.SCRIPT_SHORT = "print('brucia-after-stop');"
+    hw.SCRIPT_SOURCES = (hw.SCRIPT_LONG, hw.SCRIPT_SHORT)
+    try:
+        with mock() as (dev, path):
+            code, rep, _, _ = run_runner(path, ["--only", "script_stop"], tmp)
+            c = script_stop_of(rep)
+            check("script_stop: a follow-up script calling print() FAILs (ReferenceError, ok:false)",
+                  code == 1 and c["status"] == "FAIL" and "ReferenceError" in c["reason"]
+                  and c["evidence"]["next_run_reply"]["ok"] is False, c["reason"])
+    finally:
+        hw.SCRIPT_SHORT, hw.SCRIPT_SOURCES = saved
+    check("script_stop scripts log with console.log, never print()",
+          all("console.log(" in x and "print(" not in x for x in hw.SCRIPT_SOURCES))
+    with mock(profile="lite") as (dev, path):
+        code, rep, _, _ = run_runner(path, ["--only", "script_stop"], tmp)
+        c = script_stop_of(rep)
+        check("script_stop: SKIP on a LITE build (ERR 501), nothing else sent",
+              code == 0 and c["status"] == "SKIP" and dev.received_cmds == ["script_run " + hw.SCRIPT_LONG], str(c))
+
+
 def test_skip_without_feature(tmp):
     with mock(faults=("no_transactional_uploads",)) as (dev, path):
         code, rep, _, _ = run_runner(path, ["--only", "caps,fs_list,fs_read,fs_upload"], tmp)
@@ -402,13 +466,14 @@ def test_dry_run():
     code = hw.run(["--port", "/dev/brucia-no-such-port", "--dry-run", "--only", ALL], log=out.append)
     text = "\n".join(out)
     check("dry run opens nothing and lists the plan", code == 0 and "fs_upload_begin" in text
-          and "jam_detect" in text and "SUB" in text and hw.run.last_report is None)
+          and "jam_detect" in text and "SUB" in text and "script_stop" in text and hw.run.last_report is None)
 
 
 def test_bad_args():
     for argv in (["--streams", "wifi.ap"], ["--streams", "ble.scan"], ["--only", "tx"], ["--only", "soak"],
                  ["--soak", "0"], ["--soak", "5", "--soak-keepalive", "60"], ["--soak", "5", "--soak-keepalive", "0"],
-                 ["--soak", "5", "--streams", "wifi.ap"], ["--soak", "5", "--stream-secs", "45"]):
+                 ["--soak", "5", "--streams", "wifi.ap"], ["--soak", "5", "--stream-secs", "45"],
+                 ["--script-stop-after", "0"], ["--script-stop-bound", "30"]):
         try:
             with contextlib.redirect_stderr(io.StringIO()):
                 hw.parse_args(["--port", "x"] + argv)
@@ -642,6 +707,7 @@ def main():
         test_fault(tmp, "event_after_off", "streams", "event after OFF")
         test_interrupt(tmp)
         test_skip_without_feature(tmp)
+        test_script_stop(tmp)
         test_noise_between(tmp)
         test_noise_inside(tmp)
         test_rx_queue(tmp)

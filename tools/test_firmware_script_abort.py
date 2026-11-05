@@ -16,10 +16,16 @@ clock and checks:
   - an end-to-end model: a 60 s native delay() in a script_run ends at the 15 s bound (one slice
     late at most), so the next script_run finds the interpreter free; with the old wiring (no
     sliced sleep, deadline cleared when script_run gives up) the same run held it for 60 s.
+  - stop then new run: a looping script stopped by script_stop at 2 s replies `script stopped` within
+    a few polls, with the task handle, abort flag and deadline cleared by then (before batch 16 the
+    abort stayed set: the last step copied it in after the task cleared it), so an immediate
+    script_run is accepted (not `interpreter busy`), runs unaborted and replies ok; a stop that
+    arrives after a run ended changes nothing; a task still running refuses the next run.
 Source checks (static) pin the firmware wiring: the interrupt handler, delay(), the timer loop,
 wifi.connect / nrf24.receive / notify, the check() hook in globals.h (interpreter task, ESC and
 any-key only), the task clearing the abort/deadline/handle on every exit, script_run polling
-companionPollStop and never clearing the abort itself, and the removed wait for interpreter_state
+companionPollStop and never clearing the abort itself, an uncaught error (not exit()) replying
+ok:false, and the removed wait for interpreter_state
 to leave 1 (nothing changes it; every run used to sit out the 20 s wall clock first).
 Not covered: real FreeRTOS scheduling, QuickJS's interrupt cadence, the Bruce module loops
 themselves, hardware.
@@ -182,6 +188,79 @@ int main() {
         run(false, busy, ok);
         check(!ok && busy == 60000, "old: script timeout and the interpreter busy for 60 s");
     }
+    {   // stop then an immediate new run: script_run(while(true) delay(100)), script_stop at 2 s,
+        // then script_run of a short script. Models system.cpp's busy check and wait loop and
+        // interpreter.cpp's bjs_task_finished(), 10 ms ticks, the wait polling every 20 ms.
+        struct Interp {
+            bool abortFlag = false; uint32_t deadline = 0; bool handle = false; int state = -1;
+            bool busy() const { return state > 0 || handle; }                 // runScriptRun's refusal
+            void start(uint32_t dl) { deadline = dl; abortFlag = false; state = 1; handle = true; }
+            void finished() { deadline = 0; abortFlag = false; handle = false; state = -1; }  // bjs_task_finished
+        };
+        Interp in;
+        // Returns the reply (nullptr = ok) and when it was sent. loopForever: delay(100) in a loop;
+        // otherwise the script ends by itself after 30 ms. stopAt: when script_stop arrives (0 = never).
+        bool dropStaleAbort = true; // false: the wiring before batch 16 (abort left set after the run)
+        auto scriptRun = [&in, &dropStaleAbort](uint32_t start, bool loopForever, uint32_t stopAt, uint32_t &replyAt,
+                               bool &refusedBusy, bool &sawAbort) -> const char * {
+            refusedBusy = in.busy();
+            if (refusedBusy) return "interpreter busy";
+            in.start(start + 15000);
+            in.state = 2;
+            BjsRunWatch w(start + 15000, start + 20000);
+            sawAbort = false;
+            uint32_t sliceLeft = 100, endingAt = 0;
+            bool stopPending = stopAt != 0;
+            for (uint32_t t = start;; t += 10) {
+                // interpreter task, one 10 ms slice
+                if (in.handle) {
+                    const bool aborted = bjsAbortDue(in.abortFlag, in.deadline, t);
+                    if (aborted) sawAbort = true;
+                    if (endingAt == 0 && (aborted || (!loopForever && t >= start + 30))) endingAt = t + 10;
+                    if (endingAt != 0 && t >= endingAt) in.finished();     // interrupt -> cleanup -> exit
+                    else if (sliceLeft <= 10) sliceLeft = 100; else sliceLeft -= 10;
+                }
+                if ((t - start) % 20 != 0) continue;
+                // script_run's wait (companionPollStop consumes the stop once)
+                const bool running = in.state > 0;
+                const bool stop = running && stopPending && t >= stopAt;
+                if (stop) stopPending = false;
+                const BjsRunWatch::Step step = w.step(t, running, stop);
+                if (w.abortRequested) in.abortFlag = true;
+                if (step != BjsRunWatch::WAIT) {
+                    replyAt = t;
+                    const bool finished = in.state <= 0;
+                    if (dropStaleAbort && !in.handle) in.abortFlag = false; // system.cpp after the loop
+                    return bjsRunFailure(finished, w.stopRequested);
+                }
+            }
+        };
+        uint32_t replyAt = 0; bool busy = false, aborted = false;
+        const char *r1 = scriptRun(0, true, 2000, replyAt, busy, aborted);
+        check(!busy && aborted, "stop: the first run started and was aborted");
+        check(r1 != nullptr && std::string(r1) == "script stopped", "stop: reply is script stopped");
+        check(replyAt >= 2000 && replyAt <= 2000 + 60, "stop: reply within a few polls of the stop");
+        check(!in.busy() && !in.handle && in.state == -1, "stop: task handle cleared, state -1 at the reply");
+        check(!in.abortFlag && in.deadline == 0, "stop: abort flag and deadline cleared at the reply");
+        const char *r2 = scriptRun(replyAt + 5, false, 0, replyAt, busy, aborted);
+        check(!busy, "next run right after the stopped reply is accepted (not interpreter busy)");
+        check(r2 == nullptr && !aborted, "next run is not aborted by the previous stop and replies ok");
+        check(!in.busy() && !in.abortFlag, "next run: interpreter free again");
+        // A stop that arrives after a run ended (the app's race) changes nothing for the next run.
+        const char *r3 = scriptRun(replyAt + 5, false, replyAt + 200, replyAt, busy, aborted);
+        check(!busy && r3 == nullptr && !aborted, "late stop: the short run ends ok, no abort");
+        // Before batch 16 the step that saw the task end copied the abort in again after the task had
+        // cleared it, so it stayed set until the next interpreter start reset it.
+        dropStaleAbort = false;
+        scriptRun(replyAt + 5, true, replyAt + 500, replyAt, busy, aborted);
+        check(in.abortFlag && !in.busy(), "old wiring: abort left set after a stopped run");
+        dropStaleAbort = true;
+        in.abortFlag = false;
+        // A run while the task still runs (wall clock gave up, native still busy) is refused.
+        in.start(0); in.state = 2;
+        const char *r4 = scriptRun(100, false, 0, replyAt, busy, aborted);
+        check(busy && std::string(r4) == "interpreter busy", "busy while the old task still runs");
+    }
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }
@@ -233,6 +312,12 @@ class ScriptAbortWiring(unittest.TestCase):
         for sig in ("bool run_bjs_script_headless(char *code)", "bool run_bjs_script_headless(FS &fs, const String &filename)"):
             body = body_of(src, sig)
             self.assertLess(body.index("g_bjsAbort = false;"), body.index("startInterpreterTask();"), sig)
+            self.assertLess(body.index("g_bjsThrew = false;"), body.index("startInterpreterTask();"), sig)
+        # An uncaught error (not exit()) marks the run as failed, after the exit() early return.
+        fatal = body_of(code("src/modules/bjs_interpreter/helpers_js.cpp"), "void js_fatal_error_handler(JSContext *ctx)")
+        self.assertLess(fatal.index(") == 0) { return; }"), fatal.index("g_bjsThrew = true;"))
+        self.assertIn('"Script exited") == 0) { return; }', (ROOT / "src/modules/bjs_interpreter/helpers_js.cpp").read_text())
+        self.assertIn("if (JS_IsException(val)) { js_fatal_error_handler(ctx); }", task)
 
     def test_natives(self):
         g = code("src/modules/bjs_interpreter/globals_js.cpp")
@@ -279,8 +364,24 @@ class ScriptAbortWiring(unittest.TestCase):
         # Only the failed start clears the bound; a run that may still be going keeps it.
         after_start = run[run.index("interpreter_state = 2;"):]
         self.assertNotIn("g_bjsDeadlineMs = 0", after_start)
-        self.assertNotIn("g_bjsAbort = false", after_start)
+        # The abort is dropped only once the task is gone (the last step copies it in again after the
+        # task cleared it); never while the task may still run.
+        self.assertEqual(after_start.count("g_bjsAbort = false"), 1)
+        self.assertIn("if (interpreterTaskHandler == NULL) g_bjsAbort = false;", after_start)
+        self.assertLess(after_start.index("bool finished = (interpreter_state <= 0);"),
+                        after_start.index("if (interpreterTaskHandler == NULL) g_bjsAbort = false;"))
         self.assertNotIn("interpreterTaskHandler = NULL", after_start)
+        # An uncaught error replies ok:false with the captured output; only a clean run is ok:true.
+        threw = run.index("if (g_bjsThrew) {")
+        self.assertLess(run.index("companionAckMsg(id, false, failure);"), threw)
+        self.assertRegex(run, r'companionAckMsg\(id, false, captured\.length\(\) \? captured\.c_str\(\) : "\s+"\);')
+        self.assertLess(threw, run.index("companionAckMsg(id, true, captured.c_str());"))
+        # The busy refusal checks both the state and the task handle, and the reply goes out only
+        # after the wait loop (a stopped run answers once the task has ended or the wall clock ran out).
+        self.assertIn("if (interpreter_state > 0 || interpreterTaskHandler != NULL) {", run)
+        loop_end = run.index("if (step != BjsRunWatch::WAIT) break;")
+        self.assertLess(loop_end, run.index("companionAckMsg(id, false, failure);"))
+        self.assertLess(loop_end, run.index("companionAckMsg(id, true, captured.c_str());"))
 
 
 if __name__ == "__main__":

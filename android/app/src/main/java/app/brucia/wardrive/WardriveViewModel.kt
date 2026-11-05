@@ -1237,16 +1237,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * De Bruijn brute force: the phone computes the shortest sequence covering every
-     * [bits]-bit fixed OOK code, the device transmits it via `subghz tx`. Returns the
-     * command sent (also echoed to the console) so the UI can show what ran.
+     * De Bruijn brute force request. The device `subghz tx` path sends a single fixed code and
+     * cannot carry a De Bruijn sweep (a full sequence is 2^n bits; the key is one code of at most
+     * 64 bits), so this validates and refuses with a clear reason, echoes it to the console, and
+     * transmits NOTHING - no false "sent", no exception on the device. Returns the reason shown so
+     * the UI can surface it. [freqHz], [teUs] and [repeat] are unused while the path refuses.
      */
     fun transmitDeBruijn(bits: Int, freqHz: Long, teUs: Int, repeat: Int): String {
-        val (hex, len) = app.brucia.subghz.DeBruijn.hexKey(bits)
-        val cmd = "subghz tx $hex $freqHz $teUs $repeat"
-        _console.value = (_console.value + "> de Bruijn B(2,$bits): $len bits").takeLast(500)
-        dispatchCmd(cmd)
-        return cmd
+        val reason = app.brucia.subghz.DeBruijn.transmitRejection(bits)
+        _console.value = (_console.value + "> de Bruijn B(2,$bits) refused: $reason").takeLast(500)
+        return reason
     }
 
     // Wi-Fi deauth of one AP is a time-bounded op that blocks the whole companion link for its full
@@ -3268,7 +3268,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             Entry("portal", { evilPortal.stop() }, { evilPortal.abandon() }),
             Entry("ibutton", { ibutton.stop() }),
             Entry("clock", { clock.stop() }),
-            Entry("script", { script.stop() }),
+            Entry("script", { script.stop() }, { script.abandon() }),
             Entry("espnow", { espNow.stop() }),
             Entry("speaker", { speaker.stop(); speaker.stopSong() }, { speaker.disconnect() }),
             Entry("mic-record", { micRecorder.stop() }),
@@ -3379,8 +3379,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val clock = ClockService(viewModelScope, commandRunner, isConnected = { session != null })
     val clockStatus: StateFlow<String> = clock.status
 
-    private val script = ScriptService(viewModelScope, commandRunner, isConnected = { session != null })
+    // script_stop goes out like the responder/karma stops: unlogged and unawaited (the firmware
+    // consumes it while script_run waits and never ACKs it). A lambda: directStop is declared below.
+    private val script = ScriptService(viewModelScope, commandRunner, isConnected = { session != null },
+        stopRunner = { cmd, timeoutMs -> directStop.run(cmd, timeoutMs) })
     val scriptOutput: StateFlow<String> = script.output
+    /** True while a script_run awaits its reply (the Scripts screen shows Stop instead of Run). */
+    val scriptBusy: StateFlow<Boolean> = script.busy
+    /** True while a stop is on its way and the run has not ended yet. */
+    val scriptStopping: StateFlow<Boolean> = script.stopping
 
     private val espNow = EspNowService(viewModelScope, commandRunner, isConnected = { session != null })
     val espnowStatus: StateFlow<String> = espNow.status
@@ -3398,6 +3405,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Run a JavaScript source on the device; the captured output lands on [scriptOutput]. */
     fun scriptRun(src: String) = script.run(src)
+
+    /** Stop the running script on the device (script_stop); the run's own reply shows the outcome. */
+    fun scriptStop() = script.stop()
 
     /** Clear the script output (kept while a script is still running). */
     fun clearScriptOutput() = script.clear()
@@ -3493,7 +3503,13 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val directStop = CommandRunner { cmd, _ ->
         val captured = client
         withContext(Dispatchers.IO) {
-            try { if (client === captured) captured?.cmd(cmd) } catch (e: Exception) { BruciaLog.d("Op", "$cmd: ${e.message}") }
+            try {
+                if (client === captured && captured != null) {
+                    // Same preflight as the session (stops are always permitted on an open link).
+                    CommandCapabilities.check(cmd, _device.value?.caps, _device.value?.features)
+                    captured.cmd(cmd)
+                }
+            } catch (e: Exception) { BruciaLog.d("Op", "$cmd: ${e.message}") }
         }
         true to ""
     }

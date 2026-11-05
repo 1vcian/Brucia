@@ -135,6 +135,11 @@ object EspProtocol {
         return null
     }
 
+    /** True for the esptool stub's greeting frame, the raw ASCII bytes "OHAI" (no response header). */
+    fun isStubGreeting(frame: ByteArray): Boolean =
+        frame.size >= 4 && frame[0].toInt() == 'O'.code && frame[1].toInt() == 'H'.code &&
+            frame[2].toInt() == 'A'.code && frame[3].toInt() == 'I'.code
+
     /** Number of [FLASH_WRITE_SIZE] blocks needed for [totalBytes]. */
     fun numBlocks(totalBytes: Int, blockSize: Int = FLASH_WRITE_SIZE): Int =
         (totalBytes + blockSize - 1) / blockSize
@@ -269,10 +274,64 @@ object SlipCodec {
                 END -> {
                     // An END with an empty buffer is a redundant delimiter (back-to-back
                     // 0xC0); treat it as the start of the next frame rather than a frame.
-                    if (buf.isEmpty()) { null } else { inFrame = false; buf.toByteArray().also { buf.clear() } }
+                    // An END that closes a frame may also open the next one, so the reader
+                    // stays in a frame: a stray partial frame (junk then 0xC0) is closed by
+                    // the next reply's opening delimiter without swallowing that reply.
+                    if (buf.isEmpty()) { null } else { buf.toByteArray().also { buf.clear() } }
                 }
                 else -> { buf.add(v.toByte()); null }
             }
         }
+    }
+
+    /**
+     * Persistent receive side of the link: raw bytes from any number of USB reads go in with
+     * [feed], complete frames come out one at a time with [nextFrame]. Whatever follows a
+     * frame stays buffered for the next call, because one read can hold several frames (a
+     * reply and the stub's "OHAI" greeting, the eight SYNC replies) or end inside a frame,
+     * even between an escape byte and its code.
+     */
+    class Receiver {
+        private var raw = ByteArray(512)
+        private var start = 0
+        private var end = 0
+        private val reader = FrameReader()
+
+        /** Raw bytes received but not yet decoded. */
+        val buffered: Int get() = end - start
+
+        /** Append the first [count] bytes of [bytes] (one read's worth) to the buffer. */
+        fun feed(bytes: ByteArray, count: Int = bytes.size) {
+            require(count in 0..bytes.size) { "count $count outside 0..${bytes.size}" }
+            if (count == 0) return
+            val live = end - start
+            if (end + count > raw.size) {
+                val target = if (live + count <= raw.size) raw else ByteArray(maxOf(raw.size * 2, live + count))
+                raw.copyInto(target, 0, start, end)
+                raw = target
+                start = 0
+                end = live
+            }
+            bytes.copyInto(raw, end, 0, count)
+            end += count
+        }
+
+        /**
+         * Decode buffered bytes up to the end of the next complete frame and return it, or
+         * null once the buffer is used up (a partial frame then stays in progress and is
+         * completed by later [feed] calls). Bytes after the returned frame are kept.
+         */
+        fun nextFrame(): ByteArray? {
+            while (start < end) {
+                val frame = reader.offer(raw[start++].toInt() and 0xFF)
+                if (frame != null) return frame
+            }
+            start = 0
+            end = 0
+            return null
+        }
+
+        /** Drop everything buffered, including a partial frame. */
+        fun clear() { start = 0; end = 0; reader.reset() }
     }
 }

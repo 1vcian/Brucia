@@ -54,7 +54,7 @@ object BuiltinFeatures {
                 FeatureDescriptor("org.brucia.bleir.badusb", 4, "BadUSB", "Run Ducky keystroke-injection scripts"),
             )),
             FeatureCategory("Spam", "Spam", listOf(
-                FeatureDescriptor("org.brucia.spam.spamble", 49, "Spam BLE", "Bluetooth pairing-popup floods (iOS/Android/Windows/Samsung)", "ble"),
+                FeatureDescriptor("org.brucia.spam.spamble", 49, "Spam BLE", "Broadcasts BLE pairing advertisements (iOS/Android/Windows/Samsung); receiver reaction is unverified", "ble"),
                 FeatureDescriptor("org.brucia.spam.spamwifi", 50, "Spam Wi-Fi", "Beacon flood: broadcast fake Wi-Fi networks", "wifi"),
                 FeatureDescriptor("org.brucia.spam.spamnfc", 51, "Spam NFC", "NFC NDEF push (tap-to-send)", "nfc"),
             )),

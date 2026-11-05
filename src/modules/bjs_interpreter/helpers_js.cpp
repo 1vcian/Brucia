@@ -43,6 +43,7 @@ void js_fatal_error_handler(JSContext *ctx) {
 
     JSValue jsvMessage = JS_GetPropertyStr(ctx, obj, "message");
     if (strcmp(JS_ToCString(ctx, jsvMessage, &sb), "Script exited") == 0) { return; }
+    g_bjsThrew = true; // Brucia: script_run reports an uncaught error as ok:false
 
     tft.fillScreen(bruceConfig.bgColor);
     tft.setTextSize(FM);
