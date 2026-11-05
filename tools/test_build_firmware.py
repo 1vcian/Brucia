@@ -1,19 +1,23 @@
+from contextlib import redirect_stdout
+import io
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-from build_firmware import (build, installed_packages, main, normalize_manifests,
-                            quarantine_orphans, reachable_packages)
+from build_firmware import (build, installed_packages, is_exact_spec, main, normalize_manifests,
+                            quarantine_orphans, reachable_packages, registry_pins,
+                            unpinned_libraries)
 
 
-def listing(*packages, required='spec'):
+def listing(*packages, required=None):
     """Fake `pio pkg list -e <env> --only-libraries -v` output for the given paths."""
     lines = ['Resolving board dependencies...', 'Libraries']
     for index, package in enumerate(packages):
         branch = '└──' if index == len(packages) - 1 else '├──'
-        lines.append(f'{branch} {Path(package).name} @ 1.0.0 (required: {required}, {package})')
+        spec = required or f'owner/{Path(package).name} @ 1.0.0'
+        lines.append(f'{branch} {Path(package).name} @ 1.0.0 (required: {spec}, {package})')
     return '\n'.join(lines) + '\n'
 
 
@@ -218,6 +222,134 @@ class OrphanLibraryTest(unittest.TestCase):
                 main()
         self.assertEqual('refusing', raised.exception.code)
         check.assert_not_called()
+
+
+class PinnedVersionTest(unittest.TestCase):
+    """An exact lib_deps pin decides which installed version of a library stays linkable."""
+
+    def tree(self, root, names):
+        board = root / '.pio/libdeps/board'
+        for name in names:
+            (board / name).mkdir(parents=True)
+            (board / name / 'library.json').write_text('{}')
+        return board
+
+    def test_exact_specs(self):
+        for spec in ('m5stack/M5GFX @ 0.2.36', 'LibSSH-ESP32 @ 5.10.0',
+                     'git+https://github.com/a/b#' + 'c' * 40,
+                     'https://github.com/a/b/archive/' + 'c' * 40 + '.zip'):
+            with self.subTest(spec=spec):
+                self.assertTrue(is_exact_spec(spec))
+        for spec in ('M5GFX @ >=0.2.35', 'ESP32Async/AsyncTCP @ ^3.5.0', 'x @ ~1.2.3',
+                     'NimBLE-Arduino', 'git+https://github.com/a/b', 'git+https://github.com/a/b#main',
+                     'Foo @ >=1.0.0, <2.0.0'):
+            with self.subTest(spec=spec):
+                self.assertFalse(is_exact_spec(spec))
+
+    def test_other_version_reached_only_through_a_range_is_quarantined(self):
+        # `pio pkg install` of the pin m5stack/M5GFX @ 0.2.36 over a newer leftover 0.2.37
+        # keeps the old one in M5GFX/ and puts the pinned one in M5GFX@0.2.36/ (PlatformIO
+        # "detach-new"); M5Unified's own `M5GFX >=0.2.35` still prints the newer one.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            board = self.tree(root, ['M5Unified', 'M5GFX', 'M5GFX@0.2.36'])
+            output = '\n'.join([
+                'Libraries',
+                f'├── M5GFX @ 0.2.36 (required: m5stack/M5GFX @ 0.2.36, {board}/M5GFX@0.2.36)',
+                f'└── M5Unified @ 0.2.29 (required: m5stack/M5Unified @ 0.2.29, {board}/M5Unified)',
+                f'    └── M5GFX @ 0.2.37 (required: M5GFX @ >=0.2.35, {board}/M5GFX)', ''])
+            with patch('build_firmware.subprocess.run',
+                       return_value=subprocess.CompletedProcess([], 0, output)):
+                removed = quarantine_orphans(root, root / '.pio/libdeps', 'board', 'pio')
+            self.assertEqual(['M5GFX'], removed)
+            self.assertEqual(['M5GFX@0.2.36', 'M5Unified'], [p.name for p in installed_packages(board)])
+
+    def test_same_package_reached_by_pin_and_range_is_kept(self):
+        board = Path('/p/.pio/libdeps/board')
+        packages = [board / 'ESPAsyncWebServer', board / 'AsyncTCP']
+        output = '\n'.join([
+            f'├── ESPAsyncWebServer @ 3.12.1 (required: ESP32Async/ESPAsyncWebServer @ 3.12.1, {board}/ESPAsyncWebServer)',
+            f'│   └── AsyncTCP @ 3.5.0 (required: ESP32Async/AsyncTCP @ ^3.5.0, {board}/AsyncTCP)',
+            f'└── AsyncTCP @ 3.5.0 (required: ESP32Async/AsyncTCP @ 3.5.0, {board}/AsyncTCP)'])
+        self.assertEqual(set(packages), reachable_packages(output, packages))
+        self.assertEqual([], unpinned_libraries(output, packages))
+
+    def test_library_reached_only_through_a_range_is_kept_and_reported(self):
+        board = Path('/p/.pio/libdeps/board')
+        packages = [board / 'Parent', board / 'Child']
+        output = '\n'.join([
+            f'├── Parent @ 1.0.0 (required: owner/Parent @ 1.0.0, {board}/Parent)',
+            f'│   └── Child @ 2.1.0 (required: Child @ >=2.0.0, <3.0.0, {board}/Child)'])
+        self.assertEqual(set(packages), reachable_packages(output, packages))
+        self.assertEqual(['Child (required: Child @ >=2.0.0, <3.0.0)'],
+                         unpinned_libraries(output, packages))
+
+    def test_range_only_library_is_reported_before_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            board = self.tree(root, ['Parent', 'Child'])
+            output = '\n'.join([
+                f'├── Parent @ 1.0.0 (required: owner/Parent @ 1.0.0, {board}/Parent)',
+                f'│   └── Child @ 2.1.0 (required: Child @ ^2.0.0, {board}/Child)'])
+            printed = io.StringIO()
+            with patch('build_firmware.subprocess.run',
+                       return_value=subprocess.CompletedProcess([], 0, output)), redirect_stdout(printed):
+                self.assertEqual([], quarantine_orphans(root, root / '.pio/libdeps', 'board', 'pio'))
+            self.assertIn('Warning: board resolves Child (required: Child @ ^2.0.0) through a range',
+                          printed.getvalue())
+
+    def test_registry_pins_come_from_exact_lib_deps_entries(self):
+        self.assertEqual({'m5gfx': '0.2.36', 'nimble-arduino': '2.5.2', 'libssh-esp32': '5.10.0',
+                          'adafruit gfx library': '1.13.0'},
+                         registry_pins(['m5stack/M5GFX @ 0.2.36 ; why', 'h2zero/NimBLE-Arduino@2.5.2',
+                                        'LibSSH-ESP32@5.10.0', 'adafruit/Adafruit GFX Library @ 1.13.0',
+                                        'm5stack/M5Unified @ ^0.2.11', 'FFat',
+                                        'Adafruit BusIO=https://github.com/a/b#' + 'c' * 40]))
+
+    def test_pinned_release_decides_even_when_listed_only_under_ranges(self):
+        # PlatformIO prints each package once: when a parent sorting before the pinned
+        # library reaches it first, the exact top-level line is never printed. Here two
+        # parents' ranges reach two installed releases; the pin keeps 2.5.2 only.
+        board = Path('/p/.pio/libdeps/board')
+        packages = [board / 'A', board / 'B', board / 'NimBLE-Arduino', board / 'NimBLE-Arduino@2.6.0']
+        output = '\n'.join([
+            f'├── A @ 1.0.0 (required: git+https://github.com/x/a#{"a" * 40}, {board}/A)',
+            f'│   └── NimBLE-Arduino @ 2.6.0 (required: NimBLE-Arduino, {board}/NimBLE-Arduino@2.6.0)',
+            f'└── B @ 1.0.0 (required: git+https://github.com/x/b#{"b" * 40}, {board}/B)',
+            f'    └── NimBLE-Arduino @ 2.5.2 (required: NimBLE-Arduino @ ^2.5.0, {board}/NimBLE-Arduino)'])
+        pins = {'nimble-arduino': '2.5.2'}
+        self.assertEqual({board / 'A', board / 'B', board / 'NimBLE-Arduino'},
+                         reachable_packages(output, packages, pins))
+        self.assertEqual([], unpinned_libraries(output, packages, pins))
+        # Without the declared pin both stay and both are reported as unpinned.
+        self.assertEqual(set(packages), reachable_packages(output, packages))
+        self.assertEqual(2, len(unpinned_libraries(output, packages)))
+
+    def test_pin_matching_no_listed_release_removes_nothing(self):
+        board = Path('/p/.pio/libdeps/board')
+        packages = [board / 'Time']
+        output = f'└── Time @ 1.6.1 (required: Time, {board}/Time)'
+        self.assertEqual({board / 'Time'}, reachable_packages(output, packages, {'time': '9.9.9'}))
+
+    def test_build_passes_each_env_lib_deps_to_the_quarantine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            board = self.tree(root, ['M5GFX', 'M5GFX@0.2.36'])
+            listed = '\n'.join([
+                f'├── M5GFX @ 0.2.37 (required: M5GFX @ >=0.2.35, {board}/M5GFX)',
+                f'├── M5GFX @ 0.2.36 (required: M5GFX @ >=0.2.0, {board}/M5GFX@0.2.36)'])
+
+            def run(args, **kwargs):
+                if args[1:3] == ['project', 'config']:
+                    return subprocess.CompletedProcess(args, 0, json.dumps([
+                        ['platformio', []], ['env:board', [['lib_deps', ['m5stack/M5GFX @ 0.2.36']]]]]))
+                if args[1:3] == ['pkg', 'list']:
+                    return subprocess.CompletedProcess(args, 0, listed)
+                return subprocess.CompletedProcess(args, 0)
+
+            with patch('build_firmware.subprocess.run', side_effect=run), redirect_stdout(io.StringIO()):
+                build(root, ['board'], 'pio')
+            self.assertEqual(['M5GFX@0.2.36'], [p.name for p in installed_packages(board)])
 
 
 if __name__ == '__main__':

@@ -1,4 +1,5 @@
 #include "power_commands.h"
+#include "helpers.h" // Brucia: cliFromCompanionScript
 #include "core/settings.h"
 #include <globals.h>
 
@@ -14,6 +15,14 @@ uint32_t rebootCallback(cmd *c) {
 }
 
 uint32_t sleepCallback(cmd *c) {
+#if !defined(LITE_VERSION)
+    // Brucia: sleeps until a key is pressed at the device; a companion script would hang there (the
+    // app's own Sleep button sends a routed `sleep`, which still works).
+    if (cliFromCompanionScript()) {
+        serialDevice->println("sleep is not available in a companion script");
+        return false;
+    }
+#endif
     setSleepMode();
     return true;
 }

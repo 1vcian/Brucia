@@ -103,14 +103,16 @@ jobs:
             ${{ runner.os }}-platformio-${{ hashFiles('platformio.ini') }}
             ${{ runner.os }}-platformio-
 
+      # Libraries are pinned exactly (tools/test_dependency_pins.py), so the key covers every
+      # ini that declares lib_deps plus the script that patches installed libraries in place.
+      # No restore-keys: a partial match would restore libraries installed for other pins,
+      # and plain `platformio run` builds whatever is in .pio/libdeps (an older version or a
+      # library no env declares any more). On a miss the libraries are installed fresh.
       - name: PIO libraries cache
         uses: actions/cache@v4
         with:
           path: .pio/libdeps
-          key: ${{ runner.os }}-pio-${{ env.SELECTED_ENV }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: |
-            ${{ runner.os }}-pio-${{ env.SELECTED_ENV }}-${{ hashFiles('platformio.ini') }}
-            ${{ runner.os }}-pio-${{ env.SELECTED_ENV }}-
+          key: ${{ runner.os }}-pio-libdeps-v2-${{ env.SELECTED_ENV }}-${{ hashFiles('platformio.ini', 'boards/**/*.ini', 'patch_library_conflicts.py') }}
 
       - name: Install dependencies
         run: |

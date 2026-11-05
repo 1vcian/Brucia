@@ -29,6 +29,23 @@ S02 packets remain blocked by their missing prerequisites; S07 is done (2026-11-
 W06 and W07 are done and wired. W08 (phone-only pilot), W09 (device-backed pilot, iButton) and W10 (firmware adapter, iButton) are done; W11 runs in batches, one at a time after review.
 Release correctness and physical acceptance gates still apply before publication.
 
+## Functional defects and acceptance follow-up — 2026-11-05
+
+User requested investigation and a functional test plan after batch 14; this is
+not authorization to declare every existing feature accepted from aggregate test
+counts. Full plan: [APP_CONTROLS_CHECKLIST.md](../../../docs/APP_CONTROLS_CHECKLIST.md#functional-acceptance-priorities--2026-11-05),
+F01–F20. Diagnostic evidence/limits: [TESTS.md](../../../TESTS.md#functional-contract-investigation--2026-11-05-after-batch-14).
+No production change or on-device reproduction was made in this investigation.
+
+| Item | Priority / state | Finding and next acceptance |
+|---|---|---|
+| F01–F02: De Bruijn | P0 OPEN | Owner reports T-Embed reboot. Host reproduction using the real Kotlin generator and extracted CLI callback: default 12 produces 1,024 hex characters, `std::stoull` throws before RF init; n=8/10 also fail. CLI transmits a hardcoded 24 bits for the small accepted inputs, so it cannot carry the generated sequence. UI permits 23/24 although generator max is 22; n>=15 exceeds frame capacity. First require safe rejection/no crash and honest UI feedback; do not silently truncate or treat a larger frame limit as a fix. Device panic/reset trace still needed to tie this failure to the reported reboot. This specific path was not covered by earlier receive-side S11 work. |
+| F03: legacy numeric parsers | P0 OPEN | Throwing conversions also occur in RF named/key commands, tone/beep and screen color, reached through the CLI fallback. Audit target-width bounds and full-token validation with output drivers stubbed; malformed input must yield ERR, preserve state and permit the next command. No physical crash reproduced for these other callers. |
+| F04: ARP CLI ownership | P0 OPEN | CLI `arp` invokes interactive ARPScanner; its setup has three early returns after LOCK_TCPIP_CORE without unlock. First fault-inject the error paths and guarantee balanced ownership plus headless rejection. Actual deadlock depends on target lwIP configuration; not claimed as reproduced. |
+| F05–F08: BLE visibility/results/ownership/Stop | P1 OPEN | Owner sees no Mac effect. Mac card routes to ios only; remote popup support unknown. Host failure stub shows bounded wrapper returns normally despite every advertising start failing; dispatcher then reports success. 8 s request with 100 copies lasts 9,205 virtual ms (driver timing not measured). Review error reporting, single BLE owner and post-deinit scan/HID state; use a benign advertiser to separate observed packets from OS UI behavior. No payload/rate improvements or new platform claims. |
+| F09–F10: headless recovery | P1 OPEN | Script timeout can leave interpreter busy; IR headless setup can still call pin chooser. These are reachable-function gaps beyond the direct prompt-call checks. Require bounded, visible failure followed by a successful benign command/script; no menu waiting on the device. |
+| F11–F20: functional acceptance | P1/P2 OPEN | Exercise mode transitions, actual audio/capture/network effects, missing modules, storage failures, USB/background/rotation, update recovery, exports and repeated cycles on supported boards. Keep FAIL/BLOCKED/NOT RUN distinct from PASS; general link/build/unit suites are insufficient evidence. |
+
 ## Immediate queue
 
 | ID | Priority | State | Next action / acceptance |
@@ -52,7 +69,7 @@ Release correctness and physical acceptance gates still apply before publication
 | S04 | P0 | DONE | 2026-11-04 coordinator: additive transactional_uploads CAPS and fs_upload_* protocol; app validates token/cumulative bytes/commit CRC, never falls back to truncate, and reports uncertain commit outcomes. Firmware stages/verifies before promotion; LittleFS rename, FAT journal/backup/rollback with retained previous bytes on recovery failure. Reserved paths and concurrent legacy writes reject; idle expiry starts after slow IO. 41 UBSan engine scenarios plus real-handler fixtures, 563 cached JVM tests / 88 suites / 158 production files; three board builds (see TESTS.md). FAT visibility/power-loss durability, card swaps and Android provider rollback are not certified. No worker launched; next S06 only on explicit request. |
 | S05 | P0 | BLOCKED | Final app/device acceptance and flash recovery; phone, board and appropriate peripherals required. 2026-11-05: first `tools/hw_acceptance.py` run on the T-Embed CC1101 found an inbound frame loss (RX queue too small for upload chunks) and a framing loss on `cc1101 Connection OK`; both fixed in software in batch 8 (HWLINK, see "S05 helper" below). Rerun on the same board with the batch 8 firmware: 12/12 PASS (upload with 3072-byte chunks, subghz.raw with 0 noise bytes, heap -7,576 B as predicted; report hw-acceptance-20261105T103009045Z, details in TESTS.md). 2026-11-05 owner phone test of release 0.1.5 (9f4eefa4): app update, firmware flash from the phone, upload > 3 KB, Sub-GHz Listen with 0 noise bytes, speaker/DTMF/SSTV, raw IR replay, new UI and USB unplug recovery all reported passing (TESTS.md "Phone test"). Still open: live RX traffic, NFC/RF/IR peripherals beyond replay, cancel mid-download, wake lock/swipe-away, flash recovery. |
 | S06 | P1 NEXT | IN_PROGRESS | 2026-11-04 PortLease/ownership slice integrated: `transport/UsbOwnership` (PortLease close-once, FlashPortOwner token per flash with 90 s handoff deadline, stale/duplicate/expired ports closed on arrival, `launchFlashOwned` releases on cancellation-before-start via invokeOnCompletion; UsbPermissionRequests correlated by process-wide id + EXTRA_DEVICE name, 60 s deadline). MainActivity: one permission receiver onCreate..onDestroy, unique request codes, onDestroy cancels pending requests and aborts a waiting flash; Connect/openPort refused while flashing; transport construction failure closes the connection. VM: `flashEnteringBootloader()` returns a token, `flashFirmware(token, io, lease)` adopts by identity (no blanket isFlashing rejection), `flashAbort` ignores stale tokens, `onCleared` shuts the owner. Tests: UsbOwnershipTest 14. Behavior change: Activity recreation during the permission wait aborts the flash. Open: flash still calls `vm.disconnect()` (service/wake lock stopped during flash), companion-link vs flash arbitration (slice B), port.close()/connection semantics (D4/D5). No device evidence. Batch 2 (slice B): FlashPortOwner now arbitrates the USB device between companion link and flash by token (Connect/attach auto-connect via beginCompanionLink/connect(token)/abortCompanionLink; second open refused, flash preempts and closes the companion port, abandoned open expires after 10 s; "USB device busy" toast). D6a fixed: flash no longer calls disconnect(); ConnectionService switches to owner `flash:<token>` (keeps wake lock) and every flash end path (finish/abort/expiry/late handoff/cancel-before-start/onCleared) stops it once via onEnded. D4/D5 evidence from usb-serial-for-android 3.8.1 bytecode: `CommonUsbSerialPort.close()` closes the UsbDeviceConnection (l.155), `open()` throws "Already open" before taking the connection (l.114-115); new `releaseUsbPort(openedHere)` avoids killing a live link on a failed second open. onCleared disconnects before closing the owner. UsbOwnershipTest 22. Device-only: wake lock through a real flash, claimInterface on two connections, close() idempotency API 26-35. |
-| S07 | P1 | DONE | 2026-11-05: v1/v2 sources found in the squashed pre-0.1 history (v1 `85a74629`, v2 `0c705937`, v3 `7c541da4`; reachable only as local unreferenced objects). Neither shipped: every tag v0.1-v0.1.4 is v3, the first APK-building CI job (`83de6259`) came after v3, and the old public repo is gone. `schemas/1.json`/`2.json` generated by Room 2.8.5 KSP from those sources; Room 2.6.1 (their original toolchain) gives the same tables and identity hashes, and the pipeline reproduces `3.json` (unchanged). `BruciaMigrations` 1->2 (rebuild `ap`, rows kept, accumulators seeded from the v1 sighting) and 2->3 (create `saved`), registered in `BruciaDb.get`; no destructive fallback. Tests: `BruciaMigrationTest` (MigrationTestHelper, emulator API 36) and `BruciaMigrationsSeedTest` (JVM); emulator 12/12, JVM 783/783. Debug build carries kotlinx-serialization-core 1.8.1 for room-testing (release unchanged, 1.7.3). Batch 12 (DEPS): release aligned on 1.8.1. No real-device v1/v2 file was tested. See `android/app/schemas/README.md`. |
+| S07 | P1 | DONE | 2026-11-05: v1/v2 sources found in the squashed pre-0.1 history (v1 `85a74629`, v2 `0c705937`, v3 `7c541da4`; reachable only as local unreferenced objects). Neither shipped: every tag v0.1-v0.1.4 is v3, the first APK-building CI job (`83de6259`) came after v3, and the old public repo is gone. `schemas/1.json`/`2.json` generated by Room 2.8.5 KSP from those sources; Room 2.6.1 (their original toolchain) gives the same tables and identity hashes, and the pipeline reproduces `3.json` (unchanged). `BruciaMigrations` 1->2 (rebuild `ap`, rows kept, accumulators seeded from the v1 sighting) and 2->3 (create `saved`), registered in `BruciaDb.get`; no destructive fallback. Tests: `BruciaMigrationTest` (MigrationTestHelper, emulator API 36) and `BruciaMigrationsSeedTest` (JVM); emulator 12/12, JVM 783/783. Debug build carries kotlinx-serialization-core 1.8.1 for room-testing (release unchanged, 1.7.3). Batch 12 (DEPS): release aligned on 1.8.1. Batch 14 (APPPOLISH): 1.12.0 in every build type, BruciaMigrationTest passes with it on the emulator. No real-device v1/v2 file was tested. See `android/app/schemas/README.md`. |
 | S08 | P1 | IN_PROGRESS | Long-session memory/queue/drop/Stop tests with deterministic virtual transport; physical stress remains separate. 2026-11-04 batch 2: `SessionStressTest` (6 tests, virtual clock + fake fragmenting/coalescing transport, no sleeps): 5,000 mixed commands with timeouts/cancellation/late replies, 20,000-frame flood incl. 8192-byte and malformed frames (buffer <= 12,292 bytes), 3,000-step SUB model check, 500 Stop-all cycles with rejected/missing/unwritten OFF, 300 reconnects with residual callbacks, exact 8000 ms deadlines. All pending maps/buffers/timers asserted empty per round; mutation check (5 injected leaks) caught every one; 5 consecutive runs green. No defect found, no production change. Limits: no app-side drop counter for malformed frames (silently skipped), VM reader loop/disconnect mimicked not executed, real threads/heap/USB out of scope. Batch 4 (DIAG): app-side `protocol/LinkCounters` now counts malformed and invalid-length frames (previously skipped silently), timeouts and unmatched replies; shown in the Diagnostics card and exports. Batch UPLOADTEST (2026-11-05): `SessionFileLinkTest.uploadChunksFollowTheDeviceRxMax` failed once with `fs_upload_abort` while the Mac was swapping. Test-only cause: under runBlocking, withTimeout/withTimeoutOrNull are not run by the test's event loop but by the kotlinx DefaultExecutor thread at wall-clock time, so the fixture's 40 ms per-command upload timeout could cancel a command while the test thread was descheduled, although the fake replies synchronously. Reproduced deterministically with a 60 ms sleep in the fake wire (5/14 SessionFileLinkTest tests fail on runBlocking, the observed `Unexpected command fs_upload_abort` included; 0 on virtual time). Fix: the virtual clock moved from SessionStressTest to test `VirtualTime.kt`: `runVirtual` (runBlocking drop-in on that clock; jumps to the next timer when idle like runTest; fails instead of hanging, and fails when coroutine work arrives from another thread) and `virtualUnconfined` (Unconfined-like dispatcher for injection, with virtual delays/timeouts). 341 tests in 49 classes moved to it, no assertion changed; WidsServiceTest 3.3 s -> 0.1 s. Test seam only: `CaptureWorkflow(compute = Dispatchers.Default)` (parse/hash dispatcher, default unchanged); DictionaryTestServiceTest uses its existing dispatcher parameter. No kotlinx-coroutines-test dependency added. Real-time by design (real threads or blocking calls; bounds of 1-5 s on waits that normally complete at once are hang guards): UpdateDownloadConcurrencyTest, UsbOwnershipTest (launchFlashOwned on Dispatchers.Default), RecordingBufferTest two-thread races, ProtocolTest thread pool, ReleaseUpdateServiceTest 2 blocking-fetch tests, PcmStreamServiceTest blocking read, DictionaryTestServiceTest blocked open, BurstLoopTest Default-scope cancellation; JUnit `@Test(timeout)` values are wall-clock hang guards only. A one-off run that sampled all threads at every virtual-time jump found no other thread running app code in the converted tests. Evidence: 5 consecutive full suite runs green with 16 `yes` hogs on 12 cores (load average up to 49). CPU load alone did not reproduce the original failure (0/8 runs of the affected classes with 24 hogs, before and after); the stall simulation did. No production behavior change. |
 | S09 | P1 | IN_PROGRESS | Local Claude patch reviewed and integrated: batch/stream decoders predict from the previous measured sync, preventing cumulative Scottie S1 rounding drift. Coordinator reproduced 2 failures before / 31 passing DSP tests after (27 baseline + 4 new). Fractional-time fixture is explicitly synthetic, not external evidence. 2026-11-05 timing reference (agent9/SSTVREF): `SstvTimingReferenceTest` (7 tests) holds a per-value-cited table for all six modes from JL Barber N7CXI "Proposal for SSTV Mode Specifications" (Dayton, 20 May 2000; offered "for use or publication by anyone"), cross-checked with M. Bruchanov OK2MNM "Image Communication on Short Waves" ch. 3-5 (free download, no licence stated) and the MMSSTV transmitter source (LGPL-3.0+, n5ac/mmsstv 8060b5f1); numbers only, no documents copied. All Sstv constants (sync, porches, separators, scans, VIS codes, header) match. Source conflict: Robot 72 porch before B-Y is 1500 Hz in Barber, 1900 Hz in MMSSTV; Sstv keeps 1900. Found and fixed: per-segment sample rounding made encoded line periods deviate from nominal (Martin M2 -487 ppm, 28.3 ms short per frame; S1 +70, M1 -19, S2 -16 ppm) and offset decoder sample positions by up to 1.8 samples; encoder and decoder now place boundaries on an exact time axis. Before: 2/7 new tests failed; after: 787/787, lint 0 errors. Still open: no independently encoded recording and no over-the-air test; the audio checks use Brucia's own encoder and discriminator. |
 | S10 | P1 | IN_PROGRESS | 2026-11-04: ConnectionService start rule extracted to pure `ConnectionServiceCommand`: null intent (system restart) or missing status stops the service instead of advertising Connected/taking the wake lock; START_NOT_STICKY. ConnectionServiceCommandTest 4. Activity recreation, receiver cleanup, swipe-away, foreground/wake-lock behavior still require instrumentation/device evidence. Batch 2: decision rule is owner-aware (companion vs `flash:<token>`): a companion stop/update cannot end or replace a flash, stale flash stops ignored, only a newer flash token replaces a shown flash; `stopSelf(startId)`. ConnectionServiceCommandTest 11. Batch 4 (EMU): first instrumentation tests (`app/src/androidTest`, androidx.test pinned), 7/7 on emulator API 36: START_NOT_STICKY + foreground + wake lock, stop releases everything, missing status and null-intent restart (fresh and while shown) stop without wake lock, companion vs flash token owner rules, Activity recreate x2 keeps exactly one USB permission receiver and destroy unregisters it (read from dumpsys, no hook); 5 deliberate mutations caught. Test-only `ConnectionService.live` reference. Device-only: real USB attach/permission, long screen-off session, swipe-away/process kill during link or flash. Batch FLAKY (2026-11-05): the intermittent notification-removed failure (about 1 run in 4) was a test race, not a product bug: the Stop path already calls `stopForeground(STOP_FOREGROUND_REMOVE)` before `stopSelf(startId)`, but system_server drops the service record synchronously while NotificationManagerService cancels the notification later on its handler; probe on API 36: 1/40 stops still listed the notification right after the record was gone, removed 8 ms later. The 3 post-stop single reads are now a bounded poll (`awaitNotificationRemoved`, 15 s deadline, final state asserted); wake lock asserts stay strict (released before stopSelf). 13/13 consecutive full `connectedDebugAndroidTest` runs green (12 tests each, emulator API 36); mutation `STOP_FOREGROUND_DETACH` fails at the new poll (notification still listed after 15 s), restored. No product change. |
@@ -193,8 +210,8 @@ No plugin SDK, package manager or runtime isolation has been implemented.
    4,313,744 B and core4mb 2,661,552 B built fresh with nothing quarantined; AAC noise bounds
    pass on all three. Limits: only `.pio/libdeps/<env>` is cleaned (project `lib/`,
    `lib_extra_dirs` and framework libraries are fixed by the tree and platform pin); plain
-   `pio run` and the upstream `buil_parallel.yml`/`manual_build_sel_env.yml` workflows (libdeps
-   cache keyed on platformio.ini only, with prefix restore-keys) still link whatever is cached;
+   `pio run` still links whatever is in libdeps (the upstream `buil_parallel.yml`/
+   `manual_build_sel_env.yml` libdeps caches are exact-keyed since batch 14);
    a dependency declared only in a library's manifest for another platform is not listed and
    would be quarantined if present (harmless: it is not used for this env); the listing format
    is PlatformIO 6.x (6.2.0 here). Open owner decision: whether the Cardputer should declare
@@ -433,6 +450,44 @@ compatibility remain unscored until measured separately.
   firmware leaves companion mode after 60 s without frames and stops every stream there.
   Open: phone + T-Embed checks in TESTS.md "Batch 13 (STREAMS)"; a firmware report of
   screen/LED state would replace the app-side record.
+  Batch 14 (FWSTATE): the firmware reports it. CAPS adds `scrOn`/`ledOn` (false while `scr 0` /
+  `led 0` hold the output off) and `scrBright` (`currentScreenBrightness`); `scr_bright <n>` with
+  n > 0 ends a `scr 0` hold (`companionSetScreenLevel`). The app applies them on CAPS
+  (`DeviceOutputs.reported`, skipped for an output with a request still on the wire) and the
+  screen brightness slider uses `DeviceInfo.screenBrightShown`; older firmware: keys absent, app
+  unchanged. Evidence: `DeviceOutputsTest` (+3), e2e checks against `mock_device.py` (new state,
+  reconnect, scr_bright, 15 s restore, `--legacy-outputs`), hw_acceptance CAPS validator. Open:
+  T-Embed + phone check in TESTS.md "Batch 14 (FWSTATE)".
+  Batch 14 (APPPOLISH): MITM request rows keyed by `MitmTxn.id` (`mitmRows`, `items(key =
+  { it.id })`); the list state, kept above the list/detail switch since batch UPLOADTEST, now
+  anchors on the key, so rows added at the top while the list or a detail is shown no longer
+  shift the visible row. Duplicate ids: `MitmLog.nextId()` was taken before the exchange and
+  the catch logged an error entry under the same id; a real path was a success entry followed
+  by an exception from closing the upstream socket (`socket.use` close, e.g. SSL close_notify).
+  Now `MitmLog.add` assigns the id under its lock only when the entry is stored (consecutive,
+  not reset by Clear), and `RequestLog` gives each proxied request one entry at most (the
+  failure entry only when nothing was logged). ARP spoof card: its fields were
+  `rememberSaveable`/`remember` inside a LazyColumn item, dropped with the list while a detail
+  is shown (rememberSaveable only covers recreation); now `ArpSpoofForm` in `MitmScreen`
+  above the switch, saved with a Saver that leaves the password out (password still not kept
+  across rotation, as for every secret). Tests: `MitmLogTest` 6 (success then close failure ->
+  one entry; build failure -> one error entry with the next id; 8 threads x 30 requests with
+  late failures -> 240 unique ids), `ArpSpoofFormTest` 3 (incl. a control with the old
+  in-list shape, and save/restore: SSID and addresses back, password empty), instrumentation
+  `MitmRowKeysTest` 2 (real LazyColumn: first visible row id 30 kept after 3 live and 5
+  during-detail insertions; control with unkeyed `items(txns)` shifts). Test deps added:
+  compose `ui-test-junit4` (androidTest, BOM), `ui-test-manifest` (debug only, declares the
+  empty test Activity), espresso-core 3.7.0 (3.5.0 from ui-test 1.12.1 fails on API 36:
+  `NoSuchMethodException InputManager.getInstance` while waiting for idle). kotlinx-
+  serialization-core 1.8.1 -> 1.12.0 (newest; room-testing's serialization-json resolves to
+  1.12.0 too): `connectedDebugAndroidTest` 14/14 twice on the API 36.1 emulator
+  (BruciaMigrationTest 5/5, the 12 earlier tests plus MitmRowKeysTest 2); the same 14 passed
+  on 1.8.1 first. Kotlin warnings 0 (compile tasks rerun), lint 0 errors / 2 warnings
+  (OldTargetApi, Gradle 9.8.2; the serialization NewerVersionAvailable warning is gone, no new
+  one). Release APK 18,924,883 B with either version (dex about 24 KB larger uncompressed with 1.12.0).
+  `:app:testDebugUnitTest` 879/879 (128 suites), `verifyPaparazziDebug` pass, assemble
+  debug/release pass, `tools/test_android_logic.py` 199. Open: phone checks in TESTS.md
+  "Batch 14 (APPPOLISH)".
 - Concurrent update/install and download cancellation: covered by batch 3 (see S01).
 - Root dependencies are pinned; board-specific overrides and the full environment
   matrix still need coverage. Current builds establish only the documented boards.
@@ -617,6 +672,24 @@ compatibility remain unscored until measured separately.
   a script opens under script_run (`keyboard()`, `dialog`, menus) still wait for a person at
   the device and the execution deadline does not interrupt them; interactive apps a routed CLI
   command opens (`loader`, file manager); third-party libraries. Hardware check in TESTS.md.
+  Batch 14 (FWSTATE): prompts audited (every JS native and the CLI callbacks a script reaches).
+  `bjs_prompt_unavailable(api)` (helpers_js) returns true only in companion mode and writes
+  "<api>: skipped, ..." into the script output; keyboard/hex/num (and dialog.prompt) -> "",
+  dialog.message/choice/pickFile -> "", menu.show -> -1, dialog.viewFile skipped, viewText drawn
+  without the SEL wait, wifi.connectDialog -> false, httpFetch without Wi-Fi skips the menu,
+  subghz.read/readRaw(t <= 0) -> "", mic.recordWav maxMs 0 -> ok:false, drawGif(-1) plays once.
+  CLI: `loader open` refused in companion mode (routed CMD too); `webui`, `sniffer`, `listen`,
+  `sleep` refused only on the interpreter task in companion mode (`cliFromCompanionScript`), so
+  the app's Sleep button and console `webui`/`sniffer` keep working. Already guarded before:
+  displayInfo/Success/Warning/Error wait flags, the JS error screen, serial.readln. Bruce's
+  `loopOptions(..., interpreter=false)` already returns after one pass while a script is in the
+  foreground (display.cpp), so menu.show/wifi menu were not blocking from a foreground script
+  (menu.show returned index 0 there, an upstream quirk left as is outside companion mode).
+  New `tools/test_companion_prompts.py` (10 tests, reasoned allowlist). Left open: a routed `ir rx`
+  with an unconfigured IR RX pin and `arp` open a menu (not reachable from a script);
+  `badusb.setup()` on USB-HID boards waits for a USB host; a native call that outlives the 20 s
+  wall clock (long `delay()`, long radio timeout) still leaves later script_runs `interpreter busy`
+  until it returns. Hardware check in TESTS.md "Batch 14 (FWSTATE)".
 - Test concurrent updates/install requests and cancellation during downloads.
 - Validate capability probes with pin/bus conflicts and firmware Stop/resource
   ownership; distinguish compiled, detected, initialized and tested.
@@ -636,6 +709,25 @@ accumulate across runs; a stale pre-existing file is never reported as this run'
 imports exactly that path, checks the expected per-BSSID basename and verifies size/CRC;
 `complete:false` imports nothing; old firmware keeps the listing diff, labeled. No
 wall-clock capture time is claimed. Needs S05 with live APs.
-- Batch 13 merge note: on the main tree, m5stack-core4mb built 2,660,944 B vs 2,661,552 B from
-  fresh libdeps (608 B) with nothing quarantined, so a library resolved to a different version
-  within its declared range. Exact version pins would close it.
+- Batch 14 (PINS), closing the batch 13 merge note (main-tree core4mb 2,660,944 B vs fresh
+  2,661,552 B): the main tree's libdeps (installed 2026-10-29) held M5Unified 0.2.28 + M5GFX
+  0.2.35, both inside `m5stack/M5Unified @ ^0.2.11` and M5Unified's `M5GFX >=0.2.35`; a fresh
+  install takes 0.2.29 + 0.2.36 (published 2026-10-30; M5GFX adds font clip culling, M5Unified
+  raises the speaker task stack), which CI's uncached build.yml installs on every run since. Every
+  lib_deps entry of all 70 envs is now exact (registry `owner/name @ x.y.z`, Git at a 40-hex
+  commit, lora-pager audio driver as commit archive; only `FFat`, an Arduino-ESP32 built-in,
+  is unversioned); owner-less specs got their registry owner; M5GFX 0.2.36 and AsyncTCP 3.5.0
+  are pinned next to M5Unified / ESPAsyncWebServer. `tools/test_dependency_pins.py` resolves
+  extends/`${...}` for every env and fails on any non-exact entry, a missing transitive pin, or
+  a duplicate. PlatformIO itself reinstalls a changed pin: `pio pkg install -e` uninstalls the
+  specs that left lib_deps (integrity.dat diff) and installs the pinned release when the
+  installed one differs (old one moved to `name@version`); `build_firmware.py` now quarantines
+  any other installed release of a registry-pinned library that a dependency's range still
+  reaches (pkg list prints each package once, so the pin's version, not the printed spec,
+  decides) and warns about range-only libraries. Evidence (TESTS.md batch 14): byte-identical
+  firmware before/after on all three CI envs and from a clone of the main tree's libdeps.
+  Limits: Adafruit SH110X/GFX (installed by Adafruit TCA8418's manifest, not compiled) still
+  float; transitive dependencies of non-CI envs (SensorLib, TouchLib, LiteLED, audio driver)
+  were not installed or audited; the upstream workflows still `pip install platformio`
+  unpinned and keep the `~/.platformio` cache with prefix restore-keys (platform and packages
+  are URL-pinned).

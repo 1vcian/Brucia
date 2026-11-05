@@ -682,6 +682,8 @@ JSValue native_drawGif(JSContext *ctx, JSValue *this_val, int argc, JSValue *arg
     }
     if (argc > base + 3 && JS_IsNumber(ctx, argv[base + 3])) JS_ToInt32(ctx, &playDurationMs, argv[base + 3]);
 
+    // Companion mode: -1 loops until a key is pressed at the device; play the GIF once instead.
+    if (playDurationMs < 0 && bjs_prompt_unavailable("display.drawGif() endless loop")) playDurationMs = 0;
     showGif(file.fs, file.path.c_str(), x, y, center != 0, playDurationMs);
 #endif
     return JS_UNDEFINED;

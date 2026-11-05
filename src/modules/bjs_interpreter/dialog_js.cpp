@@ -35,6 +35,8 @@ JSValue native_dialogMessage(JSContext *ctx, JSValue *this_val, int argc, JSValu
         return JS_ThrowTypeError(ctx, "dialog.message(msg:string, buttons?:object)");
     JSCStringBuf msb;
     const char *msg = JS_ToCString(ctx, argv[0], &msb);
+    // Companion mode: no button is chosen; "" is not one of the labels.
+    if (bjs_prompt_unavailable("dialog.message()")) return JS_NewString(ctx, "");
     int8_t selectedButton = displayMessage(msg, leftButton, centerButton, rightButton, bruceConfig.priColor);
     if (selectedButton == 0) {
         return JS_NewString(
@@ -104,6 +106,8 @@ JSValue native_dialogPickFile(JSContext *ctx, JSValue *this_val, int argc, JSVal
         const char *s = JS_ToCString(ctx, argv[1], &sb);
         if (s) extension = String(s);
     }
+    // Companion mode: "" as if the picker was left without a choice.
+    if (bjs_prompt_unavailable("dialog.pickFile()")) return JS_NewString(ctx, "");
     FS *fs = NULL;
     if (SD.exists(filepath)) fs = &SD;
     else if (LittleFS.exists(filepath)) fs = &LittleFS; // ← added 'else'
@@ -118,6 +122,8 @@ JSValue native_dialogChoice(JSContext *ctx, JSValue *this_val, int argc, JSValue
     if (argc < 1 || !JS_IsObject(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "dialogChoice: Choice argument must be object or array.");
     }
+    // Companion mode: "" as if the menu was left without a choice.
+    if (bjs_prompt_unavailable("dialog.choice()")) return JS_NewString(ctx, "");
     options.clear();
 
     if (JS_GetClassID(ctx, argv[0]) == JS_CLASS_ARRAY) {
@@ -185,6 +191,8 @@ JSValue native_dialogViewFile(JSContext *ctx, JSValue *this_val, int argc, JSVal
     FS *fs = NULL;
     if (SD.exists(filepath)) fs = &SD;
     else if (LittleFS.exists(filepath)) fs = &LittleFS; // ← add "else if" for SD Priority
+    // Companion mode: the viewer is not opened.
+    if (bjs_prompt_unavailable("dialog.viewFile()")) return JS_UNDEFINED;
     if (fs) { viewFile(*fs, filepath); }
     return JS_UNDEFINED;
 }
@@ -209,6 +217,12 @@ JSValue native_dialogViewText(JSContext *ctx, JSValue *this_val, int argc, JSVal
     JSCStringBuf sb;
     const char *s = JS_ToCString(ctx, argv[0], &sb);
     area.fromString(s ? s : "");
+    // Companion mode: the text is drawn but nobody can close it, so do not wait (like
+    // dialog.info(msg, true), whose core helper already returns at once in companion mode).
+    if (bjs_prompt_unavailable("dialog.viewText()")) {
+        area.draw(true);
+        return JS_UNDEFINED;
+    }
     area.show(true);
     return JS_UNDEFINED;
 }

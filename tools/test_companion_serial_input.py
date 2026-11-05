@@ -21,8 +21,9 @@ Checked here:
     at once in companion mode instead of blocking the companion loop / interpreter task;
   - the screenless SerialDisplayClass (VectorDisplay) never consumes Serial.
 
-Not covered: third-party libraries under .pio/libdeps; on-device prompts a script can open
-(keyboard(), dialog, menu) wait for a person at the device, not for Serial.
+Not covered: third-party libraries under .pio/libdeps. On-device prompts a script can open
+(keyboard(), dialog, menu) wait for a person at the device, not for Serial: see
+tools/test_companion_prompts.py.
 
     python3 tools/test_companion_serial_input.py
 """

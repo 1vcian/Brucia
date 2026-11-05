@@ -4,6 +4,53 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Functional contract investigation — 2026-11-05 (after batch 14)
+
+Scope: investigate owner-reported De Bruijn reboot and missing Apple/Mac BLE
+visibility; source review plus host-only diagnostics. No production source change,
+device command, RF/BLE transmission, firmware flash or fresh full-suite run.
+Existing batch-14 results below remain historical evidence for their stated scope.
+
+Local reproducible diagnostic:
+`python3 .codex_tmp/functional-contracts-20261105/probe.py`.
+It compiles the actual `DeBruijn.kt` and `FrameBudget.kt` with cached Kotlin 2.4.21,
+then extracts the actual `rfTxCallback` and `runBleSpamBounded` function bodies into
+C++ host harnesses. All radio/device calls and the BLE payload builder are stubs.
+The harness catches exceptions to inspect failure before any hardware call;
+it does not emulate an ESP32 panic or prove the reset cause on the owner's board.
+
+Results observed:
+
+| Case | Result |
+|---|---|
+| De Bruijn n=4 / 5 / 6 | 16 / 32 / 64 generated bits; CLI stub receives hardcoded 24-bit transmission width in all three cases |
+| n=7 / 8 / 10 / 12 / 14 | All raise `std::out_of_range` in the actual CLI callback, zero RF-init calls; default n=12 supplies 1,024 hex characters |
+| n=15 / 16 / 20 / 22 | Command payload upper bounds 8,263 / 16,455 / 262,215 / 1,048,647 bytes; all exceed the 8,192 ceiling, even before considering a smaller advertised `rx_max` |
+| n=23 / 24 (offered by UI) | Actual generator throws `IllegalArgumentException: n out of range`; UI click handler has no catch |
+| BLE advertising failure stub, 8 s / copies=1 | 348 failed start attempts, zero successes, wrapper returns normally after 8,009 virtual ms |
+| Same, copies=100 | 400 failed start attempts, zero successes, wrapper returns normally after 9,205 virtual ms |
+
+The legacy route (`commands.cpp` → SimpleCLI → `rfTxCallback`) has no catch around
+the throwing numeric conversion. This is a concrete contract failure and a strong
+explanation for the report, pending device reset/backtrace evidence. The existing
+two `DeBruijnTest` cases were rerun and both PASS: they check sequence mathematics
+and hex length, not this route. This illustrates a coverage gap, not a failed unit
+suite. Input hashes and diagnostic results are retained in the local `result.json`.
+Larger De Bruijn values already fail the app's frame limit, so the host parser result
+for those values must not be reported as proof they reach firmware from the app.
+
+BLE dispatcher success is unconditional after the void bounded wrapper returns;
+driver failures and remote UI appearance are not measured. The Mac-labelled card
+routes to `ios`, not a separate Mac implementation. No macOS compatibility result
+was obtained. Source review also identified shared BLE owner-state risks, the IR
+pin-selection path, script timeout/busy recovery, and early-return TCP/IP lock
+imbalance in `ARPScanner::setup`; these are not new on-device reproductions.
+
+The prioritized [20-case functional acceptance plan](docs/APP_CONTROLS_CHECKLIST.md#functional-acceptance-priorities--2026-11-05)
+records expected effects, negative cases, ownership transitions and recovery.
+No physical checkbox was changed. F01–F04 require host rejection/recovery work;
+the general 12/12 hardware link suite does not close them.
+
 ## Latest software checkpoint — 2026-11-05, candidate 0.1.4
 
 Four coordinated batches (backlog S01/S02/S06/S08/S10/S11/W01-W03/W11, firmware items 2-5).
@@ -14,6 +61,89 @@ versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 4
 25.8% of chip), Cardputer, core4mb (LITE), LAUNCHER_CYD, nesso-n1; 12 envs compiled in the
 matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
+
+### Hardware run 2026-11-05 - batch 14 merge
+
+T-Embed CC1101 flashed from the Mac with the merged batch 14 firmware (dirty build on db5d8d34,
+pinned libraries), report hw-acceptance-20261105T201650625Z: 12/12 PASS; CAPS carries scrOn
+true, ledOn true, scrBright 100 (rx_max 8192); ping 200/200 median 3.01 ms p99 4.05 ms; upload
+with a 3072-byte chunk; streams clean; heap stable 102,639 B; diag counters match. Screen/LED
+off-and-reconnect and script prompt items below still need the app.
+
+### Batch 14 (FWSTATE) - device reports screen/LED state, scripts do not wait for on-device prompts; software only
+
+CAPS adds `scrOn`, `ledOn` and `scrBright`; the app's Device switches and screen brightness slider
+start from them (older firmware: keys absent, app unchanged). In companion mode the prompt helpers a
+script reaches (keyboard, dialogs, menus, pickers, viewers, Wi-Fi menu, endless reads/recordings/GIF)
+return their cancelled value at once with a note in the script output; `loader open` is refused in
+companion mode and `webui`/`sniffer`/`listen`/`sleep` inside a companion script (see
+proto/PROTOCOL.md). Evidence, host-side only: `test_protocol_e2e.py` 7 new checks against
+`mock_device.py` (state after `scr 0`/`led 0` seen by a reconnect, `scr_bright`, 15 s restore,
+`--legacy-outputs`), `hw_acceptance` CAPS validator for the new keys, new
+`test_companion_prompts.py` (10 tests, reasoned allowlist); `unittest discover` 159 tests and all
+33 `tools/test_*.py` pass. Android `:app:testDebugUnitTest` 873/873 (`DeviceOutputsTest` +3: new
+firmware CAPS, old firmware CAPS, report vs a request on the wire), `lintDebug` 0 errors,
+`assembleDebug` OK. Firmware builds SUCCESS: T-Embed CC1101 static RAM 156,024 B, app 4,315,920 B /
+92.75% (+2,176 B over batch 13); core4mb (LITE) 99,616 B, 2,661,120 B / 67.68%; AAC noise bounds
+pass on both. Nothing hardware-verified.
+
+- [ ] T-Embed, app connected: Device screen, turn the screen and the LED off; without tapping
+      Disconnect, force-stop the app and reconnect within 15 s - both switches show off and the
+      device is still dark; turn them on from the app. Reconnect after more than
+      15 s of silence: both show on and the device is lit.
+- [ ] Same: screen off, Console `scr_bright 40`: the screen lights; reconnect - screen switch on,
+      brightness slider at 40.
+- [ ] Older firmware (any build before batch 14) with this app: switches behave as before (show
+      what the app set, on after a disconnect).
+- [ ] T-Embed, app connected, Scripts tool: `print("a"); var s = keyboard("x"); print("got[" + s + "]");`
+      replies at once with `a`, `keyboard(): skipped, it waits for a person at the device
+      (companion mode)` and `got[]`; no keyboard appears on the device and the next script_run is
+      not `interpreter busy`. Same for `dialog.choice(["a","b"])`, `menu.show("t", ["a"])` (-1),
+      `dialog.viewText("hi")` (text drawn, returns at once).
+- [ ] Same session: a script with `serial.cmd("sleep")` returns `false` at once and the device stays
+      awake; the Device screen's Sleep button still puts the device to sleep (key press wakes it).
+- [ ] Outside companion mode (device menu Scripts, or a serial terminal `js run_from_file`), a script
+      calling `keyboard()` still opens the on-device keyboard and returns the typed text.
+
+### Batch 14 (APPPOLISH) - MITM list keys and ARP fields, serialization 1.12.0, software and emulator only
+
+MITM request rows are keyed by their log id; ids are assigned by the log when an entry is
+stored and one proxied request logs one entry at most. The ARP spoof card fields live in
+the MITM screen above the list/detail switch. kotlinx-serialization-core 1.12.0 in every
+build type. Evidence: `MitmLogTest` 6, `ArpSpoofFormTest` 3 (JVM Compose runtime with a
+saveable-state registry, incl. a control with the old shape), `MitmRowKeysTest` 2 on the
+API 36.1 emulator (real LazyColumn, incl. an unkeyed control that shifts);
+`:app:testDebugUnitTest` 879/879 (128 suites), Kotlin warnings 0, `lintDebug` 0 errors /
+2 warnings (OldTargetApi, Gradle 9.8.2), `verifyPaparazziDebug` pass, `assembleDebug` and
+`assembleRelease` pass, `tools/test_android_logic.py` 199, `connectedDebugAndroidTest`
+14/14 twice with 1.12.0 (BruciaMigrationTest 5/5). No traffic was sent through the proxy.
+
+Phone (MITM proxy running, a second device using it as HTTP proxy):
+- [ ] Scroll the request list down to a request, keep browsing on the second device: the
+      request you were looking at stays at the top of the screen while new ones arrive
+      above it; open a request, let more traffic arrive, Back: the same request is shown.
+- [ ] Type an SSID, password, target and gateway in the ARP spoof card, open a request and
+      go Back: all four fields keep their text. Rotate: SSID, target and gateway stay, the
+      password is empty.
+- [ ] Clear the log, browse again: the list fills without a crash.
+
+### Batch 14 (PINS) - exact library pins, software only
+
+All lib_deps entries of the 70 envs are exact (`tools/test_dependency_pins.py`, 10 tests: every
+env resolved through extends/`${...}`, transitive pins, workflow cache keys); the 608 B core4mb
+gap was M5Unified 0.2.28/M5GFX 0.2.35 in an older libdeps vs 0.2.29/0.2.36 fresh.
+`test_build_firmware.py` 23 tests (9 new: pin-aware quarantine, range-only warning). `unittest
+discover` 165 tests, all 32 `tools/test_*.py`, website 15/15 pass. Firmware builds with the same
+uncommitted-tree state (dirty flag set in both), sha256 of `firmware.bin` before -> after pinning,
+each from empty libdeps: core4mb 2,661,552 B 2da92de1... -> 2da92de1...; T-Embed CC1101
+4,313,744 B 2f266684... -> 2f266684...; Cardputer 4,223,152 B 87ecc2ad... -> 87ecc2ad... (an
+attempt that also pinned Adafruit SH110X/GFX in lib_deps gave 4,223,184 B and was dropped). AAC
+noise bounds pass on all three. core4mb from an APFS clone of the main tree's libdeps:
+`pio pkg install` removed the specs that left lib_deps and installed M5Unified 0.2.29 + M5GFX
+0.2.36, firmware 2da92de1... (identical). Same libdeps with M5GFX swapped back to 0.2.35 (pins
+unchanged): `pio pkg install` installed 0.2.36 and moved 0.2.35 to `M5GFX@0.2.35`, the wrapper
+quarantined it, firmware 2da92de1... again. Nothing hardware-verified; no device behavior is
+meant to change.
 
 ### Batch 13 (REPRO) - builds independent of leftover libraries, software only
 

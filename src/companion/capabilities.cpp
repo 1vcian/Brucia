@@ -806,6 +806,12 @@ void sendCaps(uint32_t id) {
     d["ledEffect"] = (int)bruceConfig.ledEffect; // 0..9
 #endif
     d["bright"] = (int)bruceConfig.bright; // screen brightness 0..100
+    // Lite controls (additive): live screen/LED state and backlight level, so an app that reconnects
+    // shows what the device is doing (a `scr 0`/`led 0` hold survives up to 15 s of silence).
+    d["scrOn"] = companionScreenOn();
+    d["ledOn"] = companionLedOn();
+    // Backlight level now (0..100): differs from bright after scr_bright or while scr 0 holds it at 0.
+    if (currentScreenBrightness >= 0) d["scrBright"] = currentScreenBrightness;
     sendEnvelope(out);
 }
 

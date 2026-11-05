@@ -7893,7 +7893,8 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
                     Switch(checked = ledOn, enabled = connected, onCheckedChange = { vm.setDeviceLed(it) })
                 }
                 Spacer(Modifier.height(10.dp))
-                var scrBright by remember(device?.screenBright) { mutableFloatStateOf((device?.screenBright?.takeIf { it >= 0 } ?: 100).toFloat()) }
+                val devScrBright = device?.screenBrightShown ?: -1
+                var scrBright by remember(devScrBright) { mutableFloatStateOf((devScrBright.takeIf { it >= 0 } ?: 100).toFloat()) }
                 Text("Screen brightness: ${scrBright.toInt()}%", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 Slider(
                     value = scrBright, onValueChange = { scrBright = it },

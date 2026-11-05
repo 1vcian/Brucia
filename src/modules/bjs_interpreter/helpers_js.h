@@ -29,6 +29,13 @@ js_get_path_from_params(JSContext *ctx, JSValue *argv, bool checkIfexist = true,
 
 JSValue js_value_from_json_variant(JSContext *ctx, JsonVariantConst value);
 
+// Brucia: true in companion mode, where an on-device prompt (keyboard, dialog, menu, picker,
+// viewer) would wait for a person who is not there; the script_run deadline cannot interrupt that
+// native wait. The caller then returns its "cancelled" value without opening the prompt; this
+// appends "<api>: skipped, ..." to the script output (script_run's ACK.d.out). Outside companion
+// mode it returns false and Bruce's prompt runs as before.
+bool bjs_prompt_unavailable(const char *api);
+
 void internal_print(
     JSContext *ctx, JSValue *this_val, int argc, JSValue *argv, uint8_t printTft, uint8_t newLine
 );

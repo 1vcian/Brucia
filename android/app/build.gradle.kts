@@ -107,10 +107,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     // kotlinx-serialization-core is not used by app code; savedstate/lifecycle bring 1.7.3.
-    // room-testing reads the schema JSON with 1.8 and the test APK runs on the app's classes
+    // room-testing reads the schema JSON with 1.8+ and the test APK runs on the app's classes
     // (1.7.3 gives AbstractMethodError in MigrationTestHelper), so it is raised for every
     // build type: release ships the same version the debug and instrumentation builds run.
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1")
+    // 1.12.0 checked with connectedDebugAndroidTest (BruciaMigrationTest) on the API 36 emulator.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.12.0")
     implementation("com.github.mik3y:usb-serial-for-android:3.8.1")
     implementation("com.google.android.gms:play-services-location:21.4.0")
 
@@ -124,6 +125,14 @@ dependencies {
     androidTestImplementation("androidx.test:rules:1.7.0")
     androidTestImplementation("androidx.test:core-ktx:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    // Compose UI tests on the emulator (MITM row keys need real layout); the manifest artifact
+    // declares the empty test Activity in the debug build only.
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // ui-test 1.12.1 brings espresso-core 3.5.0, which calls InputManager.getInstance (gone on
+    // API 36) when it waits for idle; 3.7.0 matches the androidx.test 1.7 line above.
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     // Room persistence
     implementation("androidx.room:room-runtime:2.8.5")

@@ -75,6 +75,9 @@ JSValue native_subghzRead(JSContext *ctx, JSValue *this_val, int argc, JSValue *
     if (argc > 0 && JS_IsNumber(ctx, argv[0])) {
         int t;
         JS_ToInt32(ctx, &t, argv[0]);
+        // Companion mode: a timeout of 0 or less waits for ESC at the device; "" as on a timeout.
+        if (t <= 0 && bjs_prompt_unavailable("subghz.read() without a timeout"))
+            return JS_NewString(ctx, "");
         r = rfReceiveSignal(bruceConfigPins.rfFreq, t, false, true); // headless mode for JS
     } else {
         r = rfReceiveSignal(bruceConfigPins.rfFreq, 10, false, true);
@@ -87,6 +90,9 @@ JSValue native_subghzReadRaw(JSContext *ctx, JSValue *this_val, int argc, JSValu
     if (argc > 0 && JS_IsNumber(ctx, argv[0])) {
         int t;
         JS_ToInt32(ctx, &t, argv[0]);
+        // Companion mode: a timeout of 0 or less waits for ESC at the device; "" as on a timeout.
+        if (t <= 0 && bjs_prompt_unavailable("subghz.readRaw() without a timeout"))
+            return JS_NewString(ctx, "");
         r = rfReceiveSignal(bruceConfigPins.rfFreq, t, true, true); // raw + headless for JS
     } else {
         r = rfReceiveSignal(bruceConfigPins.rfFreq, 10, true, true);

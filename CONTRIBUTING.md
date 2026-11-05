@@ -135,6 +135,45 @@ a `__has_include` and change the firmware (it did for the Cardputer and M5Unifie
 Use the wrapper for a new checkout, after deleting `.pio`, or whenever libraries
 were installed by hand; plain `pio run` does not clean `.pio/libdeps`.
 
+#### Pinned libraries and how to bump one
+
+Every library in `lib_deps` (platformio.ini `[env]`/`[env_light]` and the `boards/**/*.ini`
+overrides) names one release: a registry library as `owner/name @ x.y.z`, a Git library at
+a full 40-character commit (`https://github.com/owner/repo#<sha>`), a download as a commit
+archive URL. No `^`, `~`, `>=`, bare names or branches: with a range, a fresh install picks
+the newest matching release while an existing `.pio/libdeps` keeps the one it has, so the
+same commit built different firmware (m5stack-core4mb differed by 608 B: M5Unified
+0.2.28/0.2.29 and M5GFX 0.2.35/0.2.36). The one exception is `FFat`, an Arduino-ESP32
+built-in whose version is the platform's. A compiled registry library that another library
+pulls in through a range in its own manifest is pinned directly next to it (`m5stack/M5GFX`
+next to `m5stack/M5Unified`, `ESP32Async/AsyncTCP` next to `ESP32Async/ESPAsyncWebServer`).
+Manifest dependencies that are installed but never compiled stay out of `lib_deps`, because
+listing a library there forces it into the build (Adafruit SH110X and Adafruit GFX Library,
+pulled in by Adafruit TCA8418: pinning them grew the Cardputer firmware by 32 B).
+`tools/test_dependency_pins.py` enforces all of this for every env.
+
+To bump a library:
+
+1. Pick the release: `pio pkg show owner/name` (registry) or `git ls-remote <url> <ref>`
+   (Git; use the full commit, not a tag or branch).
+2. Change its line in every ini that names it (`grep -rn 'name' platformio.ini boards`).
+   For a parent listed above, read the new release's `library.json` `dependencies` (or
+   `library.properties` `depends=`) and move the directly pinned child to a release that
+   satisfies it.
+3. If `patch_library_conflicts.py` patches the library, check the patterns still apply
+   (the build fails when one no longer matches).
+4. Build each CI env with the wrapper and run the host tests:
+   `python3 tools/build_firmware.py -e <env>`, `python3 tools/test_audio_noise_bounds.py -e <env>`,
+   `python3 -m unittest discover -s tools -p 'test_*.py'`. An existing `.pio/libdeps` needs no
+   cleaning: `pio pkg install` removes what was installed for a spec that left `lib_deps`
+   (it compares against `.pio/libdeps/<env>/integrity.dat`) and installs the pinned release
+   when the installed one differs (moving the old one aside as `name@version`); the wrapper
+   then quarantines whatever the pins no longer reach, including another installed release
+   of a pinned library that only a dependency's range would match. It prints
+   `Warning: <env> resolves <library> ... through a range` for each library still reached
+   only through a range: pin it if the env compiles it (the build log's "Dependency Graph").
+5. Note the old and new versions and the firmware size change in CHANGELOG.md.
+
 The flashable images are `.pio/build/lilygo-t-embed-cc1101/firmware.factory.bin`
 (merged, used by the web flasher) and `Bruce-lilygo-t-embed-cc1101.bin` in the
 repository root.

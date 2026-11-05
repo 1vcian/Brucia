@@ -176,6 +176,11 @@ data class DeviceInfo(
     val ledBright: Int = -1,  // device LED brightness 0..100; -1 = unknown
     val ledEffect: Int = 0,   // device LED animation 0..9
     val screenBright: Int = -1, // device screen brightness 0..100; -1 = unknown
+    /** CAPS d.scrOn / d.ledOn: false while the app's `scr 0` / `led 0` holds it off; null on older firmware. */
+    val screenOn: Boolean? = null,
+    val ledOn: Boolean? = null,
+    /** CAPS d.scrBright: backlight level now (0..100); null on older firmware. */
+    val screenLevel: Int? = null,
     val features: DeviceFeatures = DeviceFeatures(),
     val proto: Int? = null,          // CAPS d.proto; null when absent/malformed
     val build: DeviceBuild? = null,  // CAPS d.build; null on firmware without provenance
@@ -184,6 +189,12 @@ data class DeviceInfo(
     val rxMax: Int? = null,
     val rxBuf: Int? = null,  // CAPS d.rx_buf: RX buffer bytes the device allocated
 ) {
+    /**
+     * Brightness the screen shows while on, for the brightness slider: the live level when the
+     * firmware reports it and the screen is on, else the configured [screenBright] (-1 = unknown).
+     */
+    val screenBrightShown: Int get() = screenLevel?.takeIf { screenOn != false } ?: screenBright
+
     /** Provenance lines for the log export and session reports. */
     fun provenanceLines(): List<String> = listOf(
         "Firmware: " + fw.ifBlank { "unknown" } + " / protocol " + (proto?.toString() ?: "unknown"),
@@ -222,6 +233,9 @@ data class DeviceInfo(
                 ledBright = d.optInt("ledBright", -1),
                 ledEffect = d.optInt("ledEffect", 0),
                 screenBright = d.optInt("bright", -1),
+                screenOn = d.opt("scrOn") as? Boolean,
+                ledOn = d.opt("ledOn") as? Boolean,
+                screenLevel = (d.opt("scrBright") as? Int)?.takeIf { it in 0..100 },
                 proto = (d.opt("proto") as? Int)?.takeIf { it >= 0 },
                 build = DeviceBuild.fromJson(d.optJSONObject("build")),
                 evidence = evidence,

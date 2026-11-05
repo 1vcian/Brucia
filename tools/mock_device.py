@@ -22,10 +22,15 @@ queue: bytes beyond N that arrive while the mock is not reading are dropped, and
 frame is abandoned after 2 s (rx_stale), as the device reader does. CAPS reports
 `rx_max`/`rx_buf` for that queue unless `--legacy-caps` (firmware before rx_max).
 
+Lite controls: `scr 0|1`, `led 0|1` and `scr_bright <n>` change the mock's screen/LED state, which
+CAPS reports as `scrOn`/`ledOn`/`scrBright` (omitted with `--legacy-outputs`, firmware before
+them); after 15 s without a frame both outputs turn back on, as on the device.
+
     python3 tools/mock_device.py            # prints the PTY path and serves
     python3 tools/mock_device.py --path-file /tmp/brucia_pty
     python3 tools/mock_device.py --profile lite   # CAPS/ERR 501 of a LITE (launcher) build
     python3 tools/mock_device.py --rx-queue 1024 --legacy-caps --noise between
+    python3 tools/mock_device.py --legacy-outputs  # CAPS without scrOn/ledOn/scrBright
 """
 import argparse
 import base64
@@ -241,7 +246,7 @@ class MockDevice:
     main() runs one on a fresh PTY; tests run one in a thread with a stop event."""
 
     def __init__(self, faults=(), counters=None, poll_interval=0.02, emit_interval=1.0, profile="full",
-                 noise=(), rx_queue=None, caps_rx_max="auto"):
+                 noise=(), rx_queue=None, caps_rx_max="auto", legacy_outputs=False):
         unknown = set(faults) - set(FAULTS)
         if unknown:
             raise ValueError(f"unknown mock faults: {sorted(unknown)}")
@@ -260,6 +265,11 @@ class MockDevice:
         self._wire_hdr, self._wire_left, self._wire_pos = b"", 0, 0  # host framing, for rx_queue
         self.faults = set(faults)
         self.lite = profile == "lite"
+        # Lite controls (scr/led/scr_bright): live state reported in CAPS unless legacy_outputs.
+        self.legacy_outputs = legacy_outputs
+        self.config_bright = 100
+        self.screen_on, self.led_on, self.scr_bright = True, True, self.config_bright
+        self._last_frame = time.time()
         self.counters = counters or LinkCounters()
         self.poll_interval = poll_interval
         self.emit_interval = emit_interval
@@ -395,7 +405,37 @@ class MockDevice:
             "build": {"commit": "unknown", "id": "mock", "time": "unknown",
                       "time_src": "unknown", "env": "mock"},
             "evidence": evidence,
+            "bright": self.config_bright,
+            **({} if self.legacy_outputs else
+               {"scrOn": self.screen_on, "ledOn": self.led_on, "scrBright": self.scr_bright}),
         }
+
+    def _outputs(self, cmd):
+        """scr/led/scr_bright as the firmware applies them; returns the ACK body, None if not one."""
+        verb, _, arg = cmd.partition(" ")
+        if verb not in ("scr", "led", "scr_bright") or not arg.strip():
+            return None
+        try:
+            v = int(arg.strip())
+        except ValueError:
+            v = 0  # String::toInt()
+        if verb == "scr":
+            self.screen_on = v != 0
+            self.scr_bright = self.config_bright if self.screen_on else 0
+            return {"ok": True}
+        if verb == "led":
+            self.led_on = v != 0
+            return {"ok": True}
+        v = min(max(v, 0), 100)
+        self.scr_bright = v
+        if v > 0:
+            self.screen_on = True  # a visible level ends a `scr 0` hold
+        return {"ok": True, "out": f"screen {v}%"}
+
+    def _restore_outputs_if_silent(self):
+        if (not self.screen_on or not self.led_on) and time.time() - self._last_frame > 15:
+            self._outputs("scr 1")
+            self._outputs("led 1")
 
     def _diag(self):
         reply = diag_reply(self.counters, time.time() - self.started)
@@ -499,6 +539,7 @@ class MockDevice:
 
     def _handle(self, fd, msg, stop):
         t, mid, d = msg.get("t"), msg.get("id", 0), msg.get("d", {})
+        self._last_frame = time.time()
         if t == HELLO:
             self._send(fd, CAPS, mid, self._caps())
         elif t == PING:
@@ -511,6 +552,8 @@ class MockDevice:
                 self._send(fd, ERR, mid, {"code": 501, "msg": unsupported})
             elif cmd == "diag":
                 self._send(fd, ACK, mid, self._diag())
+            elif (reply := self._outputs(cmd)) is not None:
+                self._send(fd, ACK, mid, reply)
             elif cmd.startswith("fs_read"):
                 path = cmd[len("fs_read"):].strip()
                 content = self.files.get(path, CAPTURES.get(path, b"BRUCIA-MOCK-FILE-" + (b"x" * 2000)))
@@ -579,6 +622,7 @@ class MockDevice:
                 self._count_rx(msg)
                 self._handle(fd, msg, stop)
 
+            self._restore_outputs_if_silent()
             now = time.time()
             for due, stream in list(self._after_off):
                 if now >= due:
@@ -603,6 +647,8 @@ def main():
                     help="inject debug text between frames / inside EVENT frames; repeatable")
     ap.add_argument("--rx-queue", type=int, help="simulate a device RX queue of N bytes (drops beyond it)")
     ap.add_argument("--legacy-caps", action="store_true", help="omit CAPS rx_max/rx_buf (older firmware)")
+    ap.add_argument("--legacy-outputs", action="store_true",
+                    help="omit CAPS scrOn/ledOn/scrBright (firmware before the lite-control state)")
     args = ap.parse_args()
 
     master, slave = pty.openpty()
@@ -612,7 +658,8 @@ def main():
             f.write(dev)
     print(f"mock device at: {dev}", flush=True)
     MockDevice(faults=args.fault, counters=COUNTERS, profile=args.profile, noise=args.noise,
-               rx_queue=args.rx_queue, caps_rx_max=None if args.legacy_caps else "auto").serve(master)
+               rx_queue=args.rx_queue, caps_rx_max=None if args.legacy_caps else "auto",
+               legacy_outputs=args.legacy_outputs).serve(master)
 
 
 if __name__ == "__main__":

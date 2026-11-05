@@ -87,9 +87,12 @@ JSValue native_micRecordWav(JSContext *ctx, JSValue *this_val, int argc, JSValue
 
     // ===== RESOLVE FILESYSTEM =====
     FS *fs = fileParams.fs;
-    if (fs == nullptr) {
+    // Brucia: maxMs 0 records until SEL is pressed at the device (or for ever without stopOnSel);
+    // in companion mode nobody is there, so it fails like a recording that could not start.
+    bool noOneToStop = maxMs == 0 && bjs_prompt_unavailable("mic.recordWav() with maxMs 0");
+    if (fs == nullptr || noOneToStop) {
         // No filesystem specified - auto-detect (SD or LittleFS)
-        if (!getFsStorage(fs) || fs == nullptr) {
+        if (noOneToStop || !getFsStorage(fs) || fs == nullptr) {
             // No storage available - return failure object
             JSValue obj = JS_NewObject(ctx);
             JS_SetPropertyStr(ctx, obj, "ok", JS_NewBool(0));

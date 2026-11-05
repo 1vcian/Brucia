@@ -1,6 +1,7 @@
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
 #include "helpers_js.h"
 #include "core/sd_functions.h"
+#include "interpreter.h" // Brucia: bjs_capture_write (script_run output)
 #include <globals.h>
 
 #include <math.h>
@@ -25,6 +26,14 @@ void print_errorMessage(const char *msg, const char *stackTrace) {
     // A JS exception already reached the script_run output through js_log_func.
     if (g_companionActive) return;
     while (!check(AnyKeyPress)) delay(50);
+}
+
+bool bjs_prompt_unavailable(const char *api) {
+    if (!g_companionActive) return false;
+    static const char note[] = ": skipped, it waits for a person at the device (companion mode)\n";
+    bjs_capture_write(api, strlen(api));
+    bjs_capture_write(note, sizeof(note) - 1);
+    return true;
 }
 
 void js_fatal_error_handler(JSContext *ctx) {

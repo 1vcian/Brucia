@@ -128,28 +128,27 @@ class MitmProxy(context: Context, private val port: Int) {
     }
 
     private fun processPlain(req: HttpRequest, cout: OutputStream): Boolean {
-        val id = MitmLog.nextId()
         val started = System.currentTimeMillis()
         val target = parseAbsoluteTarget(req.target)
         if (target == null) {
-            MitmLog.add(errorTxn(id, started, req.method, "http", "?", req.target, "Unparseable request target"))
+            MitmLog.add(errorTxn(started, req.method, "http", "?", req.target, "Unparseable request target"))
             return false
         }
         val (host, portNum, path) = target
-        return try {
+        return RequestLog().run(
+            failed = { e -> errorTxn(started, req.method, "http", host, path, "Upstream error: ${e.message}") },
+            onFailure = false,
+        ) { log ->
             withUpstream(Socket()) { up ->
                 up.connect(InetSocketAddress(host, portNum), UPSTREAM_CONNECT_MS)
                 up.soTimeout = UPSTREAM_READ_MS
                 exchange(
-                    id, started, "http", host, req.method, path, req,
+                    log, started, "http", host, req.method, path, req,
                     up.getInputStream(), BufferedOutputStream(up.getOutputStream()),
                     cout, decrypted = true,
                 )
             }
             keepAlive(req.version, req.headers)
-        } catch (e: Exception) {
-            MitmLog.add(errorTxn(id, started, req.method, "http", host, path, "Upstream error: ${e.message}"))
-            false
         }
     }
 
@@ -159,7 +158,6 @@ class MitmProxy(context: Context, private val port: Int) {
         val hp = connect.target.split(":")
         val host = hp[0]
         val portNum = hp.getOrNull(1)?.toIntOrNull() ?: 443
-        val id = MitmLog.nextId()
         val started = System.currentTimeMillis()
 
         // Acknowledge the tunnel to the client.
@@ -167,7 +165,7 @@ class MitmProxy(context: Context, private val port: Int) {
             cout.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray())
             cout.flush()
         }.getOrElse {
-            MitmLog.add(errorTxn(id, started, "CONNECT", "https", host, "", "Failed to ack tunnel"))
+            MitmLog.add(errorTxn(started, "CONNECT", "https", host, "", "Failed to ack tunnel"))
             return
         }
 
@@ -180,7 +178,7 @@ class MitmProxy(context: Context, private val port: Int) {
             // Client refused our leaf: HSTS / pinning, or CA not trusted. Metadata only.
             MitmLog.add(
                 errorTxn(
-                    id, started, "CONNECT", "https", host, "",
+                    started, "CONNECT", "https", host, "",
                     "TLS not intercepted (HSTS/pinning or CA not trusted): ${e.message}",
                 ).copy(decrypted = false, note = "CONNECT tunnel, not decrypted (client rejected the MITM certificate)"),
             )
@@ -200,9 +198,11 @@ class MitmProxy(context: Context, private val port: Int) {
     }
 
     private fun processHttps(host: String, portNum: Int, req: HttpRequest, tout: OutputStream): Boolean {
-        val id = MitmLog.nextId()
         val started = System.currentTimeMillis()
-        return try {
+        return RequestLog().run(
+            failed = { e -> errorTxn(started, req.method, "https", host, req.target, "Upstream TLS error: ${e.message}") },
+            onFailure = false,
+        ) { log ->
             val up = upstreamFactory.createSocket() as SSLSocket
             withUpstream(up) {
                 up.connect(InetSocketAddress(host, portNum), UPSTREAM_CONNECT_MS)
@@ -211,22 +211,19 @@ class MitmProxy(context: Context, private val port: Int) {
                 up.sslParameters = up.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
                 up.startHandshake()
                 exchange(
-                    id, started, "https", host, req.method, req.target, req,
+                    log, started, "https", host, req.method, req.target, req,
                     up.inputStream, BufferedOutputStream(up.outputStream),
                     tout, decrypted = true,
                 )
             }
             keepAlive(req.version, req.headers)
-        } catch (e: Exception) {
-            MitmLog.add(errorTxn(id, started, req.method, "https", host, req.target, "Upstream TLS error: ${e.message}"))
-            false
         }
     }
 
     // ---- Shared request/response exchange + logging -------------------------------
 
     private fun exchange(
-        id: Long,
+        log: RequestLog,
         started: Long,
         scheme: String,
         host: String,
@@ -248,9 +245,8 @@ class MitmProxy(context: Context, private val port: Int) {
         clientOut.write(buildResponse(resp.version, resp.status, resp.reason, resp.headers, resp.body))
         clientOut.flush()
 
-        MitmLog.add(
+        log.log(
             MitmTxn(
-                id = id,
                 timeMs = started,
                 method = method,
                 scheme = scheme,
@@ -271,9 +267,9 @@ class MitmProxy(context: Context, private val port: Int) {
     }
 
     private fun errorTxn(
-        id: Long, started: Long, method: String, scheme: String, host: String, path: String, note: String,
+        started: Long, method: String, scheme: String, host: String, path: String, note: String,
     ) = MitmTxn(
-        id = id, timeMs = started, method = method, scheme = scheme, host = host, path = path,
+        timeMs = started, method = method, scheme = scheme, host = host, path = path,
         status = -1, reqBytes = 0, respBytes = 0, durationMs = System.currentTimeMillis() - started,
         decrypted = false, note = note, reqHeaders = "", respHeaders = "", reqPreview = "", respPreview = "",
     )

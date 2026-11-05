@@ -400,6 +400,12 @@ uint32_t loaderCallback(cmd *c) {
         return true;
 
     } else if (arg == "open") {
+        // Brucia: an app opened here waits for a person at the device; in companion mode nobody is
+        // there and the companion loop (or a script_run's serial.cmd) would hang until someone is.
+        if (g_companionActive) {
+            serialDevice->println("loader open is not available in companion mode");
+            return false;
+        }
         if (!appname.isEmpty()) {
             // look for a matching name
             for (int i = 0; i < _totalItems; i++) {

@@ -1,6 +1,8 @@
 package app.brucia
 
 import app.brucia.ui.LeaveEffect
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -27,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,19 +57,34 @@ import app.brucia.ui.Button
 import app.brucia.ui.OutlinedButton
 
 /**
- * MITM intercepting-proxy tool UI. Phone-only (needs no connected device): it runs the
- * on-phone HTTP(S) proxy, exports the root CA, and shows a live transaction log with a
- * detail view. Authorized use only.
+ * ARP-spoof card inputs. [MitmScreen] owns them above its list/detail switch, so opening a request
+ * detail (the list, card included, leaves composition) keeps what was typed. The SSID and the two
+ * addresses are also saved across rotation and process death; the Wi-Fi password is deliberately
+ * not saved ([Saver] leaves it out), it lives only while the screen is open, as before.
  */
+@Stable
+internal class ArpSpoofForm(ssid: String = "", target: String = "", gateway: String = "") {
+    var ssid by mutableStateOf(ssid)
+    var password by mutableStateOf("")
+    var target by mutableStateOf(target)
+    var gateway by mutableStateOf(gateway)
+
+    companion object {
+        val Saver: Saver<ArpSpoofForm, Any> = listSaver(
+            save = { listOf(it.ssid, it.target, it.gateway) },
+            restore = { ArpSpoofForm(it[0], it[1], it[2]) },
+        )
+    }
+}
+
 @Composable
-private fun ArpSpoofCard(vm: app.brucia.wardrive.WardriveViewModel, connected: Boolean) {
+internal fun rememberArpSpoofForm(): ArpSpoofForm = rememberSaveable(saver = ArpSpoofForm.Saver) { ArpSpoofForm() }
+
+@Composable
+private fun ArpSpoofCard(vm: app.brucia.wardrive.WardriveViewModel, connected: Boolean, form: ArpSpoofForm) {
     val cs = MaterialTheme.colorScheme
     val active by vm.arpSpoofActive.collectAsState()
     val status by vm.arpSpoofStatus.collectAsState()
-    var ssid by rememberSaveable { mutableStateOf("") }
-    var pass by remember { mutableStateOf("") }
-    var target by rememberSaveable { mutableStateOf("") }
-    var gw by rememberSaveable { mutableStateOf("") }
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(14.dp)) {
             Text("ARP spoof / NetCut (device)", fontWeight = FontWeight.SemiBold, color = cs.primary)
@@ -74,16 +93,16 @@ private fun ArpSpoofCard(vm: app.brucia.wardrive.WardriveViewModel, connected: B
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(ssid, { ssid = it }, label = { Text("Wi-Fi SSID") },
+            OutlinedTextField(form.ssid, { form.ssid = it }, label = { Text("Wi-Fi SSID") },
                 singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(6.dp))
-            OutlinedTextField(pass, { pass = it }, label = { Text("Wi-Fi password") },
+            OutlinedTextField(form.password, { form.password = it }, label = { Text("Wi-Fi password") },
                 singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(6.dp))
-            OutlinedTextField(target, { target = it }, label = { Text("Target IP (e.g. 192.168.1.42)") },
+            OutlinedTextField(form.target, { form.target = it }, label = { Text("Target IP (e.g. 192.168.1.42)") },
                 singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(6.dp))
-            OutlinedTextField(gw, { gw = it }, label = { Text("Gateway IP (e.g. 192.168.1.1)") },
+            OutlinedTextField(form.gateway, { form.gateway = it }, label = { Text("Gateway IP (e.g. 192.168.1.1)") },
                 singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
             Button(
@@ -93,7 +112,7 @@ private fun ArpSpoofCard(vm: app.brucia.wardrive.WardriveViewModel, connected: B
                     containerColor = if (active) androidx.compose.ui.graphics.Color(0xFFD32F2F) else cs.primary),
                 onClick = {
                     if (active) vm.stopArpSpoof()
-                    else vm.startArpSpoof(ssid.trim(), pass.trim(), target.trim(), gw.trim())
+                    else vm.startArpSpoof(form.ssid.trim(), form.password.trim(), form.target.trim(), form.gateway.trim())
                 },
             ) { Text(if (active) "Stop ARP spoof" else "Start ARP spoof") }
             if (status.isNotEmpty()) {
@@ -104,6 +123,11 @@ private fun ArpSpoofCard(vm: app.brucia.wardrive.WardriveViewModel, connected: B
     }
 }
 
+/**
+ * MITM intercepting-proxy tool UI. Phone-only (needs no connected device): it runs the
+ * on-phone HTTP(S) proxy, exports the root CA, and shows a live transaction log with a
+ * detail view. Authorized use only.
+ */
 @Composable
 internal fun MitmScreen(vm: app.brucia.wardrive.WardriveViewModel, connected: Boolean) {
     val cs = MaterialTheme.colorScheme
@@ -122,6 +146,7 @@ internal fun MitmScreen(vm: app.brucia.wardrive.WardriveViewModel, connected: Bo
 
     var portText by rememberSaveable { mutableStateOf(port.toString()) }
     var selected by remember { mutableStateOf<MitmTxn?>(null) }
+    val arpForm = rememberArpSpoofForm()
 
     // The list state is remembered above the list/detail switch, so Back from a
     // transaction detail returns to the same scroll position instead of the top.
@@ -134,7 +159,7 @@ internal fun MitmScreen(vm: app.brucia.wardrive.WardriveViewModel, connected: Bo
             item {
                 Text("MITM proxy", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = cs.onSurface)
             }
-            item { ArpSpoofCard(vm, connected) }
+            item { ArpSpoofCard(vm, connected, arpForm) }
 
             // Prominent authorized-use warning.
             item {
@@ -266,10 +291,19 @@ internal fun MitmScreen(vm: app.brucia.wardrive.WardriveViewModel, connected: Bo
                     )
                 }
             } else {
-                items(txns) { t -> MitmRow(t, onClick = { selected = t }) }
+                mitmRows(txns) { t -> MitmRow(t, onClick = { selected = t }) }
             }
         }
     }
+}
+
+/**
+ * Transaction rows keyed by [MitmTxn.id] (unique per entry, see [MitmLog.add]): when new traffic
+ * is added at the top, the list keeps the row the user is looking at instead of its index, also
+ * across a request detail (the list state then anchors on the key when the list comes back).
+ */
+internal fun LazyListScope.mitmRows(txns: List<MitmTxn>, row: @Composable (MitmTxn) -> Unit) {
+    items(txns, key = { it.id }) { row(it) }
 }
 
 @Composable

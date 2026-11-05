@@ -7,6 +7,36 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Device screen/LED state is now reported by the device: `CAPS` carries `scrOn`, `ledOn` and
+  `scrBright` (backlight level now), and the app's Device screen switches and screen brightness
+  slider start from them on connect. Reconnecting within the device's 15 s hold after turning the
+  screen or LED off now shows them off instead of on. `scr_bright` with a level above 0 also ends
+  a `scr 0` hold. Older firmware omits the keys and the app behaves as before; older apps ignore
+  them. Host and JVM tests only; not yet checked on hardware.
+- Scripts run from the app (`script_run`) no longer hang on on-device prompts: `keyboard()`,
+  `dialog.message/choice/pickFile/viewFile/viewText/prompt`, `menu.show`, `wifi.connectDialog`,
+  the Wi-Fi menu of `wifi.httpFetch`, `subghz.read/readRaw` without a timeout,
+  `mic.recordWav` with `maxMs: 0` and an endless `display.drawGif` return their cancelled value
+  at once in companion mode and add a line saying so to the script output. In a companion script,
+  `serial.cmd()` refuses `webui`, `sniffer`, `listen` and `sleep` (they run until a key is pressed
+  at the device); `loader open` is refused in companion mode, also from the app console. Outside
+  companion mode nothing changes. New static check `tools/test_companion_prompts.py`. Not yet
+  checked on hardware.
+- Firmware libraries are pinned to exact releases for every board: registry libraries as
+  `owner/name @ x.y.z` (ranges such as `M5Unified @ ^0.2.11`, `XPowersLib @^0.3.3` and
+  `Adafruit TCA8418 @ ^1.0.2`, and bare `m5stack/M5Unified`, now name the release a fresh
+  install picks today), Git libraries at full commits (ESP32_Button, TouchLib) and the
+  T-Lora Pager audio driver at its v0.1.3 commit archive (same contents). M5GFX 0.2.36 and
+  AsyncTCP 3.5.0, pulled in by M5Unified and ESPAsyncWebServer through ranges, are pinned
+  next to them. This closes the 608 B core4mb difference between an older `.pio/libdeps`
+  (M5Unified 0.2.28, M5GFX 0.2.35, still inside the old ranges) and a fresh install
+  (0.2.29/0.2.36); `tools/build_firmware.py` now also quarantines another installed release
+  of a pinned library that only a dependency's range would reach, and warns about libraries
+  still reached only through a range. Firmware unchanged: T-Embed CC1101, Cardputer and
+  core4mb build byte-identical firmware before and after, and core4mb built from a copy of
+  the old libdeps now matches the fresh build. The all-board `buil_parallel.yml` and manual
+  build workflows cache libraries only for identical ini files and library patches (no
+  partial-key restore). How to bump a pinned library: CONTRIBUTING.md.
 - Firmware builds no longer depend on leftover libraries: before building, `tools/build_firmware.py`
   moves any library in `.pio/libdeps/<env>` that the board's declared dependencies do not
   account for to `.pio/libdeps-orphans/<env>/` and prints it. A local Cardputer build had
@@ -34,6 +64,14 @@ that offloads computation to the phone. Format loosely follows
 - MITM: going Back from a request detail returns to the same place in the request list;
   before, the list always jumped back to the top. Checked with a JVM Compose runtime test,
   not yet on a phone.
+- MITM: when new traffic arrives, the request list keeps showing the request you were looking
+  at, also when you come back from a request detail; before, the new requests at the top
+  pushed the visible rows down. A request that failed after it was logged (for example while
+  closing the connection to the server) no longer adds a second line for the same request.
+  Checked with JVM tests and on the API 36 emulator, not yet on a phone.
+- MITM: the ARP spoof Wi-Fi name, password, target and gateway fields are no longer cleared
+  when a request detail is opened and closed. After a rotation the password is still left
+  empty on purpose, as before. Checked with JVM tests, not yet on a phone.
 - Tablets and other wide windows: the home category grid adds columns as the window widens
   (tiles of at least 160dp; 2 columns on phones in portrait as before, 4 on a 1280x800dp
   tablet in portrait, 5 in landscape, about 4 on a phone in landscape) and the dashboard is
@@ -54,7 +92,7 @@ that offloads computation to the phone. Format loosely follows
 - App libraries updated: BouncyCastle 1.78.1 -> 1.86 (MITM certificates; picks up the
   upstream security fixes since 1.78.1, none of which were in the certificate-building code
   the app uses), ZXing core 3.5.3 -> 3.5.4 (QR codes), and the release build now uses the same
-  kotlinx-serialization-core version as the debug and test builds (1.8.1; it was 1.7.3 in
+  kotlinx-serialization-core version as the debug and test builds (1.12.0; it was 1.7.3 in
   release only). Release APK about 640 KB smaller. Test-only: org.json 20260814.
 - MITM: hosts with names longer than 64 characters keep working with BouncyCastle 1.86,
   which refuses such a certificate common name (the host now goes only into the certificate's

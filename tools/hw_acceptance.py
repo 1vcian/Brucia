@@ -351,6 +351,12 @@ def caps_problems(d):
         p.append(f"rx_max {d['rx_max']!r} is not an integer in 1..{MAX_FRAME}")
     if "rx_buf" in d and not (_u32(d["rx_buf"]) and d["rx_buf"] > 0):
         p.append(f"rx_buf {d['rx_buf']!r} is not a positive integer")
+    # Lite-control state (additive; absent on older firmware).
+    for k in ("scrOn", "ledOn"):
+        if k in d and not isinstance(d[k], bool):
+            p.append(f"{k} {d[k]!r} is not a boolean")
+    if "scrBright" in d and not (_u32(d["scrBright"]) and d["scrBright"] <= 100):
+        p.append(f"scrBright {d['scrBright']!r} is not an integer in 0..100")
     return p
 
 

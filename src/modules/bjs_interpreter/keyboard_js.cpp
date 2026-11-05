@@ -11,6 +11,10 @@ enum KeyboardType { KEYBOARD_NORMAL, KEYBOARD_HEX, KEYBOARD_NUM };
 // Helper function that handles the common argument parsing logic for keyboard functions
 static JSValue keyboard_wrapper(JSContext *ctx, JSValue *argv, int argc, KeyboardType type) {
     String result = "";
+    // Companion mode: "" as if cancelled with ESC (see bjs_prompt_unavailable). dialog.prompt() is
+    // native_keyboard too.
+    static const char *const names[] = {"keyboard()", "hexKeyboard()", "numKeyboard()"};
+    if (bjs_prompt_unavailable(names[type])) return JS_NewString(ctx, "");
 
     if (argc == 0) {
         switch (type) {

@@ -5,6 +5,9 @@ Runs the mock device (on the PTY master, in a thread) and a host client (on the
 slave, via pyserial) and asserts the full round-trip: HELLO->CAPS, PING->PONG,
 CMD->ACK(+out), and a deduplicated wifi.ap stream. Exit code 0 = PASS.
 
+The lite-control state (CAPS scrOn/ledOn/scrBright after scr/led/scr_bright, a reconnect seeing it,
+the 15 s restore, and an older firmware without the keys) runs against tools/mock_device.py.
+
     python3 tools/test_protocol_e2e.py
 """
 import json
@@ -18,7 +21,10 @@ import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mock_device import LinkCounters, diag_reply  # noqa: E402  (shared diag shape + counters)
+from mock_device import LinkCounters, MockDevice, diag_reply  # noqa: E402  (shared diag shape + counters)
+
+ROOT = Path(__file__).resolve().parents[1]
+OUTPUT_KEYS = ("scrOn", "ledOn", "scrBright")
 
 HELLO, CAPS, CMD, ACK, ERR, EVENT, DATA, SUB, PING, PONG = range(1, 11)
 
@@ -193,6 +199,104 @@ def mock_serve(master, stop):
         time.sleep(0.01)
 
 
+class FrameClient:
+    """Length-prefixed JSON client on a PTY slave (pyserial)."""
+
+    def __init__(self, dev_path):
+        import serial  # pyserial
+        self.ser = serial.Serial(dev_path, 115200, timeout=2)
+
+    def send(self, kind, mid, d):
+        p = json.dumps({"v": 0, "t": kind, "id": mid, "d": d}).encode()
+        self.ser.write(struct.pack("<I", len(p)) + p)
+
+    def _exact(self, k):
+        b = b""
+        while len(b) < k:
+            c = self.ser.read(k - len(b))
+            if not c:
+                return None
+            b += c
+        return b
+
+    def reply(self, mid, kind, timeout=3):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            head = self._exact(4)
+            if head is None:
+                continue
+            body = self._exact(struct.unpack("<I", head)[0])
+            m = json.loads(body) if body else None
+            if m and m.get("id") == mid and m.get("t") == kind:
+                return m
+        return None
+
+    def caps(self, mid):
+        self.send(HELLO, mid, {"app": "e2e"})
+        m = self.reply(mid, CAPS)
+        return m["d"] if m else None
+
+    def cmd(self, mid, text):
+        self.send(CMD, mid, {"cmd": text})
+        m = self.reply(mid, ACK)
+        return m["d"] if m else None
+
+    def close(self):
+        self.ser.close()
+
+
+def output_state(caps):
+    """The app's reading of CAPS: (screenOn, ledOn, scrBright), None for each key an older firmware omits."""
+    def b(k):
+        v = (caps or {}).get(k)
+        return v if isinstance(v, bool) else None
+    lvl = (caps or {}).get("scrBright")
+    return b("scrOn"), b("ledOn"), lvl if isinstance(lvl, int) and not isinstance(lvl, bool) and 0 <= lvl <= 100 else None
+
+
+def outputs_checks(checks):
+    """Screen/LED state in CAPS (proto/PROTOCOL.md "Lite controls"): firmware and mock agree on the
+    keys, a reconnect (fresh HELLO) sees what the previous session set, and older firmware omits them."""
+    caps_src = (ROOT / "src/companion/capabilities.cpp").read_text()
+    checks.append(("firmware CAPS reports scrOn/ledOn/scrBright",
+                   all(f'd["{k}"]' in caps_src for k in OUTPUT_KEYS)))
+    for legacy in (False, True):
+        master, slave = pty.openpty()
+        dev = MockDevice(poll_interval=0.002, legacy_outputs=legacy)
+        stop = threading.Event()
+        th = threading.Thread(target=dev.serve, args=(master, stop), daemon=True)
+        th.start()
+        cli = FrameClient(os.ttyname(slave))
+        try:
+            first = cli.caps(1)
+            acks = [cli.cmd(2, "scr 0"), cli.cmd(3, "led 0")]
+            cli.close()  # app gone: a new session starts with HELLO
+            cli = FrameClient(os.ttyname(slave))
+            again = cli.caps(4)
+            if legacy:
+                checks.append(("older firmware: CAPS without screen/LED state",
+                               first is not None and again is not None
+                               and not any(k in d for d in (first, again) for k in OUTPUT_KEYS)
+                               and output_state(again) == (None, None, None)))
+                continue
+            checks.append(("CAPS: screen/LED on at session start", output_state(first) == (True, True, 100)))
+            checks.append(("scr 0 / led 0 ACK ok", all(a and a.get("ok") is True for a in acks)))
+            checks.append(("reconnect: CAPS reports screen/LED off", output_state(again) == (False, False, 0)))
+            lvl = cli.cmd(5, "scr_bright 40")
+            checks.append(("scr_bright: visible level ends the scr 0 hold",
+                           lvl is not None and lvl.get("out") == "screen 40%"
+                           and output_state(cli.caps(6)) == (True, False, 40)))
+            dev._last_frame -= 16  # 15 s without a frame: the device turns both back on
+            time.sleep(0.05)
+            checks.append(("15 s silence restores screen/LED", output_state(cli.caps(7)) == (True, True, 100)))
+        finally:
+            cli.close()
+            stop.set()
+            th.join(timeout=5)
+            os.close(master)
+            os.close(slave)
+
+
 def main():
     import serial  # pyserial
     master, slave = pty.openpty()
@@ -355,6 +459,8 @@ def main():
                    and after["tx_frames"] >= before["tx_frames"] + 2))
     stop.set()
     ser.close()
+
+    outputs_checks(checks)
 
     ok = all(v for _, v in checks)
     for name, v in checks:

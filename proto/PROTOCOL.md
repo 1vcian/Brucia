@@ -361,6 +361,30 @@ and reply shape; everything else is "whatever the CLI prints".
 silent for more than 15s, and always on leaving companion mode, so the device
 never gets stuck dark if the app disconnects mid-session.
 
+#### Device appearance and lite-control state in `CAPS` (additive)
+
+`CAPS` also reports the device's look and its output state, so an app that connects or reconnects
+shows what the device is doing rather than what it last asked for:
+
+| key | type | meaning |
+|---|---|---|
+| `theme` | int | UI primary color, RGB565 |
+| `led`, `ledBright`, `ledEffect` | int | LED color `0xRRGGBB`, brightness 0..100, animation 0..9 (only on boards with an addressable LED) |
+| `bright` | int | configured screen brightness 0..100 (what `scr 1` and the 15 s restore return to) |
+| `scrOn` | bool | `false` while `scr 0` holds the screen off |
+| `ledOn` | bool | `false` while `led 0` holds the LED off (tracked on boards without an LED too) |
+| `scrBright` | int | backlight level now, 0..100: `0` during a `scr 0` hold, the `scr_bright <n>` value after that command (not saved, so it differs from `bright`) |
+
+`scr_bright <n>` (0..100, clamped) sets the backlight without saving; a level above 0 also ends a
+`scr 0` hold (`scrOn` becomes `true` and the 15 s restore no longer applies). A reconnect within the
+15 s window therefore sees `scrOn:false` / `ledOn:false`; after the window, or after leaving companion
+mode, both read `true` again.
+
+Compatibility: `scrOn`, `ledOn` and `scrBright` are new; firmware before them omits the keys, and the
+app then keeps its previous behavior (the switches show what the app last set, and both read on after
+a disconnect). Only literal booleans and an integer 0..100 are taken; anything else is treated as
+absent. Older apps ignore the keys.
+
 ### Console input and scripts in companion mode
 
 While companion mode is active the USB serial port carries only frames, and only the companion
@@ -391,7 +415,38 @@ with `script timeout`, `interpreter busy`, `script too large` (over 6000 charact
 | `serial.readln([timeoutMs])` | returns `""` at once, without reading or flushing the port (outside companion mode it still waits up to the timeout for a line from the USB console) |
 | `serial.cmd(cmd)`, `audio.playFile()`, `audio.tone()`, `badusb.runFile()`, `subghz.transmitFile()` (CLI-backed helpers) | run the CLI command with no console: its text is dropped and console input reads as empty; the return value is the CLI result |
 | uncaught error | the device shows the error screen but does not wait for a key, so the interpreter ends and a later `script_run` is not left `interpreter busy` |
-| `keyboard()`, `dialog.*`, menus and other on-device prompts | still wait for a person at the device; the execution bound does not interrupt a native wait, so avoid them in scripts meant for `script_run` |
+| `keyboard()`, `hexKeyboard()`, `numKeyboard()`, `dialog.prompt()` | return `""` at once, as when cancelled with ESC |
+| `dialog.message()` | returns `""` at once (no button label) |
+| `dialog.choice()`, `dialog.pickFile()` | return `""` at once, as when left without a choice |
+| `menu.show()` | returns `-1` at once, as when left with back |
+| `dialog.viewFile()` | returns at once without opening the viewer |
+| `dialog.viewText()` | draws the text and returns at once instead of waiting for SEL |
+| `dialog.info/success/warning/error(msg, true)` | show the message and return at once (Bruce's display helpers skip the key wait in companion mode) |
+| `wifi.connectDialog()` | returns `false` at once (use `wifi.connect(ssid, timeout, password)`) |
+| `wifi.httpFetch()` with no Wi-Fi | does not open the network menu; throws `WIFI Not Connected` as when no network is chosen |
+| `subghz.read(t)` / `subghz.readRaw(t)` with `t <= 0` | return `""` at once (with `t <= 0` they wait for ESC; a positive timeout runs as usual) |
+| `mic.recordWav(path, {maxMs: 0})` | returns `{ok:false, path:"", bytes:0, ...}` at once (with `maxMs: 0` it records until SEL, or for ever) |
+| `display.drawGif(..., -1)` | plays the GIF once instead of looping until a key is pressed |
+| `serial.cmd("loader open ...")` | `false`; `loader open` is refused in companion mode (also as a routed `CMD`), see below |
+| `serial.cmd()` of `webui`, `sniffer`, `listen`, `sleep` / `power sleep` | `false`: these run until a key is pressed at the device and are refused inside a companion script; sent by the app as a routed `CMD` they still run (the app's Sleep button) |
+
+Each skipped helper above appends one line to `out`, `<api>: skipped, it waits for a person at the
+device (companion mode)`, so the app shows why the script got the cancelled value. Waits that end on
+their own are unchanged: radio reads with a positive timeout (`ir.read`, `rfid.read`, `subghz.read`,
+`nrf24.receive`, `ble.scan`), `wifi.connect`, `delay()`, `audio.playFile()`, `mic.recordWav` with a
+duration. They still count against the 20 s wall clock, and the 15 s execution bound does not
+interrupt a native call that runs past it: `script_run` then answers `script timeout` and later
+`script_run`s answer `interpreter busy` until that call returns. `badusb.setup()` on USB-HID boards
+waits for a USB host, not for a person, and is not changed (the app does not offer BadUSB over the
+USB link). Scanned by `tools/test_companion_prompts.py`: every interpreter function that calls a
+prompt helper (keyboard, menus, dialogs, file picker, viewers, Wi-Fi network menu, wait-for-key
+loops) skips it in companion mode or is in its reasoned allowlist (the on-device Scripts menu).
+
+`loader open <app>` (opens a Bruce app's on-device UI) answers `loader open is not available in
+companion mode` and `ok:false` in companion mode, as a routed `CMD` too; use Remote control, which
+leaves companion mode first. Outside companion mode it is unchanged. Still not covered for a routed
+`CMD` (not reachable from a script, where Bruce's menus already return at once while a script is in
+the foreground): `ir rx` with an IR RX pin that is not configured (pin menu) and `arp` (result menu).
 
 Outside companion mode none of this applies: Bruce's console, `serial.readln` and the CLI behave
 as upstream.

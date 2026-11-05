@@ -1,6 +1,16 @@
 #include "helpers.h"
 #ifndef LITE_VERSION
+#include "modules/bjs_interpreter/interpreter.h"
 #include <globals.h>
+
+bool cliFromCompanionScript() {
+#if !defined(DISABLE_INTERPRETER)
+    return g_companionActive && interpreterTaskHandler != NULL &&
+           xTaskGetCurrentTaskHandle() == interpreterTaskHandler;
+#else
+    return false;
+#endif
+}
 
 bool _setupPsramFs() {
     // https://github.com/tobozo/ESP32-PsRamFS/blob/main/examples/PSRamFS_Test/PSRamFS_Test.ino

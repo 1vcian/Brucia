@@ -22,6 +22,73 @@ files (`AudioScreens.kt`, `MitmUi.kt`, `NetworkScanScreen.kt`, `WidsScreen.kt`,
 `GeoSignalsScreen.kt`).
 
 
+## Functional acceptance priorities — 2026-11-05
+
+This pass follows two owner reports: De Bruijn reboots the T-Embed, and the
+Apple/iOS/Mac BLE card produces nothing visible on the Mac. It supplements the
+per-control inventory below with end-to-end outcomes and failure recovery.
+The batch 14 link suite passing 12/12 does **not** cover these operations.
+No new physical check is marked passed by this audit.
+
+Evidence labels: **HOST** = reproduced using production code with hardware stubs;
+**CODE** = source finding, device consequence unverified; **REPORT** = owner's
+observation; **PENDING** = acceptance test not run. A button changing color, a
+command being sent, or an ACK alone is not proof that the intended operation worked.
+
+### First: crashes, hangs and misleading success
+
+| ID / priority | Function and current evidence | Required test and acceptance |
+|---|---|---|
+| F01 / P0 | **De Bruijn → legacy RF CLI. HOST + REPORT.** `hexKey(12)` generates 1,024 hex characters (4,096 bits), but `rfTxCallback` calls `std::stoull` for a single 64-bit integer. The actual callback throws `out_of_range` for n=8/10/12 before RF initialization. It fixes the transmitted width at 24 even for the smaller inputs it accepts. | Host-only rejection regression first: feed the actual UI-generated values through the real parser with RF stubbed. Oversized/incompatible input must yield a clear failure before radio initialization, never an exception, silent truncation or success. Do not use the existing button for live acceptance until the incompatible contract is resolved. Obtain the original device reset reason/backtrace to close the reboot diagnosis; do not claim a verified physical cause from the host test alone. |
+| F02 / P0 | **De Bruijn UI bounds and feedback. HOST + CODE.** UI permits 23/24, generator permits at most 22; both throw `IllegalArgumentException`. Custom n=15 already produces 8,192 hex characters plus envelope/command overhead; preset n=16 produces 16,384. Both exceed the frame ceiling. The UI displays “Transmitting” without awaiting the outcome. | Offline/UI tests for every preset and both custom bounds: invalid input must be rejected before generating large data or writing USB; no app crash/freeze and no success toast on rejection. Include negotiated `rx_max`, not only the protocol maximum. Validate feedback independently of the generator's mathematical correctness. |
+| F03 / P0 | **Console/macros: numeric CLI conversions. CODE.** RF CLI, `tone`/`beep` and screen-color callbacks use throwing `std::stoul`/`stoull`; the legacy route has no exception handler. | Stub all output drivers and exercise empty, nonnumeric, negative, trailing-junk and overflowing arguments through each relevant parser. Expect one correlated error, unchanged settings, no hardware access and a subsequent benign command succeeding. Host `unsigned long` width can differ from ESP32: include explicit target-width boundary cases. |
+| F04 / P0 | **`arp` CLI: menu and network lock. CODE.** `scanHostsCallback` constructs the interactive `ARPScanner`. `setup()` has three early returns after `LOCK_TCPIP_CORE()` and before `UNLOCK_TCPIP_CORE()` (IP lookup, missing IP/netmask, unusable interface). | Fault-inject those three conditions on host first; assert balanced lock/unlock and no menu or wait-for-key in companion mode. Then verify the supported bounded/headless behavior on an owned network. Expected: recoverable error with network and USB still responsive. Real lock impact depends on the target's lwIP configuration; not reproduced on hardware here. |
+| F05 / P1 | **Apple/iOS/Mac BLE visibility. CODE + REPORT.** The Mac-labelled card sends target `ios`, routed only to the Apple ProximityPair wrapper; it does not implement a separate Mac flow. | Record macOS/device/version and whether the expected result is a popup or a Settings entry. First validate the observer with an ordinary known BLE advertiser; separately record controller success, actual advertisement observation, and OS UI response. No popup is not proof that no packet was sent, and a captured packet is not proof of Mac compatibility. No claim of a pairable AirPods device from an advertisement alone. |
+| F06 / P1 | **BLE false success. HOST + CODE.** The bounded wrapper ignores payload/advertising failure results and returns void; the dispatcher sends success after it returns. With an always-failing fake advertiser it still finishes normally. | Inject init/data/start failure without radio output. A failed start must become a correlated failure in the app, with no “sent/working” claim or continuing retry loop. Do not infer success on another device from the existing `spam done` reply. |
+| F07 / P1 | **Shared BLE state: scan, HID, GATT, advertising. CODE, device effect PENDING.** Bounded advertising deinitializes the shared stack; it does not synchronize the scan owner's flag. | Exercise transitions with a benign test advertiser/peripheral: Scan → advertising → Stop → Scan, HID → Scan → HID, GATT → Scan; repeat, rotate and disconnect. Expect one explicit controller owner, honest status, fresh scan/HID operation afterwards, and no reset/stale handle. Verify that leaving a tool really completed its cleanup before the next acquires BLE. |
+| F08 / P1 | **Stop latency and physical cessation. HOST + PENDING.** App bursts request 8 s; the BLE loop checks the deadline outside the copies loop. Virtual-clock failure stub: 8,009 ms with one copy, 9,205 ms with 100 copies, not a 2 s stop guarantee. | Host-test deadline and cancellation at each phase; use a benign advertiser for physical stop timing. Measure from app Stop to last observed activity and to recovered USB responsiveness. No new burst after Stop/leave/disconnect; report the in-flight bound separately from immediate UI cleanup. Apply the same distinction to all burst-driven tools. |
+| F09 / P1 | **Script timeout/recovery. CODE, known batch-14 limit.** `runScriptRun` can return at 20 s while a native call/task remains busy; it clears the execution deadline on return. | Fault-inject an overlong native call; after timeout, run a harmless short script. Expected: a defined busy/termination outcome, no late side effect/output attributed to the second run, and eventual recovery without reboot. Separately check prompt APIs return their documented cancellation/error value. An error reply alone is not proof the interpreter stopped. |
+| F10 / P1 | **IR receive with unconfigured pin. CODE.** `IrRead(headless)` still calls `setup()`, which calls `gsetIrRxPin(true)` when the configured pin is absent from the allowed list. | Stub the invalid-pin case: no pin-selection menu, no wait for device buttons; clear error and next command succeeds. On configured hardware, check known remote reception, no-signal timeout, cancel, save/reopen and ordinary replay on an owned receiver. |
+
+### Then: actual effects, mode changes and persistence
+
+These are **PENDING**, not findings that every listed feature is broken. Use
+owned devices and controlled fixtures; disruptive modes use driver stubs or an
+isolated bench. The criteria concern correctness and cleanup, not increasing
+transmission rate, popup frequency or attack effectiveness.
+
+| ID / priority | Functional scenario | Observable pass condition |
+|---|---|---|
+| F11 / P1 | RF Listen/Spectrum/capture and operation ownership: switch modes, rotate, leave, disconnect, then start a fresh passive capture. Exercise transmit conflicts with the output driver stubbed. | No two owners use CC1101/RMT simultaneously; no stale “on” state or radio left initialized for the wrong mode; the new capture receives a known fixture and completion/truncation metadata is preserved. Never equate raw timings with a verified complete capture. |
+| F12 / P1 | Audio: mic/recording → tone/file/SSTV playback → mic; cancel source preparation and playback; disconnect while recording/exporting. | Real audio input/output, no silence falsely reported as success, no stuck I2S owner, retained recording on failed export, and successful next recording. Measure gaps and compare short known audio/image fixtures; external SSTV interoperability remains a separate check. |
+| F13 / P1 | Optional modules and NFC: missing/uninitialized hardware, unsupported tag/operation, tag removed during a supported read, then a fresh read. | Capability/error matches the actual operation; no indefinite busy or fake success. Unsupported headless NFC features remain explicitly unsupported. LoRa/NRF24/LF RFID/iButton/Ethernet absence must not be inferred away from a generic radio/NFC capability. |
+| F14 / P1 | Wi-Fi association vs scanning/monitoring: owned AP, wrong credentials, DHCP failure, SSID/password with spaces/Unicode; scan → join → scan. | Actual address/connectivity confirmed separately from command acceptance; no shell-token corruption, lost previous results or permanently broken Wi-Fi mode. Stop/disconnect returns ownership and a subsequent scan works. |
+| F15 / P1 | Network Scan/MITM: denied LAN permission, unavailable gateway, refused TLS trust, long host names, start/stop/restart and rotation. | Denial/failure is visible; no scan shown as “empty success” solely because access was denied. MITM rows remain stable; an ordinary configured test-client request yields a verifiable response, while untrusted/pinned clients fail honestly. Confirm forwarding, not just proxy startup. |
+| F16 / P1 | Files and captures: save, reopen, export, import; full storage, removed SD, interrupted transfer and lost final ACK. | Destination bytes/hash and metadata agree; old data is retained on failure, partial/unknown capture completeness is labelled, and a rejected transfer is not listed as successfully saved. No destructive retries after an uncertain commit. |
+| F17 / P1 | USB/app lifecycle: stream active → two rotations → Back; screen off/background; unplug/replug; app force-stop and reconnect. | Intended stream survives rotation, leaving stops it exactly once, no orphaned pending operation, app flags agree with device state, firmware cleanup occurs after the documented link-loss timeout. Screen/LED values after reconnect come from device evidence where available. |
+| F18 / P1 | APK/firmware update: wrong/missing asset, download cancel, USB permission denial, Activity recreation and bootloader re-enumeration. | Correct artifact/board identity and integrity, exactly-once port release, no flash after cancellation, recoverable errors; preserve user data on signed upgrade. Power interruption during writing requires a separate recovery setup, not the routine phone smoke test. |
+| F19 / P2 | Phone-only exports and integrations: QR with Unicode, PCAP import, offline analysis, reports, macro/tone/SSTV editor state and document-provider denial. | Independent reader accepts exports; QR round-trip preserves exact data; invalid files fail boundedly; rotation does not discard work and cancelled/denied saves do not claim completion. |
+| F20 / P2 | Repetition and board variants: 20 start/stop/reconnect cycles of each supported benign feature; repeat missing-module/error cases on one non-S3 and one LITE build. | Uptime does not reset, free/largest heap settle without a downward trend, resource counts recover, and framed USB contains no stray debug text. Physical results are board-specific; a successful build alone cannot tick this row. |
+
+### Evidence to retain for each run
+
+Record ID, exact APK/firmware version and build identifier, board/peripherals,
+phone/receiver OS, inputs, prior active modes, observed effect, ACK/ERR and timing.
+Take `diag` before and after where advertised: uptime, reset reason, free/minimum/
+largest heap and link/drop counters. After a reboot collect the panic/backtrace
+with the matching ELF if available; USB disconnect alone does not identify a reset
+cause. Keep one host/process owning serial at a time. A controlled restart is not
+the same as the spontaneous reset under investigation.
+
+Verdict per case: PASS with evidence / FAIL with reproduction / BLOCKED with missing
+fixture / NOT RUN. Return to a simple known-good function after every error case.
+Complete host rejection/recovery checks for F01–F04 before routine phone acceptance.
+
+Apple's documented [Mac pairing flow](https://support.apple.com/en-us/108786) and
+[iPhone setup animation](https://support.apple.com/en-us/104989) are different;
+neither source certifies compatibility of Brucia's synthetic advertisements.
+Mac visibility therefore remains unknown pending observation on the reported OS.
+
 ## Software contract matrix — 2026-11-04 (S03)
 
 This inventory covers all 50 catalogued tools plus Theme. It describes software

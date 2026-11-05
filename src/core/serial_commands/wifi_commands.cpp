@@ -1,4 +1,5 @@
 #include "wifi_commands.h"
+#include "helpers.h" // Brucia: cliFromCompanionScript
 #include "core/wifi/webInterface.h"
 #include "core/wifi/wifi_common.h" //to return MAC addr
 #include <globals.h>
@@ -58,6 +59,13 @@ uint32_t webuiCallback(cmd *c) {
     Argument arg = cmd.getArgument("noAp");
     bool noAp = arg.isSet();
 
+#if !defined(LITE_VERSION)
+    // Brucia: the Web UI runs until ESC is pressed at the device; a companion script would hang there.
+    if (cliFromCompanionScript()) {
+        serialDevice->println("webui is not available in a companion script");
+        return false;
+    }
+#endif
     serialDevice->println(String("Starting Web UI ") + !noAp ? "AP" : "STA");
     serialDevice->println("Press ESC to quit");
     startWebUi(!noAp); // MEMO: will quit when check(EscPress)
@@ -78,6 +86,11 @@ uint32_t scanHostsCallback(cmd *c) {
 }
 
 uint32_t snifferCallback(cmd *c) {
+    // Brucia: the sniffer runs until ESC is pressed at the device; a companion script would hang there.
+    if (cliFromCompanionScript()) {
+        serialDevice->println("sniffer is not available in a companion script");
+        return false;
+    }
     sniffer_setup();
 
     return true;
@@ -89,6 +102,11 @@ uint32_t listenTCPCallback(cmd *c) {
         return false;
     }
 
+    // Brucia: asks for the port on the on-device keyboard; a companion script would hang there.
+    if (cliFromCompanionScript()) {
+        serialDevice->println("listen is not available in a companion script");
+        return false;
+    }
     listenTcpPort();
 
     return true;

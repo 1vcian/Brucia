@@ -281,6 +281,14 @@ def test_upload_sizing():
           and hw.device_rx_max({"rx_max": 9000})[0] == hw.LEGACY_RX_MAX)
     check("CAPS validator: bad rx_max flagged", any("rx_max" in p for p in hw.caps_problems(
         {"board": "b", "chip": "c", "fw": "f", "proto": 0, "modules": [], "features": {}, "rx_max": 0})))
+    base = {"board": "b", "chip": "c", "fw": "f", "proto": 0, "modules": [], "features": {}}
+    check("CAPS validator: screen/LED state accepted, absent or valid",
+          hw.caps_problems(base) == [] and hw.caps_problems({**base, "scrOn": False, "ledOn": True, "scrBright": 0}) == [])
+    check("CAPS validator: malformed screen/LED state flagged",
+          any("scrOn" in p for p in hw.caps_problems({**base, "scrOn": 0}))
+          and any("ledOn" in p for p in hw.caps_problems({**base, "ledOn": "off"}))
+          and any("scrBright" in p for p in hw.caps_problems({**base, "scrBright": 101}))
+          and any("scrBright" in p for p in hw.caps_problems({**base, "scrBright": True})))
     link = hw.Link(BytePort([]))
     link.rx_max = 64
     try:

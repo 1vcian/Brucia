@@ -125,6 +125,15 @@ void companionSetLed(bool on) {
     g_ledOff = !on;
 }
 
+bool companionScreenOn() { return !g_screenOff; }
+bool companionLedOn() { return !g_ledOff; }
+
+void companionSetScreenLevel(uint8_t level) {
+    setBrightness(level, false);
+    // The screen is lit again: report it on and do not "restore" it later.
+    if (level > 0) g_screenOff = false;
+}
+
 static void companionRestoreOutputs() {
     if (g_screenOff) companionSetScreen(true);
     if (g_ledOff) companionSetLed(true);

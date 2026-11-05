@@ -8,11 +8,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * Device screen and LED power ("scr 0|1", "led 0|1", the Device screen's lite-mode switches), kept
  * outside the UI so a recreated screen shows what the device is doing instead of a fresh "on".
  *
- * The firmware does not report either output, so this is the state the app last asked for: shown at
- * once, and put back when the device rejects the request or does not answer, unless a newer request
- * for the same output replaced it. With no link both are on: companion mode starts with them on, and
- * the device turns them back on when it leaves companion mode or hears nothing for 15 s. A clean
- * disconnect also sends the restore itself ([disconnect]) so a quick reconnect finds them on.
+ * A request is shown at once, and put back when the device rejects it or does not answer, unless a
+ * newer request for the same output replaced it. Firmware that reports the outputs (CAPS
+ * `scrOn`/`ledOn`) sets them on connect through [reported], so a reconnect within the device's 15 s
+ * hold shows them off. Older firmware does not report them: then this is the state the app last
+ * asked for. With no link both are on: companion mode starts with them on, and the device turns them
+ * back on when it leaves companion mode or hears nothing for 15 s. A clean disconnect also sends the
+ * restore itself ([disconnect]) so a quick reconnect finds them on.
  */
 class DeviceOutputs {
     data class State(val screenOn: Boolean = true, val ledOn: Boolean = true)
@@ -22,6 +24,8 @@ class DeviceOutputs {
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
     private val latest = LongArray(Output.entries.size)
+    // Highest token answered per output: below [latest] while a request is on the wire.
+    private val answered = LongArray(Output.entries.size)
 
     /** Record a request and return its token for [finish]; the command to send is [command]. */
     @Synchronized fun request(output: Output, on: Boolean): Long {
@@ -32,8 +36,22 @@ class DeviceOutputs {
 
     /** The reply to request [token]: a failure restores the previous value if nothing newer was asked. */
     @Synchronized fun finish(output: Output, token: Long, on: Boolean, ok: Boolean) {
-        if (!ok && latest[output.ordinal] == token) set(output, !on)
+        val i = output.ordinal
+        if (token > answered[i]) answered[i] = token
+        if (!ok && latest[i] == token) set(output, !on)
     }
+
+    /**
+     * The device's own report (CAPS `scrOn`/`ledOn`); null = not reported (older firmware), which
+     * keeps the current value. An output with a request still on the wire keeps the requested value:
+     * the device answers frames in order, so a report sent before that request was applied is older.
+     */
+    @Synchronized fun reported(screenOn: Boolean?, ledOn: Boolean?) {
+        if (screenOn != null && idle(Output.SCREEN)) set(Output.SCREEN, screenOn)
+        if (ledOn != null && idle(Output.LED)) set(Output.LED, ledOn)
+    }
+
+    private fun idle(output: Output) = answered[output.ordinal] >= latest[output.ordinal]
 
     /**
      * The link is going down: return the restore commands for outputs the app turned off (to send
@@ -41,7 +59,7 @@ class DeviceOutputs {
      */
     @Synchronized fun disconnect(): List<String> {
         val s = _state.value
-        for (i in latest.indices) latest[i]++
+        for (i in latest.indices) { latest[i]++; answered[i] = latest[i] }
         _state.value = State()
         return buildList {
             if (!s.screenOn) add(command(Output.SCREEN, true))

@@ -29,6 +29,8 @@ JSValue native_wifiConnected(JSContext *ctx, JSValue *this_val, int argc, JSValu
 }
 
 JSValue native_wifiConnectDialog(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    // Companion mode: false as if the network menu was left (use wifi.connect(ssid, ...)).
+    if (bjs_prompt_unavailable("wifi.connectDialog()")) return JS_NewBool(false);
     bool connected = wifiConnectMenu();
     return JS_NewBool(connected);
 }
@@ -103,7 +105,8 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
 
     JSCStringBuf stringBuffer;
 
-    if (!WiFi.isConnected()) wifiConnectMenu();
+    // Companion mode: no network menu; the request fails as it does when no network is chosen.
+    if (!WiFi.isConnected() && !bjs_prompt_unavailable("wifi.httpFetch() network menu")) wifiConnectMenu();
     if (!WiFi.isConnected()) return JS_ThrowTypeError(ctx, "WIFI Not Connected");
 
     if (argc < 1 || !JS_IsString(ctx, argv[0]))

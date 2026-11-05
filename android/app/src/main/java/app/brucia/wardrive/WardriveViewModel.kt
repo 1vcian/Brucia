@@ -849,7 +849,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // Device screen/LED power (lite mode): kept here so the Device screen's switches show the
-    // device's state after a rotation instead of resetting to on.
+    // device's state after a rotation instead of resetting to on, and set from CAPS on connect when
+    // the firmware reports it (scrOn/ledOn).
     private val outputs = DeviceOutputs()
     val deviceOutputs: StateFlow<DeviceOutputs.State> = outputs.state
 
@@ -978,6 +979,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 val d = msg.optJSONObject("d") ?: return
                 val info = DeviceInfo.fromCaps(d)
                 _device.value = info
+                // Screen/LED switches follow the device when it reports them (older firmware: unchanged).
+                outputs.reported(info.screenOn, info.ledOn)
                 // Frames above the device's RX buffer would be lost on the wire: refuse them locally.
                 client?.sendLimit = app.brucia.protocol.FrameBudget.sendLimit(info.rxMax)
                 // Record the exact firmware artifact so an exported log can be tied to it.

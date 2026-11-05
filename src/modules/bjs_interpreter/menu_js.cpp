@@ -27,6 +27,8 @@ JSValue native_menuShow(JSContext *ctx, JSValue *this_val, int argc, JSValue *ar
     JS_ToInt32(ctx, &length, lengthVal);
 
     if (length <= 0 || length > 100) return JS_NewInt32(ctx, -1);
+    // Companion mode: -1 as if the user pressed back.
+    if (bjs_prompt_unavailable("menu.show()")) return JS_NewInt32(ctx, -1);
 
     // Build Bruce options vector from JS array
     options.clear();

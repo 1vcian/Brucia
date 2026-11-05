@@ -259,7 +259,7 @@ void handleCompanionCommand(JsonDocument &in, uint32_t id, CompanionSession &ses
             int v = cmdStr.substring(11).toInt();
             if (v < 0) v = 0;
             if (v > 100) v = 100;
-            setBrightness((uint8_t)v, false);
+            companionSetScreenLevel((uint8_t)v);
             char o[24];
             snprintf(o, sizeof(o), "screen %d%%", v);
             companionAckMsg(id, true, o);
