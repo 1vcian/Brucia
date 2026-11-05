@@ -125,7 +125,7 @@ static AudioOutputI2S *createConfiguredAudioOutput() {
     AudioOutputI2S *audioout = new AudioOutputI2S();
 
     if (!audioout) {
-        Serial.println("ERROR: AudioOutputI2S allocation failed");
+        usbConsole().println("ERROR: AudioOutputI2S allocation failed");
         return nullptr;
     }
 
@@ -138,19 +138,19 @@ static AudioOutputI2S *createConfiguredAudioOutput() {
 // Helper to validate file existence
 static bool validateAudioFile(FS *fs, const String &filepath) {
     if (!fs) {
-        Serial.println("ERROR: Invalid filesystem pointer");
+        usbConsole().println("ERROR: Invalid filesystem pointer");
         return false;
     }
 
     if (!fs->exists(filepath.c_str())) {
-        Serial.print("ERROR: Audio file not found: ");
-        Serial.println(filepath);
+        usbConsole().print("ERROR: Audio file not found: ");
+        usbConsole().println(filepath);
         return false;
     }
 
     File file = fs->open(filepath.c_str(), "r");
     if (!file) {
-        Serial.println("ERROR: Cannot open audio file");
+        usbConsole().println("ERROR: Cannot open audio file");
         return false;
     }
 
@@ -159,12 +159,12 @@ static bool validateAudioFile(FS *fs, const String &filepath) {
     file.close();
 
     if (!isFile) {
-        Serial.println("ERROR: Path is a directory, not a file");
+        usbConsole().println("ERROR: Path is a directory, not a file");
         return false;
     }
 
     if (fileSize == 0) {
-        Serial.println("ERROR: Audio file is empty");
+        usbConsole().println("ERROR: Audio file is empty");
         return false;
     }
 
@@ -180,13 +180,13 @@ static void audioPlaybackTask(void *parameter) {
 
     AudioPlayerState *player = g_audioPlayer;
 
-    Serial.println("Audio playback task started");
+    if (!g_companionActive) Serial.println("Audio playback task started");
 
     // Main playback loop
     while (player->generator && player->generator->isRunning()) {
         // Check for stop request (prioritized check)
         if (player->stopRequested) {
-            Serial.println("Stop requested");
+            if (!g_companionActive) Serial.println("Stop requested");
             break;
         }
 
@@ -205,11 +205,11 @@ static void audioPlaybackTask(void *parameter) {
 
                     player->state = PLAYBACK_PAUSED;
                     player->pausedTime = millis();
-                    Serial.println("Playback paused - I2S stopped");
+                    if (!g_companionActive) Serial.println("Playback paused - I2S stopped");
                 } else if (player->state == PLAYBACK_PAUSED) {
                     // Restart I2S output
                     if (!player->output->begin()) {
-                        Serial.println("ERROR: Failed to restart I2S output");
+                        if (!g_companionActive) Serial.println("ERROR: Failed to restart I2S output");
                         player->pauseRequested = false;
                         player->unlock();
                         break; // Exit task if can't restart
@@ -223,7 +223,7 @@ static void audioPlaybackTask(void *parameter) {
 
                     player->state = PLAYBACK_PLAYING;
                     player->totalPausedDuration += millis() - player->pausedTime;
-                    Serial.println("Playback resumed - I2S restarted");
+                    if (!g_companionActive) Serial.println("Playback resumed - I2S restarted");
                 }
                 player->pauseRequested = false;
                 player->unlock();
@@ -237,15 +237,15 @@ static void audioPlaybackTask(void *parameter) {
                 player->output->SetGain(player->currentGain);
                 player->volumeChanged = false;
                 player->unlock();
-                Serial.print("Volume changed to: ");
-                Serial.println(player->newVolume);
+                if (!g_companionActive) Serial.print("Volume changed to: ");
+                if (!g_companionActive) Serial.println(player->newVolume);
             }
         }
 
         // Only loop generator when not paused
         if (player->state == PLAYBACK_PLAYING) {
             if (!player->generator->loop()) {
-                Serial.println("Generator loop ended");
+                if (!g_companionActive) Serial.println("Generator loop ended");
                 break;
             }
         } else {
@@ -258,7 +258,7 @@ static void audioPlaybackTask(void *parameter) {
     }
 
     // Cleanup after playback
-    Serial.println("Audio playback task ending");
+    if (!g_companionActive) Serial.println("Audio playback task ending");
 
     // Use timeout on lock to prevent deadlock
     if (player->lock(pdMS_TO_TICKS(1000))) {
@@ -277,7 +277,7 @@ static void audioPlaybackTask(void *parameter) {
         player->unlock();
     } else {
         // Couldn't acquire lock - force cleanup anyway
-        Serial.println("WARNING: Force cleanup without lock");
+        if (!g_companionActive) Serial.println("WARNING: Force cleanup without lock");
         player->taskHandle = nullptr;
     }
 
@@ -307,7 +307,7 @@ bool stopAudioPlayback() {
 
     // Force cleanup if timeout
     if (g_audioPlayer->taskHandle != nullptr) {
-        Serial.println("WARNING: Stop timeout - forcing cleanup");
+        usbConsole().println("WARNING: Stop timeout - forcing cleanup");
         if (g_audioPlayer->lock(pdMS_TO_TICKS(500))) {
             g_audioPlayer->cleanup();
             g_audioPlayer->state = PLAYBACK_IDLE;
@@ -402,7 +402,7 @@ static bool startAsyncPlayback(
     initAudioPlayer();
 
     if (!g_audioPlayer->lock(pdMS_TO_TICKS(1000))) {
-        Serial.println("ERROR: Could not acquire lock for async playback");
+        usbConsole().println("ERROR: Could not acquire lock for async playback");
         delete generator;
         delete source;
         delete output;
@@ -439,7 +439,7 @@ static bool startAsyncPlayback(
     );
 
     if (result != pdPASS || !g_audioPlayer->taskHandle) {
-        Serial.println("ERROR: Failed to create playback task");
+        usbConsole().println("ERROR: Failed to create playback task");
 
         // Cleanup on failure
         if (g_audioPlayer->lock(pdMS_TO_TICKS(500))) {
@@ -470,7 +470,7 @@ bool playAudioFile(FS *fs, String filepath, PlaybackMode mode) {
 
     AudioFileSource *source = new AudioFileSourceFS(*fs, filepath.c_str());
     if (!source) {
-        Serial.println("ERROR: Failed to create audio source");
+        usbConsole().println("ERROR: Failed to create audio source");
         _setup_codec_speaker(false);
         return false;
     }
@@ -497,7 +497,7 @@ bool playAudioFile(FS *fs, String filepath, PlaybackMode mode) {
     }
 
     if (!generator) {
-        Serial.println("ERROR: Unsupported audio format");
+        usbConsole().println("ERROR: Unsupported audio format");
         delete source;
         delete audioout;
         _setup_codec_speaker(false);
@@ -505,7 +505,7 @@ bool playAudioFile(FS *fs, String filepath, PlaybackMode mode) {
     }
 
     if (!generator->begin(source, audioout)) {
-        Serial.println("ERROR: Failed to begin audio playback");
+        usbConsole().println("ERROR: Failed to begin audio playback");
         delete generator;
         delete source;
         delete audioout;
@@ -515,7 +515,7 @@ bool playAudioFile(FS *fs, String filepath, PlaybackMode mode) {
 
     // === BLOCKING MODE ===
     if (mode == PLAYBACK_BLOCKING) {
-        Serial.println("Start audio (blocking)");
+        usbConsole().println("Start audio (blocking)");
 
         while (generator->isRunning()) {
             if (!generator->loop() || check(AnyKeyPress)) { generator->stop(); }
@@ -524,7 +524,7 @@ bool playAudioFile(FS *fs, String filepath, PlaybackMode mode) {
 
         audioout->stop();
         source->close();
-        Serial.println("Stop audio");
+        usbConsole().println("Stop audio");
 
         delete generator;
         delete source;
@@ -535,7 +535,7 @@ bool playAudioFile(FS *fs, String filepath, PlaybackMode mode) {
     }
 
     // === ASYNC MODE ===
-    Serial.println("Start audio (async)");
+    usbConsole().println("Start audio (async)");
     return startAsyncPlayback(generator, source, audioout, filepath);
 }
 
@@ -544,7 +544,7 @@ bool playAudioRTTTLString(String song, PlaybackMode mode) {
 
     song.trim();
     if (song == "") {
-        Serial.println("ERROR: Empty RTTTL string");
+        usbConsole().println("ERROR: Empty RTTTL string");
         return false;
     }
 
@@ -574,7 +574,7 @@ bool playAudioRTTTLString(String song, PlaybackMode mode) {
     }
 
     if (!generator->begin(source, audioout)) {
-        Serial.println("ERROR: Failed to begin RTTTL playback");
+        usbConsole().println("ERROR: Failed to begin RTTTL playback");
         delete generator;
         delete source;
         delete audioout;
@@ -584,7 +584,7 @@ bool playAudioRTTTLString(String song, PlaybackMode mode) {
 
     // === BLOCKING MODE ===
     if (mode == PLAYBACK_BLOCKING) {
-        Serial.println("Start RTTTL (blocking)");
+        usbConsole().println("Start RTTTL (blocking)");
 
         while (generator->isRunning()) {
             if (!generator->loop() || check(AnyKeyPress)) { generator->stop(); }
@@ -593,7 +593,7 @@ bool playAudioRTTTLString(String song, PlaybackMode mode) {
 
         audioout->stop();
         source->close();
-        Serial.println("Stop audio");
+        usbConsole().println("Stop audio");
 
         delete generator;
         delete source;
@@ -604,7 +604,7 @@ bool playAudioRTTTLString(String song, PlaybackMode mode) {
     }
 
     // === ASYNC MODE ===
-    Serial.println("Start RTTTL (async)");
+    usbConsole().println("Start RTTTL (async)");
     return startAsyncPlayback(generator, source, audioout, "RTTTL");
 }
 bool tts(String text, PlaybackMode mode) {
@@ -612,12 +612,12 @@ bool tts(String text, PlaybackMode mode) {
 
     text.trim();
     if (text == "") {
-        Serial.println("ERROR: Empty TTS text");
+        usbConsole().println("ERROR: Empty TTS text");
         return false;
     }
 
     // TTS is always blocking - ESP8266SAM doesn't support async playback
-    if (mode == PLAYBACK_ASYNC) { Serial.println("WARNING: TTS doesn't support async mode, using blocking"); }
+    if (mode == PLAYBACK_ASYNC) { usbConsole().println("WARNING: TTS doesn't support async mode, using blocking"); }
 
     // Stop any current playback
     if (isAudioPlaying()) { stopAudioPlayback(); }
@@ -631,7 +631,7 @@ bool tts(String text, PlaybackMode mode) {
     }
 
     if (!audioout->begin()) {
-        Serial.println("ERROR: Failed to initialize audio output for TTS");
+        usbConsole().println("ERROR: Failed to initialize audio output for TTS");
         delete audioout;
         _setup_codec_speaker(false);
         return false;
@@ -714,7 +714,7 @@ void playTone(unsigned int frequency, unsigned long duration, short waveType) {
     }
 
     if (!wav->begin(file, out)) {
-        Serial.println("ERROR: Failed to begin tone playback");
+        usbConsole().println("ERROR: Failed to begin tone playback");
         delete wav;
         delete file;
         delete out;
@@ -763,7 +763,7 @@ void playDtmf(unsigned int lowHz, unsigned int highHz, unsigned long duration) {
     out->SetChannels(2);
     out->SetRate(sampleRate);
     if (!out->begin()) {
-        Serial.println("ERROR: Failed to begin DTMF playback");
+        usbConsole().println("ERROR: Failed to begin DTMF playback");
         delete out;
         _setup_codec_speaker(false);
         return;

@@ -38,7 +38,7 @@ void listenTcpPort() {
         WiFiClient client = server.accept();
 
         if (client) {
-            Serial.println("Client connected");
+            usbConsole().println("Client connected");
             tft.setCursor(10, tft.getCursorY());
             tft.println("Client connected");
 
@@ -62,21 +62,21 @@ void listenTcpPort() {
                             padprint(keyString);
                         }
                         client.print(keyString);
-                        Serial.print(keyString);
+                        usbConsole().print(keyString);
                     }
                 } else {
                     if (client.available()) {
                         String incomingData = client.readString();
                         if (tft.getCursorY() > tftHeight - 3 * LH * FP) drawMainBorderWithTitle("LISTEN TCP");
                         padprint(incomingData);
-                        Serial.print(incomingData);
+                        usbConsole().print(incomingData);
                     }
                     if (check(SelPress)) { inputMode = true; }
                 }
                 vTaskDelay(pdMS_TO_TICKS(1));
             }
             client.stop();
-            Serial.println("Client disconnected");
+            usbConsole().println("Client disconnected");
             displayError("Client disconnected");
         }
         if (check(EscPress)) {

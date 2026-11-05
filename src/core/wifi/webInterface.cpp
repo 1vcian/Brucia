@@ -65,7 +65,7 @@ void cleanlyStopWebUiForWiFiFeature() {
     if (!isWebUIActive && !server) { return; }
 
     // Brief notification (non-blocking)
-    Serial.println("Stopping WebUI for WiFi feature...");
+    usbConsole().println("Stopping WebUI for WiFi feature...");
 
     // Stop the WebUI
     if (server) {
@@ -83,7 +83,7 @@ void cleanlyStopWebUiForWiFiFeature() {
         vTaskDelay(pdMS_TO_TICKS(250));
     }
 
-    Serial.println("WebUI stopped, starting WiFi feature...");
+    usbConsole().println("WebUI stopped, starting WiFi feature...");
 }
 /**********************************************************************
 **  Function: loopOptionsWebUi
@@ -382,7 +382,7 @@ static bool startMdnsResponder() {
 
     if (!MDNS.begin(host)) {
         RAM_LOG("MDNS failed");
-        Serial.printf("Error setting up MDNS responder!\n");
+        usbConsole().printf("Error setting up MDNS responder!\n");
         return false;
     }
 
@@ -739,7 +739,7 @@ void configureWebServer() {
         }
     });
     server->begin();
-    Serial.println("Webserver started");
+    usbConsole().println("Webserver started");
 }
 
 /**********************************************************************
@@ -761,7 +761,7 @@ void startWebUi(bool mode_ap) {
         // Clear this vector to free stack memory
         options.clear();
 
-        Serial.println("Configuring Webserver ...");
+        usbConsole().println("Configuring Webserver ...");
         if (psramFound()) server = (AsyncWebServer *)ps_malloc(sizeof(AsyncWebServer));
         else server = (AsyncWebServer *)malloc(sizeof(AsyncWebServer));
 

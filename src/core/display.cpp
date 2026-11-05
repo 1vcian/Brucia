@@ -315,7 +315,7 @@ int8_t displayMessage(
 
 void displayError(const String &txt, bool waitKeyPress) {
     displayRedStripe(txt);
-    Serial.println("ERR: " + txt);
+    usbConsole().println("ERR: " + txt);
 #ifndef HAS_SCREEN
     return;
 #endif
@@ -329,7 +329,7 @@ void displayError(const String &txt, bool waitKeyPress) {
 
 void displayWarning(const String &txt, bool waitKeyPress) {
     displayRedStripe(txt, TFT_BLACK, TFT_YELLOW);
-    Serial.println("WARN: " + txt);
+    usbConsole().println("WARN: " + txt);
 #ifndef HAS_SCREEN
     return;
 #endif
@@ -340,7 +340,7 @@ void displayWarning(const String &txt, bool waitKeyPress) {
 
 void displayInfo(const String &txt, bool waitKeyPress) {
     displayRedStripe(txt, TFT_WHITE, TFT_BLUE);
-    Serial.println("INFO: " + txt);
+    usbConsole().println("INFO: " + txt);
 #ifndef HAS_SCREEN
     return;
 #endif
@@ -352,7 +352,7 @@ void displayInfo(const String &txt, bool waitKeyPress) {
 
 void displaySuccess(const String &txt, bool waitKeyPress) {
     displayRedStripe(txt, TFT_WHITE, TFT_DARKGREEN);
-    Serial.println("SUCCESS: " + txt);
+    usbConsole().println("SUCCESS: " + txt);
 #ifndef HAS_SCREEN
     return;
 #endif
@@ -363,7 +363,7 @@ void displaySuccess(const String &txt, bool waitKeyPress) {
 
 void displayTextLine(const String &txt, bool waitKeyPress) {
     displayRedStripe(txt, getComplementaryColor2(bruceConfig.priColor), bruceConfig.priColor);
-    Serial.println("MESSAGE: " + txt);
+    usbConsole().println("MESSAGE: " + txt);
 #ifndef HAS_SCREEN
     return;
 #endif
@@ -749,10 +749,10 @@ int loopOptions(
             if (forceMenuOption >= 0) {
                 chosen = forceMenuOption;
                 forceMenuOption = -1; // reset SerialCommand navigation option
-                Serial.print("Forcely ");
+                usbConsole().print("Forcely ");
             }
             if (chosen >= options.size() || !options[chosen].enabled) continue;
-            Serial.println("Selected: " + String(options[chosen].label));
+            usbConsole().println("Selected: " + String(options[chosen].label));
             options[chosen].operation();
             break;
         }

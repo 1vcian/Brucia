@@ -69,6 +69,10 @@ android {
         // rememberLauncherForActivityResult, no Fragments involved).
         disable += "InvalidFragmentVersionForActivityResult"
     }
+    sourceSets {
+        // Exported Room schemas (1-3) for MigrationTestHelper in instrumentation tests.
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
     packaging {
         resources {
             // The three BouncyCastle jars each ship an identical multi-release OSGI
@@ -114,6 +118,11 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.5")
     implementation("androidx.room:room-ktx:2.8.5")
     ksp("androidx.room:room-compiler:2.8.5")
+    androidTestImplementation("androidx.room:room-testing:2.8.5")
+    // room-testing reads the schema JSON with kotlinx-serialization 1.8; the test APK runs on
+    // the app's classes, where lifecycle brings 1.7.3 (AbstractMethodError in
+    // MigrationTestHelper). Raised for the debug build only; release keeps 1.7.3.
+    debugImplementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1")
 
     // Map
     implementation("org.osmdroid:osmdroid-android:6.1.20")

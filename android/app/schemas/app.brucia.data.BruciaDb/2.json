@@ -1,0 +1,95 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "e39db8cdd0170c14b25b5ab65edf5d05",
+    "entities": [
+      {
+        "tableName": "ap",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`bssid` TEXT NOT NULL, `ssid` TEXT NOT NULL, `channel` INTEGER NOT NULL, `rssi` INTEGER NOT NULL, `enc` TEXT NOT NULL, `lat` REAL, `lon` REAL, `timeMillis` INTEGER NOT NULL, `wLat` REAL NOT NULL, `wLon` REAL NOT NULL, `wSum` REAL NOT NULL, `seen` INTEGER NOT NULL, PRIMARY KEY(`bssid`))",
+        "fields": [
+          {
+            "fieldPath": "bssid",
+            "columnName": "bssid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ssid",
+            "columnName": "ssid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channel",
+            "columnName": "channel",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rssi",
+            "columnName": "rssi",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enc",
+            "columnName": "enc",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "timeMillis",
+            "columnName": "timeMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wLat",
+            "columnName": "wLat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wLon",
+            "columnName": "wLon",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wSum",
+            "columnName": "wSum",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seen",
+            "columnName": "seen",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "bssid"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e39db8cdd0170c14b25b5ab65edf5d05')"
+    ]
+  }
+}

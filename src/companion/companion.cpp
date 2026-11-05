@@ -10,6 +10,7 @@
 #include <WiFi.h>
 #include <brucia_identity.h>
 #include <esp_log.h>
+#include <stdio.h>
 #include <globals.h>
 
 volatile bool g_enterCompanionRequested = false;
@@ -21,14 +22,82 @@ namespace companion {
 static bool g_screenOff = false;
 static bool g_ledOff = false;
 
-// ESP-IDF / arduino log output (log_e, ESP_LOGx; CONFIG_ARDUHAL_ESP_LOG routes log_x through
-// esp_log) reaches the same USB serial from any task, also the IDF console's secondary
-// USB-Serial-JTAG output. While companion mode owns the link it would corrupt framing, so it is
-// dropped; the previous writer is restored on exit. Bare printf()/ets_printf are not covered.
+// Output that does not go through Serial but reaches the same wire while companion mode owns it.
+// Per the pinned framework sdkconfig (IDF 5.5.4, newlib): the console is UART0
+// (CONFIG_ESP_CONSOLE_UART_NUM=0), which is the USB bridge that Serial uses on the ESP32 boards,
+// and the ESP32-S3 adds the USB-Serial-JTAG as secondary console
+// (CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y), which is the port HWCDC Serial uses there.
+// Three paths are muted while g_companionActive and restored on exit:
+//  1. esp_log writer (ESP_LOGx inside the precompiled IDF libraries).
+//  2. stdout/stderr (bare printf/puts, also the esp_log default writer): the FILE objects are
+//     shared by all tasks, so their write hook is swapped for one that drops output.
+//  3. ESP32-S3 ROM printf (ets_printf/esp_rom_printf, and Arduino log_x/ESP_LOGx in code built
+//     with the Arduino headers, which end in ets_printf via log_printf): the ROM's
+//     uart_tx_one_char copies every character to the USB-Serial-JTAG while g_usb_print is set
+//     (checked in esp32s3_rev0_rom.elf), so the flag is cleared. On the ESP32 the ROM printf goes
+//     to UART0 through a putc hook with no getter to restore, so it is left alone; those builds
+//     use CORE_DEBUG_LEVEL=0 (log_x compiled out) and only early/ISR error logs remain.
 static vprintf_like_t g_prevLogVprintf = nullptr;
 static int companionMutedLog(const char *fmt, va_list args) {
     if (g_companionActive) return 0;
     return g_prevLogVprintf ? g_prevLogVprintf(fmt, args) : vprintf(fmt, args);
+}
+
+using StdioWriteFn = decltype(((FILE *)nullptr)->_write);
+static StdioWriteFn g_prevStdoutWrite = nullptr;
+static StdioWriteFn g_prevStderrWrite = nullptr;
+static FILE *g_mutedStdout = nullptr;
+static FILE *g_mutedStderr = nullptr;
+static _READ_WRITE_RETURN_TYPE
+mutedStdoutWrite(struct _reent *r, void *cookie, const char *buf, _READ_WRITE_BUFSIZE_TYPE n) {
+    if (g_companionActive || !g_prevStdoutWrite) return n;
+    return g_prevStdoutWrite(r, cookie, buf, n);
+}
+static _READ_WRITE_RETURN_TYPE
+mutedStderrWrite(struct _reent *r, void *cookie, const char *buf, _READ_WRITE_BUFSIZE_TYPE n) {
+    if (g_companionActive || !g_prevStderrWrite) return n;
+    return g_prevStderrWrite(r, cookie, buf, n);
+}
+static void swapStdioWrite(FILE *f, StdioWriteFn fn, StdioWriteFn &prev, FILE *&owner) {
+    if (!f) return;
+    flockfile(f);
+    fflush(f);
+    if (fn) {
+        prev = f->_write;
+        f->_write = fn;
+        owner = f;
+    } else if (owner == f && prev) {
+        f->_write = prev;
+        prev = nullptr;
+        owner = nullptr;
+    }
+    funlockfile(f);
+}
+
+#if CONFIG_IDF_TARGET_ESP32S3
+extern "C" bool g_usb_print; // ROM flag (esp32s3.rom.ld): ROM printf also writes the USB-Serial-JTAG
+static bool g_prevRomUsbPrint = false;
+#endif
+
+static void muteNonSerialOutput(bool mute) {
+    if (mute) {
+        g_prevLogVprintf = esp_log_set_vprintf(companionMutedLog);
+        swapStdioWrite(stdout, mutedStdoutWrite, g_prevStdoutWrite, g_mutedStdout);
+        swapStdioWrite(stderr, mutedStderrWrite, g_prevStderrWrite, g_mutedStderr);
+#if CONFIG_IDF_TARGET_ESP32S3
+        g_prevRomUsbPrint = g_usb_print;
+        g_usb_print = false;
+#endif
+    } else {
+#if CONFIG_IDF_TARGET_ESP32S3
+        g_usb_print = g_prevRomUsbPrint;
+#endif
+        // fflush inside drops what was buffered during companion mode (g_companionActive still set)
+        swapStdioWrite(g_mutedStderr, nullptr, g_prevStderrWrite, g_mutedStderr);
+        swapStdioWrite(g_mutedStdout, nullptr, g_prevStdoutWrite, g_mutedStdout);
+        esp_log_set_vprintf(g_prevLogVprintf ? g_prevLogVprintf : vprintf);
+        g_prevLogVprintf = nullptr;
+    }
 }
 
 void companionSetScreen(bool on) {
@@ -146,8 +215,8 @@ static void runCompanionUSB(bool headless) {
     while (Serial.available()) Serial.read(); // drain stale bytes
     resetFrameReader();
     diagNoteSession();
-    g_companionActive = true; // from here Serial is the framed protocol: mute module debug prints
-    g_prevLogVprintf = esp_log_set_vprintf(companionMutedLog);
+    muteNonSerialOutput(true); // stdout flushed through the old writer before the link turns framed
+    g_companionActive = true;  // from here Serial is the framed protocol: mute module debug prints
     startCompanionStorage();
 
     bool helloSeen = false;
@@ -472,9 +541,8 @@ static void runCompanionUSB(bool headless) {
     stopCompanionNetwork();
     stopCompanionBluetoothControls();
     companionRestoreOutputs(); // leaving companion mode: screen/LED back on
-    g_companionActive = false; // Serial is a normal console again
-    esp_log_set_vprintf(g_prevLogVprintf ? g_prevLogVprintf : vprintf);
-    g_prevLogVprintf = nullptr;
+    muteNonSerialOutput(false); // before clearing the flag, so buffered stdout is dropped, not sent
+    g_companionActive = false;  // Serial is a normal console again
     if (serialcmdsTaskHandle) vTaskResume(serialcmdsTaskHandle);
 }
 

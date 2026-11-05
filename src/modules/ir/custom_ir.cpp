@@ -83,12 +83,12 @@ bool txIrFile(FS *fs, const String &filepath, bool hideDefaultUI) {
     // digitalWrite(bruceConfigPins.irTx, LED_ON);
 
     if (!databaseFile) {
-        Serial.println("Failed to open database file.");
+        usbConsole().println("Failed to open database file.");
         displayError("Fail to open file");
         delay(2000);
         return false;
     }
-    Serial.println("Opened database file.");
+    usbConsole().println("Opened database file.");
 
     bool endingEarly = false;
     int codes_sent = 0;
@@ -108,7 +108,7 @@ bool txIrFile(FS *fs, const String &filepath, bool hideDefaultUI) {
         if (line.startsWith("type:")) total_codes++;
     }
 
-    Serial.printf("\nStarted SPAM all codes with: %d codes", total_codes);
+    usbConsole().printf("\nStarted SPAM all codes with: %d codes", total_codes);
     // comes back to first position, beggining of the file
     databaseFile.seek(0);
     while (databaseFile.available()) {
@@ -120,9 +120,9 @@ bool txIrFile(FS *fs, const String &filepath, bool hideDefaultUI) {
             codes_sent++;
             String type = line.substring(5);
             type.trim();
-            Serial.println("Type: " + type);
+            usbConsole().println("Type: " + type);
             if (type == "raw") {
-                Serial.println("RAW code");
+                usbConsole().println("RAW code");
                 while (databaseFile.available()) {
                     line = databaseFile.readStringUntil('\n');
                     if (line.endsWith("\r")) line.remove(line.length() - 1);
@@ -131,11 +131,11 @@ bool txIrFile(FS *fs, const String &filepath, bool hideDefaultUI) {
                         line = line.substring(10);
                         line.trim();
                         frequency = line.toInt();
-                        Serial.printf("Frequency: %d\n", frequency);
+                        usbConsole().printf("Frequency: %d\n", frequency);
                     } else if (line.startsWith("data:")) {
                         rawData = line.substring(5);
                         rawData.trim();
-                        Serial.println("RawData: " + rawData);
+                        usbConsole().println("RawData: " + rawData);
                     } else if ((frequency != 0 && rawData != "") || line.startsWith("#")) {
                         IRCode code;
                         code.type = "raw";
@@ -151,7 +151,7 @@ bool txIrFile(FS *fs, const String &filepath, bool hideDefaultUI) {
                     }
                 }
             } else if (type == "parsed") {
-                Serial.println("PARSED");
+                usbConsole().println("PARSED");
                 while (databaseFile.available()) {
                     line = databaseFile.readStringUntil('\n');
                     if (line.endsWith("\r")) line.remove(line.length() - 1);
@@ -159,22 +159,22 @@ bool txIrFile(FS *fs, const String &filepath, bool hideDefaultUI) {
                     if (line.startsWith("protocol:")) {
                         protocol = line.substring(9);
                         protocol.trim();
-                        Serial.println("Protocol: " + protocol);
+                        usbConsole().println("Protocol: " + protocol);
                     } else if (line.startsWith("address:")) {
                         address = line.substring(8);
                         address.trim();
-                        Serial.println("Address: " + address);
+                        usbConsole().println("Address: " + address);
                     } else if (line.startsWith("command:")) {
                         command = line.substring(8);
                         command.trim();
-                        Serial.println("Command: " + command);
+                        usbConsole().println("Command: " + command);
                     } else if (line.startsWith("value:") || line.startsWith("state:")) {
                         value = line.substring(6);
                         value.trim();
-                        Serial.println("Value: " + value);
+                        usbConsole().println("Value: " + value);
                     } else if (line.startsWith("bits:")) {
                         bits = line.substring(strlen("bits:")).toInt();
-                        Serial.println("bits: " + bits);
+                        usbConsole().println("bits: " + bits);
                     } else if (line.indexOf("#") != -1) { // TODO: also detect EOF
                         IRCode code(protocol, address, command, value, bits);
                         sendIRCommand(&code, hideDefaultUI);
@@ -210,8 +210,8 @@ bool txIrFile(FS *fs, const String &filepath, bool hideDefaultUI) {
         }
     } // end while file has lines to process
     databaseFile.close();
-    Serial.println("closed");
-    Serial.println("EXTRA finished");
+    usbConsole().println("closed");
+    usbConsole().println("EXTRA finished");
 
     resetCodesArray();
     digitalWrite(bruceConfigPins.irTx, LED_OFF);
@@ -328,7 +328,7 @@ void sendNECCommand(String address, String command, bool hideDefaultUI) {
         for (uint8_t i = 1; i <= bruceConfigPins.irTxRepeats; i++) { irsend.sendNEC(data, 32); }
     }
 
-    Serial.println(
+    usbConsole().println(
         "Sent NEC Command" + (bruceConfigPins.irTxRepeats > 0
                                   ? " (1 initial + " + String(bruceConfigPins.irTxRepeats) + " repeats)"
                                   : "")
@@ -368,7 +368,7 @@ void sendNECextCommand(String address, String command, bool hideDefaultUI) {
         for (uint8_t i = 1; i <= bruceConfigPins.irTxRepeats; i++) { irsend.sendNEC(data, 32); }
     }
 
-    Serial.println(
+    usbConsole().println(
         "Sent NECext Command" + (bruceConfigPins.irTxRepeats > 0
                                      ? " (1 initial + " + String(bruceConfigPins.irTxRepeats) + " repeats)"
                                      : "")
@@ -388,7 +388,7 @@ void sendRC5Command(String address, String command, bool hideDefaultUI) {
     if (bruceConfigPins.irTxRepeats > 0) {
         for (uint8_t i = 1; i <= bruceConfigPins.irTxRepeats; i++) { irsend.sendRC5(data, 13); }
     }
-    Serial.println(
+    usbConsole().println(
         "Sent RC5 Command" + (bruceConfigPins.irTxRepeats > 0
                                   ? " (1 initial + " + String(bruceConfigPins.irTxRepeats) + " repeats)"
                                   : "")
@@ -412,7 +412,7 @@ void sendRC6Command(String address, String command, bool hideDefaultUI) {
         for (uint8_t i = 1; i <= bruceConfigPins.irTxRepeats; i++) { irsend.sendRC6(data, 20); }
     }
 
-    Serial.println(
+    usbConsole().println(
         "Sent RC6 Command" + (bruceConfigPins.irTxRepeats > 0
                                   ? " (1 initial + " + String(bruceConfigPins.irTxRepeats) + " repeats)"
                                   : "")
@@ -434,7 +434,7 @@ void sendSamsungCommand(String address, String command, bool hideDefaultUI) {
         for (uint8_t i = 1; i <= bruceConfigPins.irTxRepeats; i++) { irsend.sendSAMSUNG(data, 32); }
     }
 
-    Serial.println(
+    usbConsole().println(
         "Sent Samsung Command" + (bruceConfigPins.irTxRepeats > 0
                                       ? " (1 initial + " + String(bruceConfigPins.irTxRepeats) + " repeats)"
                                       : "")
@@ -468,7 +468,7 @@ void sendSonyCommand(String address, String command, uint8_t nbits, bool hideDef
         // SIRC20 (20 bits)
         data = ((swappedAddr & 0x1FFF) << 7) | (swappedCmd & 0x7F);
     } else {
-        Serial.println("Invalid Sony (SIRC) protocol bit size.");
+        usbConsole().println("Invalid Sony (SIRC) protocol bit size.");
         return;
     }
 
@@ -482,7 +482,7 @@ void sendSonyCommand(String address, String command, uint8_t nbits, bool hideDef
         for (uint8_t i = 1; i <= bruceConfigPins.irTxRepeats; i++) { irsend.sendSony(data, nbits, 2); }
     }
 
-    Serial.println(
+    usbConsole().println(
         "Sent Sony Command" + (bruceConfigPins.irTxRepeats > 0
                                    ? " (1 initial + " + String(bruceConfigPins.irTxRepeats) + " repeats)"
                                    : "")
@@ -536,7 +536,7 @@ void sendKaseikyoCommand(String address, String command, bool hideDefaultUI) {
         for (uint8_t i = 1; i <= bruceConfigPins.irTxRepeats; i++) { irsend.sendPanasonic64(msb_data, 48); }
     }
 
-    Serial.println(
+    usbConsole().println(
         "Sent Kaseikyo Command" + (bruceConfigPins.irTxRepeats > 0
                                        ? " (1 initial + " + String(bruceConfigPins.irTxRepeats) + " repeats)"
                                        : "")
@@ -589,7 +589,7 @@ bool sendDecodedCommand(String protocol, String value, uint8_t bits, bool hideDe
     }
 
     delay(20);
-    Serial.println(
+    usbConsole().println(
         "Sent Decoded Command" + (bruceConfigPins.irTxRepeats > 0
                                       ? " (1 initial + " + String(bruceConfigPins.irTxRepeats) + " repeats)"
                                       : "")

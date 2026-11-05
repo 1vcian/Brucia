@@ -332,7 +332,7 @@ String formatTimeDecimal(uint32_t totalMillis) {
 }
 
 void printMemoryUsage(const char *msg) {
-    Serial.printf(
+    usbConsole().printf(
         "%s:\nPSRAM: [Free: %lu, max alloc: %lu],\nRAM: [Free: %lu, "
         "max alloc: %lu]\n\n",
         msg,

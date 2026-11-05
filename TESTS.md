@@ -15,6 +15,23 @@ versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 4
 matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
 
+### S07 (ROOMHIST) - Room v1/v2 migrations, software only
+
+Room schemas 1 and 2 generated from their source commits (`85a74629`, `0c705937`; see
+`android/app/schemas/README.md`); `3.json` and the v3 identity hash unchanged.
+`BruciaMigrationTest` on the emulator (API 36, MigrationTestHelper): v1 -> v2 keeps 3
+fixture rows (GPS fix, no fix, quote/SQL-like SSID) and seeds the accumulators; v2 -> v3
+keeps `ap` and creates `saved`; v1 -> v3 validates and leaves the same stored table SQL
+as a fresh v3 database; the app's builder opens v1 and v2 files with their rows. A
+deliberately broken migration (no `saved`, lost latitude) failed all 5. JVM:
+`BruciaMigrationsSeedTest` 3. Totals: `:app:testDebugUnitTest` 783/783 (110 suites),
+`lintDebug` 0 errors (12 warnings, dependency/target-API only), `assembleDebug` pass,
+`connectedDebugAndroidTest` 12/12, `tools/test_android_logic.py` 182. The debug build now
+carries kotlinx-serialization-core 1.8.1 (needed by room-testing); release keeps 1.7.3.
+Under heavy host load the 2 GB emulator's system server restarted (APK install failures,
+one ConnectionService assertion); with `-memory 4096 -cores 4` all passed. No v1/v2
+database from a real device was available.
+
 ### Batch 8 (HWLINK) - companion link fixes from the first hardware run, software only
 
 Fixes for the two link defects of the first `hw_acceptance.py` run on the T-Embed (inbound
@@ -46,6 +63,52 @@ host-runner acceptance below was then run on a T-Embed; the app items remain ope
       app was not involved (host runner only).
 - [ ] App: upload a file larger than 3 KB to the device; Diagnostics shows "0 noise bytes" after
       Sub-GHz Listen on/off; speaker PCM/SSTV transmit still plays.
+
+### Hardware run 2026-11-05 - batch 9 merge (candidate 0.1.5)
+
+T-Embed CC1101 flashed from the Mac with the merged batch 9 firmware (dirty build on 080f8176),
+report hw-acceptance-20261105T121303430Z: 12/12 PASS (caps rx_max 8192, upload 2 chunks with a
+3072-byte chunk, streams ON/OFF clean with 0 noise bytes, ping 200/200 median 3.03 ms p99
+4.09 ms, heap stable 102,887 B over 20 diag calls, diag counters match). Covers the link only;
+the print-hygiene items below that need a phone or peripherals remain open.
+
+### Batch 9 (PRINTS) - companion print hygiene follow-up, software only
+
+Text that could still reach the framed USB stream in companion mode: Bruce CLI commands routed
+through `CMD` now print through `usbConsole()` (Serial outside companion mode; captured into the
+ACK on the companion task, dropped elsewhere), remaining module/task prints on companion paths
+are guarded, and companion mode mutes stdout/stderr and, on ESP32-S3, the ROM printf copy to
+USB-Serial-JTAG (`g_usb_print`). Evidence, host-side only: `test_companion_print_hygiene.py`
+(58 files, reasoned allowlist, 7 tests), `unittest discover` 132 tests, every `tools/test_*.py`
+passes. Firmware builds SUCCESS (compared with the batch 8 figures above, not a rebuild of the
+base): T-Embed CC1101 static RAM 156,016 B (+32), app 4,312,896 B / 92.69% (+1,920);
+Cardputer 158,224 B (+40), 4,319,504 B / 84.50%; core4mb (LITE) 99,608 B (+32), 2,660,688 B /
+67.66%; LAUNCHER_CYD 94,504 B (+32), 2,490,480 B / 97.44% (warn > 95%, fail > 98%). AAC noise
+bounds pass on the first three. Nothing hardware-verified.
+
+- [ ] T-Embed, app console in companion mode: `ir tx NEC 04000000 08000000`, `subghz rx 433920000`,
+      `subghz scan 433000000 434000000`, `storage free`, `wifi on`: the reply shows the text Bruce
+      prints over USB (e.g. `Sent NEC Command`, `timeout`, `SDCARD mounted successfully`) and
+      Diagnostics stays at 0 noise bytes.
+- [ ] Same board: theme Save (`config_save`), speaker tone/DTMF, mic record, BLE HID connect from
+      a host, Evil Portal start/stop: 0 noise bytes; after leaving companion mode Bruce's serial
+      CLI prints as before (e.g. `nav next` shows `Next Pressed`).
+
+### S09 (SSTVREF) - SSTV timing reference, software only
+
+`SstvTimingReferenceTest` (7 tests) holds sync, porch, separator, scan, line time and VIS
+values for Robot 36/72, Martin M1/M2 and Scottie S1/S2 with a citation per value (JL Barber,
+Dayton 2000; SSTV Handbook ch. 3-5; MMSSTV source for the Robot 72 porch conflict). It checks
+the encoder/decoder tables exactly, decoder sample offsets within half a sample at 16 kHz, the
+encoded frame length within one sample and long tones in the encoded audio within 50 Hz. Before
+the fix the two realised-timing tests failed (Martin M1 frame 2.176 ms short; Martin M2 decoder
+offset 1267 vs 1267.552 samples); after it Android `:app:testDebugUnitTest` 787/787 (110
+suites), `lintDebug` 0 errors. Limits: Brucia's own encoder and FM discriminator only.
+
+- [ ] Decode an SSTV recording made by another program (e.g. MMSSTV or QSSTV) from a known
+      source image, in each of the six modes, and compare against that image.
+- [ ] Over the air: send each mode from the app to another receiver, and receive another
+      transmitter in the app; note slant and colour.
 
 ### Batches 1-4 - verify on hardware
 - [ ] Run `python3 tools/hw_acceptance.py --port <port>` first (passive, allowlisted; see

@@ -262,7 +262,7 @@ static int mj_addTarget(const uint8_t *addr, uint8_t addrLen, uint8_t channel, M
     mj_targets[idx].type = type;
     mj_targets[idx].active = true;
 
-    Serial.printf(
+    if (!g_companionActive) Serial.printf(
         "[MJ] Target #%d: type=%d ch=%d addr=%02X:%02X:%02X:%02X:%02X\n",
         idx,
         type,

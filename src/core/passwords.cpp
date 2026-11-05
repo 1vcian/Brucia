@@ -99,7 +99,7 @@ String readDecryptedFile(FS &fs, String filepath) {
     cyphertextFile.close();
 
     if (unsupported_params || cypertextData.length() == 0) {
-        Serial.println("err: invalid Encrypted file (altered?)");
+        usbConsole().println("err: invalid Encrypted file (altered?)");
         return "";
     }
 

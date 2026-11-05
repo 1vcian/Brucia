@@ -7,6 +7,12 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+## [0.1.5] - 2026-11-05
+
+- App database: a database left at schema version 1 or 2 by a pre-0.1 development build
+  (2026-10-23 to 2026-10-27, never in a release) is now migrated to version 3 with all
+  its access points kept. Before, 0.1 deleted such a database and 0.1.1-0.1.4 could not
+  open it (no migration path). Version 3 itself is unchanged. Room schemas 1 and 2 are generated from the commits that defined them.
 - App targets Android 15 (SDK 35) and draws edge to edge; the bottom bar stays above
   the keyboard. AndroidX core, activity, lifecycle and Room updated (database schema
   unchanged).
@@ -16,6 +22,13 @@ that offloads computation to the phone. Format loosely follows
 - Builds report firmware size against the board's app partition and fail when it is
   nearly full.
 - `ir rx` no longer leaks its reader when no signal arrives.
+- SSTV transmit keeps the nominal line period of each mode. Rounding every tone to whole
+  samples made lines short or long (Martin M2 28 ms short over a frame, about 124 pixels of
+  slant on a receiver that runs on the nominal clock; Scottie S1 7.7 ms long; Martin M1 and
+  Scottie S2 about 1-2 ms short); the decoder's in-line sample positions are corrected the same
+  way. Timing constants are now checked against a cited reference table (JL Barber, Dayton
+  2000, cross-checked with the SSTV Handbook and MMSSTV). Not yet verified against an
+  independently encoded recording or over the air.
 - `tools/hw_acceptance.py`: passive, allowlisted acceptance checks for a connected board.
   First run on a T-Embed CC1101 (2026-11-05): link diag keys are compared as a set (the
   firmware emits `err` first; JSON key order is not part of the contract), and a board left
@@ -36,6 +49,14 @@ that offloads computation to the phone. Format loosely follows
     reports). The Sub-GHz, NFC (EMV), IR receive/raw send, BLE spam/BadBLE, FM and NRF24
     debug prints on companion paths are silent in companion mode, and ESP-IDF log output is
     muted until companion mode exits. Bruce's own output outside companion mode is unchanged.
+  - Follow-up (batch 9; not verified on hardware): the remaining text that could reach the
+    framed stream is handled. Bruce CLI commands the app sends through the console (`ir tx`,
+    `subghz rx/scan/tx_from_file`, `play`, `tts`, `wifi on`, `storage free`, `nav`, ...) now
+    return the text they print over USB in their reply instead of writing it into the stream;
+    speaker/mic, Ethernet, LoRa, Evil Portal/karma, Wi-Fi join, brucegotchi, MouseJack, BLE
+    keyboard, script and config-save paths are silent in companion mode; bare `printf` output
+    and, on ESP32-S3 boards, ROM/Arduino log output (`log_e`) are muted until companion mode
+    exits. Outside companion mode Bruce prints exactly what it printed before.
 - CI runs on a pinned `ubuntu-24.04` image instead of `ubuntu-latest`.
 - Contributor setup documented from a fresh clone (prerequisites and exact steps).
 - Android build toolchain updated (Gradle 9.2.1, AGP 8.13.2, Kotlin 2.4.21, Room 2.8.5,

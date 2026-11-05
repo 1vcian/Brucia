@@ -123,7 +123,7 @@ bool _connectToWifiNetwork(const String &ssid, const String &pwd) {
 #ifdef HAS_SCREEN
         tft.print(".");
 #else
-        Serial.print(".");
+        usbConsole().print(".");
 #endif
 
         if (i > 20) {
@@ -144,7 +144,7 @@ bool _setupAP() {
     WiFi.softAPConfig(AP_GATEWAY, AP_GATEWAY, IPAddress(255, 255, 255, 0));
     WiFi.softAP(bruceConfig.wifiAp.ssid, bruceConfig.wifiAp.pwd, 6, 0, 4, false);
     wifiIP = WiFi.softAPIP().toString(); // update global var
-    Serial.println("IP: " + wifiIP);
+    usbConsole().println("IP: " + wifiIP);
     wifiConnected = true;
     return true;
 }
@@ -271,7 +271,7 @@ bool wifiConnectMenu(wifi_mode_t mode) {
             break;
 
         default: // error handling
-            Serial.println("Unknown wifi mode: " + String(mode));
+            usbConsole().println("Unknown wifi mode: " + String(mode));
             break;
     }
 
@@ -371,13 +371,13 @@ bool wifiConnecttoKnownNet(void) {
         String ssid = WiFi.SSID(i);
         String password = bruceConfig.getWifiPassword(ssid);
         if (password != "") {
-            Serial.println("Connecting to: " + ssid);
+            usbConsole().println("Connecting to: " + ssid);
             result = _connectToWifiNetwork(ssid, password);
         }
         // Maybe it finds a known network and can't connect, then try the next
         // until it gets connected (or not)
         if (result) {
-            Serial.println("Connected to: " + ssid);
+            usbConsole().println("Connected to: " + ssid);
             break;
         }
     }

@@ -43,7 +43,7 @@ Notes:
 
 ## Android app (JDK 17-25)
 
-JDK 17 to 25 is required (per Gradle 9.2.1/AGP 8.13.2; verified locally with 23, CI uses 21), plus the
+JDK 17 to 25 is required (per Gradle 9.2.1/AGP 8.13.2; verified with 23 locally and 21 in CI), plus the
 Android SDK with `platforms;android-35` and `build-tools;35.0.0`. Set `ANDROID_HOME`
 (or `sdk.dir` in `android/local.properties`), otherwise Gradle stops with
 "SDK location not found".

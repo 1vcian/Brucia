@@ -352,7 +352,7 @@ void mic_test() {
 
 void CreateWavHeader(byte *header, int waveDataSize) {
     if (waveDataSize < 0 || waveDataSize > 0x7FFFFFFF - 44) {
-        Serial.println("Invalid WAV size");
+        usbConsole().println("Invalid WAV size");
         waveDataSize = 0; // Fallback
     }
     header[0] = 'R';
@@ -461,7 +461,7 @@ bool mic_record_wav_to_path(
             size_t bytesRead = 0;
             esp_err_t err = i2s_channel_read(i2s_chan, (char *)i2s_buffer, bytesPerRead, &bytesRead, 1000);
             if (err != ESP_OK) {
-                Serial.printf("I2S read error: %s\n", esp_err_to_name(err));
+                usbConsole().printf("I2S read error: %s\n", esp_err_to_name(err));
                 break; // Exit Loop
             }
             if (bytesRead > 0) {

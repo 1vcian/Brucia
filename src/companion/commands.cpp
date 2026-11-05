@@ -8,11 +8,28 @@
 
 namespace brucia {
 namespace companion {
-// A SerialDevice sink that discards everything. Used to keep the framed channel
-// clean while routing a CMD through the existing text-oriented CLI.
-// NOTE (F1 limitation): a few legacy CLI commands print to `Serial` directly
-// instead of `serialDevice`; those still leak into the stream until the CLI gains
-// a proper output-capture path. The handshake (HELLO/CAPS/PING) is always clean.
+// While routeCommand runs a CLI command: the capture device and the task running it. usbConsole()
+// appends to it only from that task, so text from other tasks never touches the String.
+static SerialDevice *volatile g_cliCapture = nullptr;
+static TaskHandle_t volatile g_cliCaptureTask = nullptr;
+
+// What usbConsole() returns in companion mode: captured into the routed CLI command's ACK, or dropped.
+class CompanionConsoleSink : public Print {
+public:
+    size_t write(uint8_t c) override { return write(&c, 1); }
+    size_t write(const uint8_t *buffer, size_t size) override {
+        SerialDevice *cap = g_cliCapture;
+        if (cap && xTaskGetCurrentTaskHandle() == g_cliCaptureTask) cap->write(const_cast<uint8_t *>(buffer), size);
+        return size;
+    }
+};
+static CompanionConsoleSink g_consoleSink;
+
+// A SerialDevice that collects the CLI output into the ACK (bounded to one frame), so the framed
+// channel stays clean while a CMD is routed through the existing text-oriented CLI. Bruce CLI code
+// that prints to `serialDevice` or `usbConsole()` lands here; direct `Serial`/printf output is
+// handled by the print-hygiene guards (tools/test_companion_print_hygiene.py) and the stdout mute
+// in companion.cpp.
 class CapturingSerialDevice : public SerialDevice {
 public:
     explicit CapturingSerialDevice(String &buffer) : buf(buffer) {}
@@ -73,12 +90,15 @@ private:
 
 static bool routeCommand(const String &cmd, String &out) {
     // Run the existing Bruce CLI with output captured, so the app can display the
-    // result of any command. The CLI task is already suspended. (A few legacy
-    // commands print to Serial directly; those are not captured.)
+    // result of any command. The CLI task is already suspended.
     SerialDevice *prev = serialDevice;
     CapturingSerialDevice cap(out);
     serialDevice = &cap;
+    g_cliCaptureTask = xTaskGetCurrentTaskHandle();
+    g_cliCapture = &cap;
     bool ok = serialCli.parse(cmd);
+    g_cliCapture = nullptr;
+    g_cliCaptureTask = nullptr;
     serialDevice = prev;
     return ok;
 }
@@ -236,3 +256,8 @@ void handleCompanionCommand(JsonDocument &in, uint32_t id, CompanionSession &ses
 
 } // namespace companion
 } // namespace brucia
+
+Print &usbConsole() {
+    if (!g_companionActive) return Serial;
+    return brucia::companion::g_consoleSink;
+}

@@ -30,7 +30,7 @@ written for bash/zsh on macOS and Linux.
 | Tool | Version | Needed for |
 |------|---------|------------|
 | Git | any | clone; PlatformIO fetches Git-pinned libraries |
-| JDK | 17 to 25 per Gradle 9.2.1/AGP 8.13.2 requirements; verified locally with 23, CI uses Temurin 21 | Android |
+| JDK | 17 to 25 per Gradle 9.2.1/AGP 8.13.2 requirements; verified with 23 locally and 21 (Temurin) in CI | Android |
 | Android SDK | `platform-tools`, `platforms;android-35`, `build-tools;35.0.0` | Android |
 | Python | 3.10 to 3.14 (CI: 3.11). The pinned pioarduino platform rejects 3.15+ | firmware, host tests |
 | PlatformIO Core | 6.2.0 (CI pin), installed with pip | firmware |

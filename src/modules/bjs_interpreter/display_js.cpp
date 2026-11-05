@@ -524,7 +524,7 @@ JSValue native_drawXBitmap(JSContext *ctx, JSValue *this_val, int argc, JSValue 
 
     size_t expectedSize = ((bitmapWidth + 7) / 8) * bitmapHeight;
     if (len != expectedSize) {
-        Serial.printf("data = %s\n", data);
+        usbConsole().printf("data = %s\n", data);
         return JS_ThrowTypeError(ctx, "Bitmap size mismatch, len: %d, expected: %d", len, expectedSize);
     }
 

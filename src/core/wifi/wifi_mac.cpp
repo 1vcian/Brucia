@@ -20,9 +20,9 @@ void applyConfiguredMAC() {
         );
 
         if (esp_wifi_set_mac(WIFI_IF_STA, newMAC) == ESP_OK) {
-            Serial.println("[WiFi] Custom MAC applied: " + bruceConfig.wifiMAC);
+            usbConsole().println("[WiFi] Custom MAC applied: " + bruceConfig.wifiMAC);
         } else {
-            Serial.println("[WiFi] Failed to apply custom MAC, using default");
+            usbConsole().println("[WiFi] Failed to apply custom MAC, using default");
         }
     }
 }

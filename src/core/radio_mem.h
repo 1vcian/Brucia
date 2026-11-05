@@ -45,7 +45,7 @@ static inline bool radioHasMemForBle() {
     }
     
     // Not enough DMA memory - try to free WiFi
-    Serial.println("[RAM] Low contiguous DMA memory for BLE, attempting to free WiFi...");
+    if (!g_companionActive) Serial.println("[RAM] Low contiguous DMA memory for BLE, attempting to free WiFi...");
     
     // Disconnect WiFi if active
     if (WiFi.getMode() != WIFI_MODE_NULL || wifiConnected) {
@@ -59,12 +59,12 @@ static inline bool radioHasMemForBle() {
     
     // Recheck after freeing WiFi
     if (radioLargestDmaBlock() >= RADIO_BLE_MIN_DMA_BLOCK) {
-        Serial.printf("[RAM] WiFi freed, DMA block: %d bytes\n", radioLargestDmaBlock());
+        if (!g_companionActive) Serial.printf("[RAM] WiFi freed, DMA block: %d bytes\n", radioLargestDmaBlock());
         return true;
     }
     
     // Still not enough - return false, caller shows error
-    Serial.printf("[RAM] Still only %d bytes DMA block, minimum %d needed\n", 
+    if (!g_companionActive) Serial.printf("[RAM] Still only %d bytes DMA block, minimum %d needed\n", 
                   radioLargestDmaBlock(), RADIO_BLE_MIN_DMA_BLOCK);
     return false;
 }

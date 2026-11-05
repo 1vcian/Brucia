@@ -27,7 +27,7 @@ static SPIClass *selectEthernetSPIBus() {
         bruceConfigPins.W5500_bus.sck, bruceConfigPins.W5500_bus.miso, bruceConfigPins.W5500_bus.mosi
     );
     if (!bus) {
-        Serial.println("No hardware SPI bus available for Ethernet, falling back to default SPI");
+        if (!g_companionActive) Serial.println("No hardware SPI bus available for Ethernet, falling back to default SPI");
         return &SPI;
     }
     return bus;
@@ -39,47 +39,53 @@ static void ethernet_event_handler(arduino_event_id_t event, arduino_event_info_
         case ARDUINO_EVENT_ETH_CONNECTED: {
             uint8_t mac_addr[6] = {0};
             ETH.macAddress(mac_addr);
-            Serial.println("Ethernet Link Up");
-            Serial.printf(
-                "Ethernet HW Addr %02x:%02x:%02x:%02x:%02x:%02x",
-                mac_addr[0],
-                mac_addr[1],
-                mac_addr[2],
-                mac_addr[3],
-                mac_addr[4],
-                mac_addr[5]
-            );
+            if (!g_companionActive) { // event task: would land inside companion frames
+                Serial.println("Ethernet Link Up");
+                Serial.printf(
+                    "Ethernet HW Addr %02x:%02x:%02x:%02x:%02x:%02x",
+                    mac_addr[0],
+                    mac_addr[1],
+                    mac_addr[2],
+                    mac_addr[3],
+                    mac_addr[4],
+                    mac_addr[5]
+                );
+            }
             displaySuccess("Ethernet Link Up");
             break;
         }
         case ARDUINO_EVENT_ETH_DISCONNECTED:
-            Serial.println("Ethernet Link Down");
+            if (!g_companionActive) Serial.println("Ethernet Link Down");
             displayError("Ethernet Link Down");
             connected = false;
             break;
-        case ARDUINO_EVENT_ETH_START: Serial.println("Ethernet Started"); break;
+        case ARDUINO_EVENT_ETH_START:
+            if (!g_companionActive) Serial.println("Ethernet Started");
+            break;
         case ARDUINO_EVENT_ETH_STOP:
-            Serial.println("Ethernet Stopped");
+            if (!g_companionActive) Serial.println("Ethernet Stopped");
             displayError("Ethernet Stopped");
             connected = false;
             break;
         case ARDUINO_EVENT_ETH_LOST_IP:
-            Serial.println("Ethernet Lost IP");
+            if (!g_companionActive) Serial.println("Ethernet Lost IP");
             displayError("Ethernet Lost IP");
             connected = false;
             break;
         case ARDUINO_EVENT_ETH_GOT_IP: {
             const esp_netif_ip_info_t &ip_info = info.got_ip.ip_info;
             connected = true;
-            Serial.println("Ethernet Got IP Address");
-            Serial.println("~~~~~~~~~~~");
-            Serial.print("ETHIP:");
-            Serial.println(IPAddress(ip_info.ip.addr));
-            Serial.print("ETHMASK:");
-            Serial.println(IPAddress(ip_info.netmask.addr));
-            Serial.print("ETHGW:");
-            Serial.println(IPAddress(ip_info.gw.addr));
-            Serial.println("~~~~~~~~~~~");
+            if (!g_companionActive) { // event task: would land inside companion frames
+                Serial.println("Ethernet Got IP Address");
+                Serial.println("~~~~~~~~~~~");
+                Serial.print("ETHIP:");
+                Serial.println(IPAddress(ip_info.ip.addr));
+                Serial.print("ETHMASK:");
+                Serial.println(IPAddress(ip_info.netmask.addr));
+                Serial.print("ETHGW:");
+                Serial.println(IPAddress(ip_info.gw.addr));
+                Serial.println("~~~~~~~~~~~");
+            }
             displaySuccess("Ethernet Got IP");
             break;
         }
@@ -100,7 +106,7 @@ bool EthernetHelper::setup() {
     if (bruceConfigPins.W5500_bus.cs == GPIO_NUM_NC || bruceConfigPins.W5500_bus.sck == GPIO_NUM_NC ||
         bruceConfigPins.W5500_bus.miso == GPIO_NUM_NC || bruceConfigPins.W5500_bus.mosi == GPIO_NUM_NC) {
         displayError("W5500 Pins not set", true);
-        Serial.println("W5500 pins not configured, skipping Ethernet setup.");
+        usbConsole().println("W5500 pins not configured, skipping Ethernet setup.");
         return false;
     }
 
@@ -122,7 +128,7 @@ bool EthernetHelper::setup() {
 
     if (!ETH.begin(ETH_PHY_W5500, 1, csPin, irqPin, rstPin, *ethSpi)) {
         displayError("Ethernet start failed", true);
-        Serial.println("ETH.begin failed");
+        usbConsole().println("ETH.begin failed");
         return false;
     }
 

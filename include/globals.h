@@ -92,6 +92,12 @@ extern bool wifiConnected; // inform if wifi is active or not
 // True while the USB companion link owns Serial. Module debug prints must stay OFF then: raw bytes
 // on Serial corrupt the length-prefixed companion protocol (the app desyncs / sees "device restarted").
 extern volatile bool g_companionActive;
+// Use in place of `Serial` for text Bruce prints for the USB console user (CLI results, errors).
+// Outside companion mode it returns Serial itself, so the output is byte-identical. In companion
+// mode it returns a sink: text printed by a Bruce CLI command that the app routed through `CMD`
+// (on the companion task) is captured into that command's ACK, anything else is dropped.
+// Defined in src/companion/commands.cpp.
+Print &usbConsole();
 extern bool isWebUIActive; // inform if WebUI is active or not
 
 extern volatile int tftWidth;

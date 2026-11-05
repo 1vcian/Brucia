@@ -229,11 +229,11 @@ uint32_t helpCallback(cmd *c) {
 
 void optionsList() {
     int i = 0;
-    Serial.println("\nActual Menu: " + menuOptionLabel);
-    Serial.println("Options available: ");
+    usbConsole().println("\nActual Menu: " + menuOptionLabel);
+    usbConsole().println("Options available: ");
     for (auto opt : options) {
         String txt = (opt.hovered ? ">" : " ") + String(i) + " - " + opt.label;
-        Serial.println(txt);
+        usbConsole().println(txt);
         i++;
     }
 }
@@ -256,28 +256,28 @@ uint32_t navCallback(cmd *c) {
 
     // Here send press response only to USB serial to avoid problems with BLE app
     if (nav == "next") {
-        Serial.println("Next Pressed");
+        usbConsole().println("Next Pressed");
         var = &NextPress;
     } else if (nav == "prev") {
-        Serial.println("Prev Pressed");
+        usbConsole().println("Prev Pressed");
         var = &PrevPress;
     } else if (nav == "esc") {
-        Serial.println("Esc Pressed");
+        usbConsole().println("Esc Pressed");
         var = &EscPress;
     } else if (nav == "up") {
-        Serial.println("Up Pressed");
+        usbConsole().println("Up Pressed");
         var = &UpPress;
     } else if (nav == "down") {
-        Serial.println("Down Pressed");
+        usbConsole().println("Down Pressed");
         var = &DownPress;
     } else if (nav == "select" || nav == "sel") {
-        Serial.println("Select Pressed");
+        usbConsole().println("Select Pressed");
         var = &SelPress;
     } else if (nav == "nextpage") {
-        Serial.println("Next Page Pressed");
+        usbConsole().println("Next Page Pressed");
         var = &NextPagePress;
     } else if (nav == "prevpage") {
-        Serial.println("Prev Page Pressed");
+        usbConsole().println("Prev Page Pressed");
         var = &PrevPagePress;
     } else {
         serialDevice->println(
@@ -298,7 +298,7 @@ uint32_t navCallback(cmd *c) {
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
     tmp = millis() - tmp;
-    Serial.printf("and Released after %lums", tmp);
+    usbConsole().printf("and Released after %lums", tmp);
     optionsList();
 
     return true;

@@ -16,7 +16,7 @@ void print_errorMessage(const char *msg, const char *stackTrace) {
     tft.setCursor(0, 33);
 
     tft.printf("%s\n%s\n", msg, stackTrace);
-    Serial.printf("%s\n%s\n", msg, stackTrace);
+    usbConsole().printf("%s\n%s\n", msg, stackTrace);
     Serial.flush();
 
     delay(500);
@@ -383,35 +383,35 @@ void internal_print(
         if (JS_IsUndefined(jsvValue)) break;
         if (i > 0) {
             if (printTft) tft.print(" ");
-            Serial.print(" ");
+            usbConsole().print(" ");
         }
 
         if (JS_IsUndefined(jsvValue)) {
             if (printTft) tft.print("undefined");
-            Serial.print("undefined");
+            usbConsole().print("undefined");
 
         } else if (JS_IsNull(jsvValue)) {
             if (printTft) tft.print("null");
-            Serial.print("null");
+            usbConsole().print("null");
 
         } else if (JS_IsNumber(ctx, jsvValue)) {
             double numberValue = 0.0;
             JS_ToNumber(ctx, &numberValue, jsvValue);
             if (printTft) tft.printf("%g", numberValue);
-            Serial.printf("%g", numberValue);
+            usbConsole().printf("%g", numberValue);
 
         } else if (JS_IsBool(jsvValue)) {
             bool b = JS_ToBool(ctx, jsvValue);
             const char *boolValue = b ? "true" : "false";
             if (printTft) tft.print(boolValue);
-            Serial.print(boolValue);
+            usbConsole().print(boolValue);
 
         } else {
             JSCStringBuf sb;
             const char *s = JS_ToCString(ctx, jsvValue, &sb);
             if (s) {
                 if (printTft) tft.print(s);
-                Serial.print(s);
+                usbConsole().print(s);
             } else {
                 /* fallback */
                 JS_PrintValueF(ctx, jsvValue, JS_DUMP_LONG);
@@ -421,7 +421,7 @@ void internal_print(
 
     if (newLine) {
         if (printTft) tft.println();
-        Serial.println();
+        usbConsole().println();
     }
 }
 

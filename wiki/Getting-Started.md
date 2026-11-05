@@ -48,7 +48,7 @@ See [[Building]] for the full toolchain setup.
   cd android && ./gradlew :app:assembleDebug
   ```
 
-  Requires JDK 17-25 (per Gradle/AGP; verified with 23, CI uses 21) and Android SDK 35.
+  Requires JDK 17-25 (per Gradle/AGP; verified with 23 locally and 21 in CI) and Android SDK 35.
   See [[Building]].
 
 ## 3. Connect

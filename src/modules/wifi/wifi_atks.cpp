@@ -121,7 +121,7 @@ void wifi_complete_cleanup(bool wait = true) {
 
 void checkHeap(const char *tag) {
     uint32_t currentHeap = ESP.getFreeHeap();
-    Serial.printf("[HEAP] %s - Free: %ld\n", tag, currentHeap);
+    if (!g_companionActive) Serial.printf("[HEAP] %s - Free: %ld\n", tag, currentHeap);
 }
 
 void resetGlobalState() {

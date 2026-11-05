@@ -41,7 +41,7 @@ bool setupLittleFS(uint8_t maxFiles) {
 ***************************************************************************************/
 void closeLittleFS() {
     LittleFS.end();
-    Serial.println("LittleFS Unmounted...");
+    usbConsole().println("LittleFS Unmounted...");
 }
 
 /***************************************************************************************
@@ -83,10 +83,10 @@ bool setupSdCard(uint8_t maxFiles) {
             bruceConfigPins.SDCARD_bus.sck, bruceConfigPins.SDCARD_bus.miso, bruceConfigPins.SDCARD_bus.mosi
         );
         if (bus != nullptr && bus != &sdcardSPI) {
-            Serial.println("SDCard in the same Bus as TFT, using TFT SPI instance");
+            usbConsole().println("SDCard in the same Bus as TFT, using TFT SPI instance");
             if (!SD.begin(bruceConfigPins.SDCARD_bus.cs, *bus, 4000000UL, "/sd", maxFiles)) {
                 result = false;
-                Serial.println("SDCard in the same Bus as TFT, but failed to mount");
+                usbConsole().println("SDCard in the same Bus as TFT, but failed to mount");
             }
         } else {
             // SDCard on a dedicated bus: it's the anchor/owner of sdcardSPI, so start it here.
@@ -96,26 +96,26 @@ bool setupSdCard(uint8_t maxFiles) {
                     (int8_t)bruceConfigPins.SDCARD_bus.mosi,
                     (int8_t)bruceConfigPins.SDCARD_bus.cs
                 )) {
-                Serial.println("Failed starting SPI Bus");
+                usbConsole().println("Failed starting SPI Bus");
             } // start SPI communications
             delay(20);
             if (!SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, sdcardSPI, 4000000UL, "/sd", maxFiles)) {
                 result = false;
-                Serial.println("SDCard in a different Bus, sdcardSPI failed to mount");
+                usbConsole().println("SDCard in a different Bus, sdcardSPI failed to mount");
 #if defined(ARDUINO_M5STICK_C_PLUS) || defined(ARDUINO_M5STICK_C_PLUS2)
                 // If using Shared SPI, do not stop the bus if SDCard is not present
                 // If using Legacy, release the pins from this SPI Bus
                 if (bruceConfigPins.SDCARD_bus.miso != bruceConfigPins.CC1101_bus.miso) sdcardSPI.end();
 #endif
             }
-            Serial.println("SDCard in a different Bus, using sdcardSPI instance");
+            usbConsole().println("SDCard in a different Bus, using sdcardSPI instance");
         }
     }
 #endif
 
     if (result == false) {
-        Serial.println("SDCARD NOT mounted, check wiring and format");
-        Serial.printf(
+        usbConsole().println("SDCARD NOT mounted, check wiring and format");
+        usbConsole().printf(
             "Pins: SCK=%d, MISO=%d, MOSI=%d, CS=%d\n",
             bruceConfigPins.SDCARD_bus.sck,
             bruceConfigPins.SDCARD_bus.miso,
@@ -125,7 +125,7 @@ bool setupSdCard(uint8_t maxFiles) {
         sdcardMounted = false;
         return false;
     } else {
-        Serial.println("SDCARD mounted successfully");
+        usbConsole().println("SDCARD mounted successfully");
         sdcardMounted = true;
         return true;
     }
@@ -137,7 +137,7 @@ bool setupSdCard(uint8_t maxFiles) {
 ***************************************************************************************/
 void closeSdCard() {
     SD.end();
-    Serial.println("SD Card Unmounted...");
+    usbConsole().println("SD Card Unmounted...");
     sdcardMounted = false;
 }
 
@@ -213,7 +213,7 @@ bool copyToFs(FS from, FS to, String path, bool draw) {
     if (!sdcardMounted) {
         if (!setupSdCard()) {
             sdcardMounted = false;
-            Serial.println("SD Card not mounted");
+            usbConsole().println("SD Card not mounted");
             return false;
         }
     }
@@ -222,20 +222,20 @@ bool copyToFs(FS from, FS to, String path, bool draw) {
     const char *partitionLabel = "spiffs")
     */
     if (!setupLittleFS()) {
-        Serial.println("LittleFS not mounted");
+        usbConsole().println("LittleFS not mounted");
         return false;
     }
 
     File source = from.open(path, FILE_READ);
     if (!source) {
-        Serial.println("Fail opening Source file");
+        usbConsole().println("Fail opening Source file");
         return false;
     }
     path = path.substring(path.lastIndexOf('/'));
     if (!path.startsWith("/")) path = "/" + path;
     File dest = to.open(path, FILE_WRITE);
     if (!dest) {
-        Serial.println("Fail creating destination file");
+        usbConsole().println("Fail creating destination file");
         return false;
     }
     size_t bytesRead;
@@ -256,7 +256,7 @@ bool copyToFs(FS from, FS to, String path, bool draw) {
             // Serial.println("Falha ao escrever no arquivo de destino");
             source.close();
             dest.close();
-            Serial.println("Error 5");
+            usbConsole().println("Error 5");
             free(buff);
             return false;
         } else {
@@ -441,7 +441,7 @@ String readSmallFile(FS &fs, const String &filepath) {
 char *readBigFile(FS *fs, const String &filepath, bool binary, size_t *fileSize) {
     File file = fs->open(filepath);
     if (!file) {
-        Serial.printf("Could not open file: %s\n", filepath.c_str());
+        usbConsole().printf("Could not open file: %s\n", filepath.c_str());
         return NULL;
     }
 
@@ -450,7 +450,7 @@ char *readBigFile(FS *fs, const String &filepath, bool binary, size_t *fileSize)
     if (fileSize != NULL) { *fileSize = file.size(); }
 
     if (!buf) {
-        Serial.printf("Could not allocate memory for file: %s\n", filepath.c_str());
+        usbConsole().printf("Could not allocate memory for file: %s\n", filepath.c_str());
         return NULL;
     }
 
@@ -1101,7 +1101,7 @@ File createNewFile(FS *&fs, String filepath, String filename) {
         name += String(i);
     }
 
-    Serial.println("Creating file: " + name + ext);
+    usbConsole().println("Creating file: " + name + ext);
     File file = (*fs).open(name + ext, FILE_WRITE);
     return file;
 }

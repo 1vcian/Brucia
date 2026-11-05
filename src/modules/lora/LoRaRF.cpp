@@ -88,7 +88,7 @@ SPIClass *selectLoraSPIBus() {
     SPIClass *bus =
         acquireSPIBus(bruceConfigPins.LoRa_bus.sck, bruceConfigPins.LoRa_bus.miso, bruceConfigPins.LoRa_bus.mosi);
     if (!bus) {
-        Serial.println("No hardware SPI bus available for LoRa, falling back to default SPI");
+        if (!g_companionActive) Serial.println("No hardware SPI bus available for LoRa, falling back to default SPI");
         return &SPI;
     }
     return bus;
@@ -167,7 +167,7 @@ bool sendLoraMessage(String &payload) {
     }
     loraInterruptEnabled = true;
     if (state != RADIOLIB_ERR_NONE) {
-        Serial.printf("LoRa transmit failed: %d\n", state);
+        usbConsole().printf("LoRa transmit failed: %d\n", state);
         displayError("LoRa send failed");
         return false;
     }

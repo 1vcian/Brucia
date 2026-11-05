@@ -818,7 +818,7 @@ static void openDeauthFile(FS &Fs) {
         _deauth_file = Fs.open(deauthFilename, FILE_WRITE);
         deauthFileOpen = _deauth_file && writeHeader(_deauth_file);
         unlockFileMutex();
-        if (!deauthFileOpen) { Serial.println("Fail opening deauth capture file"); }
+        if (!deauthFileOpen) { usbConsole().println("Fail opening deauth capture file"); }
     }
 }
 
@@ -1116,7 +1116,7 @@ void openFile(FS &Fs) {
         _pcap_file = Fs.open(filename, FILE_WRITE);
         rawFileOpen = _pcap_file && writeHeader(_pcap_file);
         unlockFileMutex();
-        if (!rawFileOpen) { Serial.println("Fail opening the file"); }
+        if (!rawFileOpen) { usbConsole().println("Fail opening the file"); }
     }
 }
 
@@ -1190,7 +1190,7 @@ static std::vector<String> recentSsidsOnChannel(uint8_t channel, size_t maxItems
 static void sendDeauthNow() {
     bool deauth_sent = false;
     if (registeredBeacons.size() > 40) registeredBeacons.clear();
-    Serial.println("<<---- Sending deauth packets ---->>");
+    usbConsole().println("<<---- Sending deauth packets ---->>");
     for (const auto &registeredBeacon : registeredBeacons) {
         if (registeredBeacon.channel == all_wifi_channels[ch]) {
             memcpy(&ap_record.bssid, registeredBeacon.MAC, 6);
@@ -1282,7 +1282,7 @@ void sniffer_setup() {
     wifi_second_chan_t secondCh = (wifi_second_chan_t)NULL;
     esp_wifi_set_channel(all_wifi_channels[ch], secondCh);
 
-    Serial.println("Sniffer started!");
+    usbConsole().println("Sniffer started!");
     vTaskDelay(1000 / portTICK_RATE_MS);
 
     if (isLittleFS && !checkLittleFsSize()) {
@@ -1303,7 +1303,7 @@ void sniffer_setup() {
     for (;;) {
         if (returnToMenu) {
             if (littleFsWasFull) {
-                Serial.println("Not enough space on LittleFS");
+                usbConsole().println("Not enough space on LittleFS");
                 displayError("LittleFS Full", true);
             }
             break; // user exit or storage exit — either way stop loop

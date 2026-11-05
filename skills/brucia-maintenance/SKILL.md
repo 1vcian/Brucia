@@ -40,8 +40,9 @@ current until their app/firmware pair has passed acceptance.
 - Module presence, driver initialization and physical verification are different.
   Optional hardware gates operations; CC1101 is not an IQ SDR; stock hardware does
   not supply LF RFID/iButton. See `docs/HARDWARE_CAPABILITIES.md`.
-- Android Room v3 is preserved; v1/v2 schemas are unavailable. Never invent migration
-  schemas or delete user data to make a migration pass.
+- Android Room is at v3; v1/v2 (pre-release, never shipped) migrate through
+  `BruciaMigrations`, with schemas generated from their source commits. Never invent
+  migration schemas or delete user data to make a migration pass.
 - `VERSION` drives app/firmware versions. Android versionCode has a 1,000,000 epoch;
   keep upgrade ordering. Never relabel an old APK/binary. `release.sh` bumps versions
   and publishes: inspect its behavior before executing it for an exact-version task.

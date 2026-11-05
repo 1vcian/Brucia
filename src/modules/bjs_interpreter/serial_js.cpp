@@ -9,37 +9,37 @@ static void internal_print_mq(JSContext *ctx, int argc, JSValue *argv, uint8_t p
     for (int argIndex = 0; argIndex < argc && argIndex < 20; ++argIndex) {
         if (argIndex > 0) {
             if (printTft) tft.print(" ");
-            Serial.print(" ");
+            usbConsole().print(" ");
         }
 
         JSValue v = argv[argIndex];
         if (JS_IsUndefined(v)) {
             if (printTft) tft.print("undefined");
-            Serial.print("undefined");
+            usbConsole().print("undefined");
         } else if (JS_IsNull(v)) {
             if (printTft) tft.print("null");
-            Serial.print("null");
+            usbConsole().print("null");
         } else if (JS_IsNumber(ctx, v)) {
             double num;
             JS_ToNumber(ctx, &num, v);
             if (printTft) tft.printf("%g", num);
-            Serial.printf("%g", num);
+            usbConsole().printf("%g", num);
         } else if (JS_IsBool(v)) {
             const char *bv = JS_IsBool(v) && JS_ToBool(ctx, v) ? "true" : "false";
             if (printTft) tft.print(bv);
-            Serial.print(bv);
+            usbConsole().print(bv);
         } else {
             JSCStringBuf sb;
             const char *s = JS_ToCString(ctx, v, &sb);
             if (s) {
                 if (printTft) tft.print(s);
-                Serial.print(s);
+                usbConsole().print(s);
             }
         }
     }
     if (newLine) {
         if (printTft) tft.println();
-        Serial.println();
+        usbConsole().println();
     }
 }
 

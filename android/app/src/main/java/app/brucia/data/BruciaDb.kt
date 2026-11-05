@@ -16,7 +16,7 @@ abstract class BruciaDb : RoomDatabase() {
         fun get(context: Context): BruciaDb = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext, BruciaDb::class.java, "brucia.db"
-            ).build().also { instance = it }
+            ).addMigrations(*BruciaMigrations.ALL).build().also { instance = it }
         }
     }
 }

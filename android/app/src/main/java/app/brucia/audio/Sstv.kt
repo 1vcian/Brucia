@@ -12,8 +12,9 @@ import kotlin.math.sin
  * ESP mic/speaker carry); every bit of DSP runs here on the phone.
  *
  * Supported modes: Robot36 (the primary), Robot72, Martin M1/M2 and Scottie S1/S2.
- * Intended timing reference: JL Barber "Proposal for SSTV Mode Specifications", Dayton 2000.
- * Current regression fixtures are synthetic; external interoperability remains to be verified.
+ * Timing reference: JL Barber "Proposal for SSTV Mode Specifications", Dayton 2000; the cited
+ * table and its cross-checks live in SstvTimingReferenceTest. Regression fixtures are synthetic;
+ * interoperability with other programs and over the air remains to be verified.
  * Robot36/72 and Martin place their 1200 Hz sync pulse at the start of each line.
  * Scottie is different: its 9 ms sync pulse falls BETWEEN the blue and red scans (its defining
  * quirk), so each line runs separator, green, separator, blue, sync, porch, red, with one extra
@@ -37,6 +38,12 @@ object Sstv {
     private const val MID_PORCH = 1900.0
     private const val BLACK_FREQ = 1500.0
     private const val WHITE_FREQ = 2300.0
+    private const val VIS_ONE = 1100.0
+    private const val VIS_ZERO = 1300.0
+    private const val VIS_BIT_MS = 30.0
+
+    /** VIS start bit to first image sample: start bit, 7 data bits, parity and stop bit (10 x 30 ms). */
+    internal const val VIS_START_TO_IMAGE_MS = 300.0
 
     /** A decoded / source image: packed 0xRRGGBB pixels, row-major. */
     class Image(val width: Int, val height: Int, val pixels: IntArray = IntArray(width * height)) {
@@ -62,13 +69,32 @@ object Sstv {
 
     private enum class Ch { R, G, B, Y, CR, CB }
 
-    private sealed class Seg {
-        class Sync(val ms: Double) : Seg()
-        class Const(val freq: Double, val ms: Double) : Seg()
-        class Scan(val ch: Ch, val ms: Double) : Seg()
+    private sealed class Seg(val ms: Double) {
+        class Sync(ms: Double) : Seg(ms)
+        class Const(val freq: Double, ms: Double) : Seg(ms)
+        class Scan(val ch: Ch, ms: Double) : Seg(ms)
     }
 
     private fun samplesFor(ms: Double): Int = (ms * FS / 1000.0).roundToInt()
+
+    /**
+     * Segment boundaries in samples from the line origin, on an exact time axis: boundary i is
+     * round(t_i * FS), where t_i is the nominal time since the line start. Rounding each segment on
+     * its own instead drifts by up to 1.8 samples per line (Martin M2: 3627 vs 3628.768) - wrong
+     * pixel positions late in the line and a slanted picture on receivers that free-run on the
+     * nominal line period. Element i is the start of segment i; the last element is the line end.
+     */
+    private fun segmentBounds(mode: Mode, line: Int): IntArray {
+        val segs = segments(mode, line)
+        val out = IntArray(segs.size + 1)
+        var t = 0.0
+        for ((i, seg) in segs.withIndex()) {
+            out[i] = samplesFor(t)
+            t += seg.ms
+        }
+        out[segs.size] = samplesFor(t)
+        return out
+    }
 
     private fun valueToFreq(v: Int): Double = BLACK_FREQ + (v.coerceIn(0, 255) / 255.0) * (WHITE_FREQ - BLACK_FREQ)
     private fun freqToValue(f: Double): Int = (((f - BLACK_FREQ) / (WHITE_FREQ - BLACK_FREQ)) * 255.0).roundToInt().coerceIn(0, 255)
@@ -127,9 +153,31 @@ object Sstv {
     private fun hasStartingSync(mode: Mode): Boolean =
         mode == Mode.SCOTTIE_S1 || mode == Mode.SCOTTIE_S2
 
-    private fun lineSamples(mode: Mode, line: Int): Int = segments(mode, line).sumOf {
-        when (it) { is Seg.Sync -> samplesFor(it.ms); is Seg.Const -> samplesFor(it.ms); is Seg.Scan -> samplesFor(it.ms) }
+    private fun lineSamples(mode: Mode, line: Int): Int = segmentBounds(mode, line).last()
+
+    // --- read-only timing views (SstvTimingReferenceTest) -------------------------
+
+    /** One line segment as the encoder emits it and the decoder expects it. [freqHz] is null for scans. */
+    internal data class SegmentSpec(val kind: String, val freqHz: Double?, val ms: Double, val channel: String?)
+
+    internal fun lineLayout(mode: Mode, line: Int): List<SegmentSpec> = segments(mode, line).map {
+        when (it) {
+            is Seg.Sync -> SegmentSpec("sync", SYNC_FREQ, it.ms, null)
+            is Seg.Const -> SegmentSpec("tone", it.freq, it.ms, null)
+            is Seg.Scan -> SegmentSpec("scan", null, it.ms, it.ch.name)
+        }
     }
+
+    /** Duration of the one-off sync pulse sent before line 0, or null when the mode has none. */
+    internal fun startingSyncMs(mode: Mode): Double? =
+        if (hasStartingSync(mode)) segments(mode, 0).filterIsInstance<Seg.Sync>().first().ms else null
+
+    /** Decoder view: line length and sync position (samples from line origin) it predicts with. */
+    internal fun decoderLineSamples(mode: Mode, line: Int): Int = lineSamples(mode, line)
+    internal fun decoderSyncOffsetSamples(mode: Mode): Int = syncOffsetSamples(mode)
+
+    /** Decoder view: start sample of every segment of [line], relative to the line origin. */
+    internal fun decoderSegmentStarts(mode: Mode, line: Int): IntArray = segmentBounds(mode, line).copyOf(segments(mode, line).size)
 
     private fun syncSamples(mode: Mode): Int =
         samplesFor(segments(mode, 0).filterIsInstance<Seg.Sync>().first().ms)
@@ -140,15 +188,9 @@ object Sstv {
      * mid-line. The decoder subtracts this to turn a located sync pulse back into the line origin.
      */
     private fun syncOffsetSamples(mode: Mode): Int {
-        var off = 0
-        for (seg in segments(mode, 0)) {
-            when (seg) {
-                is Seg.Sync -> return off
-                is Seg.Const -> off += samplesFor(seg.ms)
-                is Seg.Scan -> off += samplesFor(seg.ms)
-            }
-        }
-        return off
+        val segs = segments(mode, 0)
+        val i = segs.indexOfFirst { it is Seg.Sync }
+        return segmentBounds(mode, 0)[if (i >= 0) i else segs.size]
     }
 
     // --- colour conversion ----------------------------------------------------
@@ -176,24 +218,38 @@ object Sstv {
         val src = scale(img, w, h)
         val buf = ShortBuf()
         val osc = Osc()
+        // Every boundary of the transmission sits at round(t * FS) on one exact time axis, so the
+        // average line period equals the nominal one instead of the sum of rounded segments.
+        val clock = Clock()
 
-        writeVis(buf, osc, mode)
+        for ((freq, ms) in visTones(mode.vis)) osc.write(buf, freq, clock.span(ms))
 
         // Scottie's mid-line sync means line 0's green/blue precede its sync pulse; a single 9 ms
         // starting sync pulse is sent first so the first line lines up like every later one.
-        if (hasStartingSync(mode)) osc.write(buf, SYNC_FREQ, syncSamples(mode))
+        startingSyncMs(mode)?.let { osc.write(buf, SYNC_FREQ, clock.span(it)) }
 
         for (line in 0 until h) {
             checkActive()
             for (seg in segments(mode, line)) {
+                val n = clock.span(seg.ms)
                 when (seg) {
-                    is Seg.Sync -> osc.write(buf, SYNC_FREQ, samplesFor(seg.ms))
-                    is Seg.Const -> osc.write(buf, seg.freq, samplesFor(seg.ms))
-                    is Seg.Scan -> writeScan(buf, osc, src, w, line, seg.ch, samplesFor(seg.ms))
+                    is Seg.Sync -> osc.write(buf, SYNC_FREQ, n)
+                    is Seg.Const -> osc.write(buf, seg.freq, n)
+                    is Seg.Scan -> writeScan(buf, osc, src, w, line, seg.ch, n)
                 }
             }
         }
         return buf.toArray()
+    }
+
+    /** Running nominal time; [span] returns the whole samples covering the next [ms] milliseconds. */
+    private class Clock {
+        private var tMs = 0.0
+        fun span(ms: Double): Int {
+            val n = samplesFor(tMs + ms) - samplesFor(tMs)
+            tMs += ms
+            return n
+        }
     }
 
     private fun writeScan(buf: ShortBuf, osc: Osc, img: Image, w: Int, line: Int, ch: Ch, scanSamples: Int) {
@@ -212,19 +268,25 @@ object Sstv {
         }
     }
 
-    private fun writeVis(buf: ShortBuf, osc: Osc, mode: Mode) {
-        osc.write(buf, MID_PORCH, samplesFor(300.0))   // leader
-        osc.write(buf, SYNC_FREQ, samplesFor(10.0))    // break
-        osc.write(buf, MID_PORCH, samplesFor(300.0))   // leader
-        osc.write(buf, SYNC_FREQ, samplesFor(30.0))    // start bit
+    /**
+     * Calibration header with VIS code, as (frequency Hz, duration ms) pairs: leader, break, leader,
+     * start bit, seven data bits LSB first (1100 Hz = 1, 1300 Hz = 0), even parity, stop bit.
+     */
+    internal fun visTones(vis: Int): List<Pair<Double, Double>> {
+        val out = ArrayList<Pair<Double, Double>>(14)
+        out += MID_PORCH to 300.0        // leader
+        out += SYNC_FREQ to 10.0         // break
+        out += MID_PORCH to 300.0        // leader
+        out += SYNC_FREQ to VIS_BIT_MS   // start bit
         var ones = 0
         for (bit in 0 until 7) {
-            val b = (mode.vis ushr bit) and 1
+            val b = (vis ushr bit) and 1
             if (b == 1) ones++
-            osc.write(buf, if (b == 1) 1100.0 else 1300.0, samplesFor(30.0))
+            out += (if (b == 1) VIS_ONE else VIS_ZERO) to VIS_BIT_MS
         }
-        osc.write(buf, if (ones % 2 == 1) 1100.0 else 1300.0, samplesFor(30.0)) // even parity
-        osc.write(buf, SYNC_FREQ, samplesFor(30.0))    // stop bit
+        out += (if (ones % 2 == 1) VIS_ONE else VIS_ZERO) to VIS_BIT_MS // even parity
+        out += SYNC_FREQ to VIS_BIT_MS   // stop bit
+        return out
     }
 
     // --- decoding -------------------------------------------------------------
@@ -252,9 +314,10 @@ object Sstv {
 
         val searchW = samplesFor(6.0)
         var decodedLines = 0
-        // Predict each line from the previous measured origin, not t0 + line * lineLen: per-segment
-        // sample rounding (Scottie S1: 6852 vs a nominal 6851.52 samples/line) otherwise accumulates
-        // past the sync search window by the end of a frame from a fractional-timing transmitter.
+        // Predict each line from the previous measured origin, not t0 + line * lineLen: the whole-
+        // sample line length (Scottie S1: 6852 vs a nominal 6851.52 samples/line) otherwise drifts
+        // past the sync search window by the end of a frame from a fractional-timing transmitter
+        // (Brucia's own encoder included, which keeps the nominal line period on average).
         var expected = t0.toLong()
         for (line in 0 until h) {
             if (expected + lineSamples(mode, line) >= inst.size) break
@@ -262,17 +325,9 @@ object Sstv {
             val syncPos = refineSync(inst, (expected + syncOffset).toInt(), searchW, syncLen)
             val start = syncPos - syncOffset
             expected = start.toLong() + lineSamples(mode, line)
-            var pos = start
-            for (seg in segments(mode, line)) {
-                when (seg) {
-                    is Seg.Sync -> pos += samplesFor(seg.ms)
-                    is Seg.Const -> pos += samplesFor(seg.ms)
-                    is Seg.Scan -> {
-                        val n = samplesFor(seg.ms)
-                        plane(seg.ch)[line] = sampleScan(inst, pos, n, w)
-                        pos += n
-                    }
-                }
+            val bounds = segmentBounds(mode, line)
+            for ((i, seg) in segments(mode, line).withIndex()) {
+                if (seg is Seg.Scan) plane(seg.ch)[line] = sampleScan(inst, start + bounds[i], bounds[i + 1] - bounds[i], w)
             }
             decodedLines = line + 1
         }
@@ -449,17 +504,9 @@ object Sstv {
 
         /** Sample one scan channel [ch] of [line] starting at line origin [start]; null if absent. */
         private fun channel(inst: DoubleArray, start: Int, ch: Ch, line: Int): IntArray? {
-            var pos = start
-            for (seg in segments(mode, line)) {
-                when (seg) {
-                    is Seg.Sync -> pos += samplesFor(seg.ms)
-                    is Seg.Const -> pos += samplesFor(seg.ms)
-                    is Seg.Scan -> {
-                        val n = samplesFor(seg.ms)
-                        if (seg.ch == ch) return sampleScan(inst, pos, n, w)
-                        pos += n
-                    }
-                }
+            val bounds = segmentBounds(mode, line)
+            for ((i, seg) in segments(mode, line).withIndex()) {
+                if (seg is Seg.Scan && seg.ch == ch) return sampleScan(inst, start + bounds[i], bounds[i + 1] - bounds[i], w)
             }
             return null
         }
@@ -542,7 +589,7 @@ object Sstv {
         if (runStart >= 0) runs.add(intArrayOf(runStart, inst.size - syncLen))
         if (runs.isEmpty()) return null
         val visRun = runs.firstOrNull { it[1] - it[0] >= samplesFor(100.0) }
-        val rough = if (visRun != null) visRun[0] + samplesFor(300.0) else runs.first()[0]
+        val rough = if (visRun != null) visRun[0] + samplesFor(VIS_START_TO_IMAGE_MS) else runs.first()[0]
         if (rough >= inst.size - syncLen) return null
         return refineSync(inst, rough.coerceIn(0, inst.size - syncLen - 1), samplesFor(18.0), syncLen)
     }

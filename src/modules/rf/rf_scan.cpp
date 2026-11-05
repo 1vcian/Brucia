@@ -555,7 +555,7 @@ bruceConfigPins.setRfScanRange(2); }}, {subghz_frequency_ranges[3],             
 // Routes one info line to the right sink: Serial when running headless (CLI),
 // otherwise the on-screen padded print used by the interactive scanner.
 static void rf_info_line(bool headless, const String &s) {
-    if (headless) Serial.println(s);
+    if (headless) usbConsole().println(s);
     else padprintln(s);
 }
 
@@ -795,11 +795,11 @@ String rf_scan(float start_freq, float stop_freq, int max_loops, bool *started) 
             if (mark_rssi > -75) {
                 long fr = mark_freq * 100;
                 if (fr == compare_freq) {
-                    Serial.print(F("\r\nSignal found at  "));
-                    Serial.print(F("Freq: "));
-                    Serial.print(mark_freq);
-                    Serial.print(F(" Rssi: "));
-                    Serial.println(mark_rssi);
+                    usbConsole().print(F("\r\nSignal found at  "));
+                    usbConsole().print(F("Freq: "));
+                    usbConsole().print(mark_freq);
+                    usbConsole().print(F(" Rssi: "));
+                    usbConsole().println(mark_rssi);
                     out += String(mark_freq) + ",";
                     mark_rssi = -100;
                     compare_freq = 0;
@@ -920,7 +920,7 @@ String rfReceiveSignal(float frequency, int max_loops, bool raw, bool headless) 
         }
         if (finalPoll) {
             // Final check already done in this iteration - truly timed out
-            Serial.println("timeout");
+            usbConsole().println("timeout");
             rx.end();
             deinitRfModule();
             return "";

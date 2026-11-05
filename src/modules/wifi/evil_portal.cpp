@@ -118,7 +118,7 @@ bool EvilPortal::setup() {
 
     loopOptions(options);
 
-    Serial.println("Evil Portal output file: " + outputFile);
+    usbConsole().println("Evil Portal output file: " + outputFile);
     return true;
 }
 
@@ -421,7 +421,7 @@ void EvilPortal::checkAndExtendDuration() {
 
     if (hasRecentActivity()) {
         _durationExtended = true;
-        Serial.println("[PORTAL] Activity detected, extending duration");
+        if (!g_companionActive) Serial.println("[PORTAL] Activity detected, extending duration");
     }
 }
 

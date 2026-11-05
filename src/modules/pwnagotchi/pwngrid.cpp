@@ -287,16 +287,16 @@ void pwnSnifferCallback(void *buf, wifi_promiscuous_pkt_type_t type) {
                     // serializeJson(json, Serial);  // ArduinoJson v6
                     add_new_peer(sniffed_json, snifferPacket->rx_ctrl.rssi);
                 } else if (result == DeserializationError::IncompleteInput) {
-                    Serial.println("Deserialization error: incomplete input");
+                    if (!g_companionActive) Serial.println("Deserialization error: incomplete input");
                 } else if (result == DeserializationError::NoMemory) {
-                    Serial.println("Deserialization error: no memory");
+                    if (!g_companionActive) Serial.println("Deserialization error: no memory");
                 } else if (result == DeserializationError::InvalidInput) {
-                    Serial.println("Deserialization error: invalid input");
+                    if (!g_companionActive) Serial.println("Deserialization error: invalid input");
                 } else if (result == DeserializationError::TooDeep) {
-                    Serial.println("Deserialization error: too deep");
+                    if (!g_companionActive) Serial.println("Deserialization error: too deep");
                 } else {
-                    Serial.println(essid);
-                    Serial.println("Deserialization error");
+                    if (!g_companionActive) Serial.println(essid);
+                    if (!g_companionActive) Serial.println("Deserialization error");
                 }
             }
         }

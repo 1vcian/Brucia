@@ -14,8 +14,8 @@ import kotlin.math.sin
  *
  * PROVENANCE: synthetic, written for this test; NOT an external known-answer fixture. Segment
  * durations are the nominal Scottie values quoted in Sstv.kt / AudioDspTest (attributed there to
- * JL Barber, Dayton 2000; that document was not available to verify them). Unlike the encoder and
- * AudioDspTest.referenceScottie, which round every segment to whole samples (S1: 6852 samples/line
+ * JL Barber, Dayton 2000; checked against it in SstvTimingReferenceTest). Unlike
+ * AudioDspTest.referenceScottie, which rounds every segment to whole samples (S1: 6852 samples/line
  * instead of the nominal 6851.52), this transmitter places every boundary at round(t * FS) on an
  * exact cumulative time axis, as a sound-card transmitter with a fractional line period does. A
  * decoder that predicts line N at t0 + N * roundedLineLen drifts ~0.5 sample/line off such a signal.

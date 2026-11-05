@@ -43,7 +43,7 @@ JSValue native_wifiConnect(JSContext *ctx, JSValue *this_val, int argc, JSValue 
     if (argc > 1 && JS_IsNumber(ctx, argv[1])) JS_ToInt32(ctx, &timeout_in_seconds, argv[1]);
 
     bool r = false;
-    Serial.println(String("Connecting to: ") + (ssid ? ssid : ""));
+    usbConsole().println(String("Connecting to: ") + (ssid ? ssid : ""));
 
     WiFi.mode(WIFI_MODE_STA);
     if (argc > 2 && JS_IsString(ctx, argv[2])) {
@@ -59,7 +59,7 @@ JSValue native_wifiConnect(JSContext *ctx, JSValue *this_val, int argc, JSValue 
         delay(1000);
         i++;
         if (i > timeout_in_seconds) {
-            Serial.println("timeout");
+            usbConsole().println("timeout");
             break;
         }
     } while (!WiFi.isConnected());
@@ -247,7 +247,7 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
     size_t bytesRead = 0;
     while (http.connected()) {
         if (millis() - startMillis > timeoutMillis) {
-            Serial.println("Timeout while reading response!");
+            usbConsole().println("Timeout while reading response!");
             break;
         }
 

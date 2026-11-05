@@ -248,14 +248,14 @@ bool readSubFile(FS *fs, const String &filepath, RfCodes &data) {
     databaseFile = fs->open(filepath, FILE_READ);
 
     if (!databaseFile) {
-        Serial.println("Failed to open database file.");
+        usbConsole().println("Failed to open database file.");
         displayError("Fail to open file", true);
         return false;
     }
-    Serial.println("Opened sub file.");
+    usbConsole().println("Opened sub file.");
     selected_code.filepath = filepath.substring(1 + filepath.lastIndexOf("/"));
 
-    if (!databaseFile) Serial.println("Fail opening file");
+    if (!databaseFile) usbConsole().println("Fail opening file");
     // Store the code(s) in the signal
     while (databaseFile.available()) {
         line = databaseFile.readStringUntil('\n');
@@ -306,7 +306,7 @@ bool txSubFile(RfCodes &selected_code, bool hideDefaultUI) {
     int sent = 0;
 
     int total = keyList.size() + rawDataList.size();
-    Serial.printf("Total signals found: %d\n", total);
+    usbConsole().printf("Total signals found: %d\n", total);
     // If the signal is complete, send all of the code(s) that were found in it.
     // TODO: try to minimize the overhead between codes.
     if (selected_code.protocol != "" && selected_code.preset != "" && selected_code.frequency > 0) {
@@ -337,7 +337,7 @@ bool txSubFile(RfCodes &selected_code, bool hideDefaultUI) {
         addToRecentCodes(selected_code);
     }
 
-    Serial.printf("\nSent %d of %d signals\n", sent, total);
+    usbConsole().printf("\nSent %d of %d signals\n", sent, total);
     if (!hideDefaultUI) { displayTextLine("Sent " + String(sent) + "/" + String(total), false); }
 
     // Reset vectors

@@ -415,20 +415,24 @@ size_t BleKeyboard::write(const uint8_t *buffer, size_t size) {
     }
     return n;
 }
+// Defined in Bruce's src/main.cpp. NimBLE host-task callbacks: while the USB companion link owns
+// Serial (BLE HID / BadBLE driven from the app) a print here would land inside its frames.
+extern volatile bool g_companionActive;
+
 void BleKeyboard::ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) {
     parent->connected = true;
-    Serial.println("BRUCE KEYBOARD: lib connected");
+    if (!g_companionActive) Serial.println("BRUCE KEYBOARD: lib connected");
 }
 void BleKeyboard::ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) {
     parent->connected = false;
-    Serial.println("BRUCE KEYBOARD: lib disconnected");
+    if (!g_companionActive) Serial.println("BRUCE KEYBOARD: lib disconnected");
 }
 void BleKeyboard::ServerCallbacks::onAuthenticationComplete(NimBLEConnInfo &connInfo) {
     if (connInfo.isEncrypted()) {
-        Serial.println("BRUCE KEYBOARD: Paired successfully.");
+        if (!g_companionActive) Serial.println("BRUCE KEYBOARD: Paired successfully.");
         parent->connected = true;
     } else {
-        Serial.println("BRUCE KEYBOARD: Pairing failed");
+        if (!g_companionActive) Serial.println("BRUCE KEYBOARD: Pairing failed");
         parent->connected = false;
     }
 }
@@ -444,11 +448,11 @@ void BleKeyboard::CharacteristicCallbacks::onSubscribe(
     NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo, uint16_t subValue
 ) {
     if (subValue == 0) {
-        Serial.println("BRUCE KEYBOARD: Client unsubscribed from notifications/indications.");
+        if (!g_companionActive) Serial.println("BRUCE KEYBOARD: Client unsubscribed from notifications/indications.");
         if (parent->m_subCount) parent->m_subCount--;
     } else {
         parent->m_subCount++;
-        Serial.println("BRUCE KEYBOARD: Client subscribed to notifications.");
+        if (!g_companionActive) Serial.println("BRUCE KEYBOARD: Client subscribed to notifications.");
     }
 }
 

@@ -1085,7 +1085,7 @@ int gsetIrTxPin(bool set) {
         loopOptions(options, idx);
         options.clear();
 
-        Serial.println("Saved pin: " + String(bruceConfigPins.irTx));
+        usbConsole().println("Saved pin: " + String(bruceConfigPins.irTx));
     }
 
     returnToMenu = true;
