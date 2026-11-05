@@ -189,4 +189,35 @@ class StreamSubscriptionsTest {
         assertFalse(f.streams.set("wifi.ap", true))
         f.streams.detach()
     }
+
+    @Test(timeout = 5000) fun disconnectSendsOffForEveryStreamEvenIfOneSendFails() = runVirtual<Unit> {
+        val f = Fixture(this); f.autoAck()
+        f.streams.set("ble.scan", true)
+        f.streams.set("mic.pcm", true)
+        val sent = mutableListOf<String>()
+        val left = f.streams.disconnect { stream ->
+            if (stream == "ble.scan") throw java.io.IOException("closed")
+            sent += stream
+        }
+        assertEquals(setOf("ble.scan", "mic.pcm"), left)
+        assertEquals(listOf("mic.pcm"), sent)
+        assertTrue(f.streams.activeStreams().isEmpty())
+        assertTrue(f.streams.cleanupStreams().isEmpty())
+    }
+
+    @Test(timeout = 5000) fun mayRunCoversUnconfirmedStreamsButNotAnOffInFlight() = runVirtual<Unit> {
+        val f = Fixture(this)
+        assertFalse(f.streams.mayRun("wifi.ap"))
+        f.streams.set("wifi.ap", true)
+        assertTrue(f.streams.isOn("wifi.ap"))
+        assertTrue(f.streams.mayRun("wifi.ap"))
+        until { !f.first.hasPending } // no ACK: unknown whether the radio runs
+        assertFalse(f.streams.isOn("wifi.ap"))
+        assertTrue(f.streams.mayRun("wifi.ap"))
+        f.streams.set("wifi.ap", false)
+        assertFalse("an OFF is already on its way", f.streams.mayRun("wifi.ap"))
+        f.ack(1)
+        assertFalse(f.streams.mayRun("wifi.ap"))
+        f.streams.detach()
+    }
 }

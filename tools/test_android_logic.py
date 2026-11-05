@@ -31,6 +31,7 @@ TESTS = [
     "ProtocolTest", "DeviceFilesTest", "FileListTest", "CapsTest", "CapsEvidenceTest", "AudioDspTest",
     "TftProtocolTest", "SubGhzDecoderTest", "SubGhzEncoderTest", "NdefBuilderTest", "DeviceFileReaderTest", "DownloadIOTest", "ReleaseCatalogTest", "AwaitReplyTest", "FirmwareImageTest", "UpdateHttpTest", "HttpWireTest", "RecordingBufferTest",
     "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
+    "StreamRotationTest", "ParkedLeavesTest", "DeviceOutputsTest",
 ]
 # Test-only files without a test class (compiled, not run).
 TEST_HELPERS = ["DeviceJson", "VirtualTime"]
@@ -48,7 +49,8 @@ SOURCES = [
     "files/FileList.kt", "remote/TftProtocol.kt", "nfc/NdefBuilder.kt",
     "subghz/OokProtocols.kt", "subghz/DecodedSignal.kt", "subghz/SubGhzDecoder.kt", "subghz/SubGhzEncoder.kt",
     "audio/Dtmf.kt", "audio/Fft.kt", "audio/Goertzel.kt", "audio/Oscilloscope.kt", "audio/Sstv.kt",
-    "session/CommandRunner.kt", "wifi/CaptureWorkflow.kt", "wifi/CaptureDescriptor.kt",
+    "session/CommandRunner.kt", "session/StreamSubscriptions.kt", "ui/ParkedLeaves.kt", "device/DeviceOutputs.kt",
+    "wifi/CaptureWorkflow.kt", "wifi/CaptureDescriptor.kt",
     "wifi/HandshakeParser.kt", "wifi/WpaCracker.kt", "wifi/Pmkid.kt",
 ]
 

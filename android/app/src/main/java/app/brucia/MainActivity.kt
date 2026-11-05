@@ -1,5 +1,6 @@
 package app.brucia
 
+import app.brucia.ui.LeaveEffect
 import app.brucia.ui.rememberRetained
 import app.brucia.R
 import android.Manifest
@@ -76,7 +77,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -265,6 +265,8 @@ class MainActivity : ComponentActivity() {
                     autoConnectIfReady()
                 }
                 AppRoot(vm, onConnect = { connectUsb(vm) }, onFlash = { flashFirmware(vm) })
+                // After a rotation/resize: stop the work of tools that did not come back.
+                app.brucia.ui.SettleParkedLeaves()
             }
         }
     }
@@ -2723,7 +2725,8 @@ private fun StationSnifferScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val stations by vm.stations.collectAsState()
     val sniffing by vm.sniffing.collectAsState()
     // Stop the wifi.sta stream when leaving the tab so the device radio does not keep sniffing.
-    DisposableEffect(Unit) { onDispose { vm.stopStationSniff() } }
+    // LeaveEffect, not DisposableEffect: a rotation keeps the sniff running; leaving stops it.
+    LeaveEffect { if (vm.streamMayRun("wifi.sta")) vm.stopStationSniff() }
 
     // One LazyColumn so the whole screen scrolls (controls = header item, stations = items).
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -2827,7 +2830,7 @@ private fun WifiProbeScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val probing by vm.probing.collectAsState()
     var byClient by remember { mutableStateOf(false) }
     // Stop the wifi.probe stream when leaving the tab so the device radio does not keep sniffing.
-    DisposableEffect(Unit) { onDispose { vm.stopProbeSniff() } }
+    LeaveEffect { if (vm.streamMayRun("wifi.probe")) vm.stopProbeSniff() }
 
     // Group by SSID (networks and who seeks them) or by client (devices and what they seek).
     // Hoisted above the LazyColumn because remember() cannot be called in LazyListScope.
@@ -2986,7 +2989,7 @@ private fun WifiMonitorScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var expanded by remember { mutableStateOf<Int?>(null) }
 
     // Stop the wifi.monitor stream when leaving the tab so the device radio stops capturing.
-    DisposableEffect(Unit) { onDispose { vm.stopMonitor() } }
+    LeaveEffect { if (vm.streamMayRun("wifi.monitor")) vm.stopMonitor() }
 
     val eapolCount = remember(frames) { frames.count { it.info.isEapol } }
     val pmkHex = remember(psk, targetSsid) {
@@ -3869,7 +3872,7 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
     // replay fall back to Bruce's own `ir` CLI in the ViewModel, so only these two are disabled.
     val irCmdsOmitted = device?.features?.omits(app.brucia.wardrive.DeviceFeatures.IR_CMDS) == true
     var region by rememberSaveable { mutableStateOf("na") }
-    DisposableEffect(Unit) { onDispose { vm.stopIrJammer(silent = true) } }
+    LeaveEffect { vm.stopIrJammer(silent = true) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -4076,9 +4079,15 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val subImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.importSub(uri)
     }
-    // Stop the subghz.raw stream and any recording when leaving the tab so the device RMT RX
-    // does not keep running.
-    DisposableEffect(Unit) { onDispose { vm.stopRfCapture(); vm.setSubghz(false); vm.stopSpectrum(); vm.stopSubghzJammer(silent = true) } }
+    // Stop the subghz.raw/spectrum streams, any recording and the jammer when leaving the tool so
+    // the device RMT RX does not keep running. A rotation or resize is not leaving (LeaveEffect):
+    // Listen keeps running and the recreated screen re-binds to vm.subghzListening.
+    LeaveEffect {
+        vm.stopRfCapture()
+        if (vm.streamMayRun("subghz.raw")) vm.setSubghz(false)
+        if (vm.streamMayRun("subghz.spectrum")) vm.stopSpectrum()
+        vm.stopSubghzJammer(silent = true)
+    }
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -6310,10 +6319,15 @@ private fun BleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    var scanning by remember { mutableStateOf(false) }
-    // Stop the ble.scan stream and any GATT exploration when leaving the tab so the device BLE
-    // radio does not keep scanning / stays disconnected.
-    DisposableEffect(Unit) { onDispose { vm.setBleScan(false); vm.gattStop(); vm.stopIbeacon(silent = true) } }
+    // From the ViewModel (follows the SUB outcome), so a recreated screen shows the running scan.
+    val scanning by vm.bleScanning.collectAsState()
+    // Stop the ble.scan stream and any GATT exploration when leaving the tool so the device BLE
+    // radio does not keep scanning / stays disconnected. A rotation is not leaving (LeaveEffect).
+    LeaveEffect {
+        if (vm.streamMayRun("ble.scan")) vm.setBleScan(false)
+        vm.gattStop()
+        vm.stopIbeacon(silent = true)
+    }
 
     // Single scroll container: header, controls and the device list are all items of one
     // LazyColumn (no nested same-axis scrollables).
@@ -6337,7 +6351,7 @@ private fun BleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
         item {
             StreamToggleRow("Scan", "ble.scan stream", checked = scanning, enabled = connected,
-                onCheckedChange = { scanning = it; vm.setBleScan(it) })
+                onCheckedChange = { vm.setBleScan(it) })
         }
         // BLE spam (Apple ProximityPair popups) - authorized testing only. Continuous, abortable:
         // Start launches the short-burst loop, Stop ends it (shared BlePlatformSpamCard).
@@ -6753,7 +6767,7 @@ private fun Nrf24Screen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var mjSecsText by rememberSaveable { mutableStateOf("10") }
     var mjText by rememberSaveable { mutableStateOf("") }
     // Clear the local run flags when leaving the tab.
-    DisposableEffect(Unit) { onDispose { vm.stopNrf24Scan(); vm.stopNrf24Sniff(); vm.stopNrf24Jammer(); vm.stopNrf24MouseJack() } }
+    LeaveEffect { vm.stopNrf24Scan(); vm.stopNrf24Sniff(); vm.stopNrf24Jammer(); vm.stopNrf24MouseJack() }
 
     // Unknown caps (disconnected) -> show controls normally; only a connected device that
     // reports nrf24 = false hides them.
@@ -7027,7 +7041,7 @@ private fun LoRaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var crText by rememberSaveable { mutableStateOf("") }
     var sendText by rememberSaveable { mutableStateOf("") }
     var recvSecsText by rememberSaveable { mutableStateOf("20") }
-    DisposableEffect(Unit) { onDispose { vm.stopLoraRecv() } }
+    LeaveEffect { vm.stopLoraRecv() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -7404,7 +7418,7 @@ private fun FmScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var source by rememberSaveable { mutableStateOf(FmSource.TONE) }
 
     // Stop any transmission when the user leaves the tab.
-    DisposableEffect(Unit) { onDispose { vm.fmStop() } }
+    LeaveEffect { vm.fmStop() }
 
     val freqKHz = freqText.toIntOrNull()
     val freqValid = freqKHz != null && freqKHz in 87500..108000
@@ -7810,9 +7824,11 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
     val context = LocalContext.current
 
     // Lite mode: save power by turning the device screen/LED off while the phone
-    // drives it. Both auto-restore if the connection drops, so it never stays dark.
-    var screenOn by remember { mutableStateOf(true) }
-    var ledOn by remember { mutableStateOf(true) }
+    // drives it. Both auto-restore if the connection drops, so it never stays dark. The state lives
+    // in the ViewModel, so a rotation shows what the device is doing instead of resetting to on.
+    val outputs by vm.deviceOutputs.collectAsState()
+    val screenOn = outputs.screenOn
+    val ledOn = outputs.ledOn
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -7863,7 +7879,7 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
                             style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = screenOn, enabled = connected, onCheckedChange = { screenOn = it; vm.setDeviceScreen(it) })
+                    Switch(checked = screenOn, enabled = connected, onCheckedChange = { vm.setDeviceScreen(it) })
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -7874,7 +7890,7 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
                             style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = ledOn, enabled = connected, onCheckedChange = { ledOn = it; vm.setDeviceLed(it) })
+                    Switch(checked = ledOn, enabled = connected, onCheckedChange = { vm.setDeviceLed(it) })
                 }
                 Spacer(Modifier.height(10.dp))
                 var scrBright by remember(device?.screenBright) { mutableFloatStateOf((device?.screenBright?.takeIf { it >= 0 } ?: 100).toFloat()) }

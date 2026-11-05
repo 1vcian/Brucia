@@ -1,6 +1,7 @@
 package app.brucia
 
 import androidx.compose.runtime.saveable.rememberSaveable
+import app.brucia.ui.LeaveEffect
 import app.brucia.ui.rememberRetained
 import android.Manifest
 import android.content.pm.PackageManager
@@ -38,7 +39,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -129,6 +129,18 @@ private fun concat(a: ShortArray, b: ShortArray, maxLen: Int): ShortArray {
 // --- Combined parallel dashboard ------------------------------------------------
 
 /**
+ * The device mic (mic.pcm) runs while an Audio tool is shown: started when the tool opens (and on
+ * reconnect), stopped when the user leaves it. A rotation or resize is not leaving: the stream keeps
+ * running, startMicPcm does nothing while it is on, and the recreated tool re-binds to vm.micPcm,
+ * so the device sees one ON and, on leave, one OFF. A disconnect is cleaned up by the ViewModel.
+ */
+@Composable
+private fun MicPcmWhileShown(vm: WardriveViewModel, connected: Boolean, hasMic: Boolean) {
+    LaunchedEffect(connected, hasMic) { if (connected && hasMic) vm.startMicPcm() }
+    LeaveEffect { if (vm.streamMayRun("mic.pcm")) vm.stopMicPcm() }
+}
+
+/**
  * The default Audio experience: Spectrum, Waterfall, Oscilloscope/vectorscope and SSTV all rendered
  * LIVE and SIMULTANEOUSLY as separate stacked panels in one scrollable screen. The device mic is
  * subscribed exactly once here (a single [WardriveViewModel.micPcm] collection); the same PCM chunks
@@ -142,10 +154,7 @@ internal fun AudioDashboardScreen(vm: WardriveViewModel, onConnect: () -> Unit) 
     val connected = status == "Connected"
     val pcm by vm.micPcm.collectAsState() // single subscription, fanned to all panels below
 
-    DisposableEffect(connected, device?.caps?.mic) {
-        if (connected && device?.caps?.mic == true) vm.startMicPcm()
-        onDispose { vm.stopMicPcm() }
-    }
+    MicPcmWhileShown(vm, connected, device?.caps?.mic == true)
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -176,7 +185,7 @@ private fun RecordBar(vm: WardriveViewModel, connected: Boolean) {
     LaunchedEffect(recording) {
         if (recording) { elapsed = 0; while (true) { kotlinx.coroutines.delay(1000); elapsed++ } }
     }
-    DisposableEffect(Unit) { onDispose { vm.pauseRecording() } }
+    LeaveEffect { vm.pauseRecording() }
 
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(12.dp)) {
@@ -365,14 +374,15 @@ internal fun ScopePanel(vm: WardriveViewModel, pcm: ShortArray) {
         hasAudioPerm = granted
         if (granted && scopeMode == 2) vm.startPhoneMic()
     }
-    DisposableEffect(scopeMode, hasAudioPerm) {
+    // startPhoneMic is a no-op while capturing, so a rotation keeps the same capture running.
+    LaunchedEffect(scopeMode, hasAudioPerm) {
         if (scopeMode == 2) {
             if (hasAudioPerm) vm.startPhoneMic() else permLauncher.launch(Manifest.permission.RECORD_AUDIO)
         } else {
             vm.stopPhoneMic()
         }
-        onDispose { vm.stopPhoneMic() }
     }
+    LeaveEffect { vm.stopPhoneMic() }
 
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(12.dp)) {
@@ -677,11 +687,8 @@ internal fun SstvScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
     var txMode by rememberSaveable { mutableStateOf(Sstv.Mode.ROBOT36) }
 
-    DisposableEffect(connected, device?.caps?.mic) {
-        if (connected && device?.caps?.mic == true) vm.startMicPcm()
-        onDispose { vm.stopMicPcm() }
-    }
-    DisposableEffect(Unit) { onDispose { vm.sstvTransmitStop() } }
+    MicPcmWhileShown(vm, connected, device?.caps?.mic == true)
+    LeaveEffect { vm.sstvTransmitStop() }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
@@ -747,10 +754,7 @@ internal fun OscilloscopeScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val connected = status == "Connected"
     val pcm by vm.micPcm.collectAsState()
 
-    DisposableEffect(connected, device?.caps?.mic) {
-        if (connected && device?.caps?.mic == true) vm.startMicPcm()
-        onDispose { vm.stopMicPcm() }
-    }
+    MicPcmWhileShown(vm, connected, device?.caps?.mic == true)
 
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         AudioHeader("Oscilloscope", "2D time-domain scope and XY vectorscope from the device mic", connected, onConnect)
@@ -775,7 +779,7 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val listening by vm.dtmfListening.collectAsState()
     // The detector/decoder only run while listening (mic on). Mic and speaker are half-duplex, so the
     // mic is off otherwise and the generator / keypad can use the speaker. Always stop on leaving.
-    DisposableEffect(Unit) { onDispose { vm.stopDtmfDecode() } }
+    LeaveEffect { vm.stopDtmfDecode() }
 
     val toneHz = remember(pcm) { if (pcm.size >= 256) Fft.dominantFreq(pcm, AUDIO_FS, 2048) else 0.0 }
     val level = remember(pcm) { Fft.rms(pcm) }

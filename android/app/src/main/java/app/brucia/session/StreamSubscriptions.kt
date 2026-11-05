@@ -31,6 +31,18 @@ class StreamSubscriptions(
     fun activeStreams(): Set<String> = synchronized(lock) { active.toSet() }
     fun cleanupStreams(): Set<String> = synchronized(lock) { cleanup.toSet() }
 
+    /** On, or an ON is waiting for its ACK: a screen recreated by a rotation re-binds instead of starting it again. */
+    fun isOn(stream: String): Boolean = synchronized(lock) { stream in active }
+
+    /**
+     * The device may be running [stream]: on, starting, or a start/stop whose outcome is unknown,
+     * and no OFF is already on its way. Leaving a tool sends its OFF only then, so the device sees
+     * one OFF per started stream (not a second one after an explicit Stop).
+     */
+    fun mayRun(stream: String): Boolean = synchronized(lock) {
+        stream in active || (stream in cleanup && pending[stream]?.on != false)
+    }
+
     fun set(stream: String, on: Boolean, channel: Int? = null, bssid: String? = null): Boolean = synchronized(lock) {
         val s = session()
         val error = when {
@@ -82,6 +94,18 @@ class StreamSubscriptions(
 
     /** Includes timed-out/rejected starts and failed stops, not only optimistic UI state. */
     fun stopAll() = synchronized(lock) { cleanup.toList().forEach { set(it, false) } }
+
+    /**
+     * The link is going down: [detach], then a best-effort OFF through [sendOff] (the closing
+     * transport) for every stream the device may still run. A failing send skips only its stream.
+     */
+    fun disconnect(sendOff: (String) -> Unit): Set<String> {
+        val remaining = detach()
+        remaining.forEach { stream ->
+            try { sendOff(stream) } catch (e: Exception) { onError(stream, e.message ?: "unsubscribe failed") }
+        }
+        return remaining
+    }
 
     /** Abandon local ownership and return streams needing best-effort OFF on the old transport. */
     fun detach(): Set<String> = synchronized(lock) {

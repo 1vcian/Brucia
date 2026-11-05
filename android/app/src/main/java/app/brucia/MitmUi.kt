@@ -1,5 +1,6 @@
 package app.brucia
 
+import app.brucia.ui.LeaveEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -26,7 +27,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -112,7 +112,7 @@ internal fun MitmScreen(vm: app.brucia.wardrive.WardriveViewModel, connected: Bo
     // The proxy accepts connections from LAN clients and may reach LAN servers: local network
     // access (Android 17, target 37) is checked before it starts.
     val lan = rememberLocalNetworkGate()
-    DisposableEffect(Unit) { onDispose { vm.stopArpSpoof(silent = true) } }
+    LeaveEffect { vm.stopArpSpoof(silent = true) }
 
     val running by MitmLog.running.collectAsState()
     val port by MitmLog.port.collectAsState()

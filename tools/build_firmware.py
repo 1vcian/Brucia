@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
 from check_flash_budget import check_environments
@@ -34,6 +35,66 @@ def normalize_manifests(libdeps: Path, environments: list[str]) -> int:
                 manifest.write_text(updated)
                 changed += 1
     return changed
+
+
+QUARANTINE_DIR = 'libdeps-orphans'
+
+
+def installed_packages(env_libdeps: Path) -> list[Path]:
+    """Package directories in one env's libdeps (files such as integrity.dat are kept)."""
+    if not env_libdeps.is_dir():
+        return []
+    return sorted(item for item in env_libdeps.iterdir()
+                  if item.is_dir() and not item.name.startswith('.'))
+
+
+def reachable_packages(listing: str, packages: list[Path]) -> set[Path]:
+    """Installed packages that `pio pkg list -e <env> --only-libraries -v` prints.
+
+    PlatformIO prints a package when it matches a declared lib_deps spec or a
+    dependency declared by such a package (library.json / library.properties /
+    module.json), recursively, and the verbose form ends each line with the
+    package path: "Name @ version (required: <spec>, <path>)".
+    """
+    endings = {}
+    for package in packages:
+        for form in {str(package), os.path.realpath(package)}:
+            endings[f', {form})'] = package
+    found = set()
+    for line in listing.splitlines():
+        line = line.rstrip()
+        for ending, package in endings.items():
+            if line.endswith(ending):
+                found.add(package)
+    return found
+
+
+def quarantine_orphans(project: Path, libdeps: Path, environment: str, pio: str) -> list[str]:
+    """Move packages no declared dependency accounts for out of the LDF's search path."""
+    env_libdeps = libdeps / environment
+    packages = installed_packages(env_libdeps)
+    if not packages:
+        return []
+    listing = subprocess.run([pio, 'pkg', 'list', '-e', environment, '--only-libraries', '-v'],
+                             cwd=project, check=True, capture_output=True, text=True).stdout
+    expected = reachable_packages(listing, packages)
+    if not expected:
+        # An empty match means the listing format changed or resolution failed; never
+        # empty a whole libdeps directory on that basis.
+        raise RuntimeError(f'pio pkg list matched no installed library for {environment}; '
+                           'refusing to quarantine its libdeps')
+    orphans = [package for package in packages if package not in expected]
+    if not orphans:
+        return []
+    target_root = libdeps.parent / QUARANTINE_DIR / environment
+    target_root.mkdir(parents=True, exist_ok=True)
+    for package in orphans:
+        target = target_root / package.name
+        if target.exists():
+            shutil.rmtree(target)
+        package.rename(target)
+        print(f'Quarantined undeclared library {environment}/{package.name} -> {target}', flush=True)
+    return [package.name for package in orphans]
 
 
 def build(project: Path, environments: list[str], pio: str) -> None:
@@ -58,6 +119,11 @@ def build(project: Path, environments: list[str], pio: str) -> None:
     changed += normalize_manifests(libdeps, environments)
     if changed:
         print(f'Normalized {changed} Arduino dependency manifests', flush=True)
+    # After every declared dependency is installed and normalized (so the dependency
+    # graph is complete) and before `pio run`, whose pre: script patch_library_conflicts.py
+    # then patches exactly the libraries that remain.
+    for environment in environments:
+        quarantine_orphans(project, libdeps, environment, pio)
     subprocess.run([pio, 'run', *selection], cwd=project, check=True)
 
 
@@ -71,6 +137,8 @@ def main():
         build(project, args.environment, args.pio)
     except subprocess.CalledProcessError as error:
         raise SystemExit(error.returncode) from error
+    except RuntimeError as error:
+        raise SystemExit(str(error)) from error
     over_budget = check_environments(project, args.environment)
     if over_budget:
         raise SystemExit(f'App partition budget exceeded: {", ".join(over_budget)}')

@@ -180,6 +180,25 @@ No plugin SDK, package manager or runtime isolation has been implemented.
    paths, no manual env, gave identical firmware.bin (9e890aaf...) and elf; 39 absolute
    package paths and the checkout path are gone from bin/elf. Without Git: wall clock as
    before. Limits: same toolchain/libdeps versions required; tested on one machine only.
+   Batch 13 (REPRO): the same commit gave a different Cardputer firmware depending on what was
+   already in `.pio/libdeps/<env>` (main tree 4,320,368 B / 84.52% with M5Unified + M5GFX
+   installed there on 2026-10-30 by an unrecorded command, fresh/CI 4,223,152 B / 82.62%):
+   `bus_HAL.cpp`/`audio.cpp` use `__has_include(<M5Unified.h>)` (upstream Bruce code) and the
+   LDF links any installed match. `tools/build_firmware.py` now, after install/normalize and
+   before `pio run`, asks `pio pkg list -e <env> --only-libraries -v` (PlatformIO's own walk of
+   lib_deps plus each package's declared dependencies over installed packages) and moves every
+   unlisted package dir to `.pio/libdeps-orphans/<env>/`, printing it; refuses if nothing
+   matches. A clone of the main tree's polluted libdeps: M5GFX and M5Unified quarantined,
+   firmware 4,223,152 B, sha256 5b6cada1... byte-identical to a fresh-libdeps build. T-Embed
+   4,313,744 B and core4mb 2,661,552 B built fresh with nothing quarantined; AAC noise bounds
+   pass on all three. Limits: only `.pio/libdeps/<env>` is cleaned (project `lib/`,
+   `lib_extra_dirs` and framework libraries are fixed by the tree and platform pin); plain
+   `pio run` and the upstream `buil_parallel.yml`/`manual_build_sel_env.yml` workflows (libdeps
+   cache keyed on platformio.ini only, with prefix restore-keys) still link whatever is cached;
+   a dependency declared only in a library's manifest for another platform is not listed and
+   would be quarantined if present (harmless: it is not used for this env); the listing format
+   is PlatformIO 6.x (6.2.0 here). Open owner decision: whether the Cardputer should declare
+   M5Unified (see TESTS.md batch 13 REPRO); default kept = upstream (not declared).
 5. **Recovery diagnostics — software complete (batch 4):** `diag` CMD (CAPS
    `features.diag`), on request only, no telemetry: reset reason (stable names, static
    assert against the IDF enum), uptime, heap/PSRAM, saturating uint32 link counters since
@@ -389,13 +408,31 @@ compatibility remain unscored until measured separately.
   flags, secrets (Wi-Fi PSK/passwords, WiGLE token, generated password, Wi-Fi QR payload),
   values re-read from the device (LED/screen brightness, volume), derived/cached values,
   live-stream buffers whose stream is stopped on dispose, MITM selected transaction, RF
-  fingerprint compare target, 3D map WebView. Found, not fixed: tool screens stop device
-  streams in `DisposableEffect` on any dispose, so a rotation also stops Sub-GHz Listen /
-  spectrum / jammer, BLE scan and GATT, SSTV/audio mic, Bug sweep, RF timeline/fingerprint
-  BLE (switch shows off afterwards, consistent but lost); moving these to `LeaveEffect`
-  changes device radio lifecycle and needs a connected device to verify. DeviceScreen
-  screen/LED switches are local `remember` and reset to on after a rotation. Evidence:
-  TESTS.md "Batch 12 (UIFIX)".
+  fingerprint compare target, 3D map WebView. Found in batch 12, fixed in batch 13 (STREAMS,
+  below; software and emulator only): tool screens stopped device streams in
+  `DisposableEffect`, so a rotation stopped them; DeviceScreen screen/LED switches reset to
+  on after a rotation. Evidence: TESTS.md "Batch 12 (UIFIX)".
+  Batch 13 (STREAMS): every stream/radio stop that ran in an `onDispose` (23 hooks in 9
+  files: Sub-GHz raw/spectrum/jammer/capture, BLE scan/GATT/iBeacon, mic.pcm in Audio/SSTV/
+  Oscilloscope plus recording, phone mic, SSTV TX, DTMF, Bug sweep, RF timeline/fingerprint,
+  station/probe/monitor sniffers, channel analyzer, Evil Portal target scan, WIDS, IR
+  jammer, NRF24, LoRa RX, FM, ARP spoof) now runs in `LeaveEffect`. Ownership stays where it
+  already was (`StreamSubscriptions` in `WardriveViewModel`, VM loops); screens keep only
+  re-bindable flags in `rememberRetained` (Bug sweep sweeping/bleStartedHere/peak, timeline
+  and fingerprint bleStartedHere, channel analyzer wasScanning, Evil Portal target list).
+  `LeaveEffect` parks a skipped leave in `ParkedLeaves` (Activity ViewModel) under its saved
+  id; the recreated screen claims it, otherwise `SettleParkedLeaves` (MainActivity root, after
+  two frames) runs it, so a tool left during recreation still stops; `onCleared` settles the
+  rest. Auto-starting screens start only what is not on (`StreamSubscriptions.isOn`,
+  `startMicPcm` no-op while on); leave sends OFF only when `mayRun` (on, starting or
+  unconfirmed, no OFF in flight). New `WardriveViewModel.bleScanning` (BLE Scan switch was a
+  local `remember`); `StreamSubscriptions.disconnect` (detach + best-effort OFF, used by
+  `disconnectLink`). `device/DeviceOutputs`: screen/LED state in the VM (request token,
+  failed reply undone unless superseded), reset to on at disconnect after sending `scr 1` /
+  `led 1` for an output the app turned off. Process death: the app sends nothing; the
+  firmware leaves companion mode after 60 s without frames and stops every stream there.
+  Open: phone + T-Embed checks in TESTS.md "Batch 13 (STREAMS)"; a firmware report of
+  screen/LED state would replace the app-side record.
 - Concurrent update/install and download cancellation: covered by batch 3 (see S01).
 - Root dependencies are pinned; board-specific overrides and the full environment
   matrix still need coverage. Current builds establish only the documented boards.
@@ -488,6 +525,13 @@ compatibility remain unscored until measured separately.
   envs add over CYD on the Bruce side. Threshold decision: LAUNCHER_* stays warn 95 / fail 98;
   it cannot be tightened (fail 97.5 would also fail CYD-3248S035C at 97.74%, and all 17 are
   above 95%, so the warning carries no signal on these envs).
+  Batch 13 (ELECROW): accepted at 99% by the owner, not investigated. Option (b) applied:
+  ENV_THRESHOLDS gains `LAUNCHER_elecrow-*` warn 95 / fail 99 ahead of `LAUNCHER_*` (first
+  match wins), so the 4 elecrow LAUNCHER envs now report WARN (98.54-98.66%, 34,368-37,264 B
+  free; the 99% line is 2,530,344 B, about 8.8 KB above LAUNCHER_elecrow-24B). Every other
+  LAUNCHER_* env keeps fail 98. Options (a) and (c) not pursued; the ~31 KB elecrow-vs-CYD gap
+  stays unexplained. Test: tools/test_flash_budget.py
+  test_elecrow_launcher_envs_fail_at_99_percent_other_launchers_at_98. No firmware rebuilt.
   Review fix: Bruce's `ir tx_raw` has two positional args and SimpleCLI (rennancockles b23d3779)
   splits on unquoted spaces, so a third word is "unknown argument"; IrButton.cliRaw now emits
   one double-quoted samples word (also fixes the pre-existing saved-raw-button replay via
@@ -592,3 +636,6 @@ accumulate across runs; a stale pre-existing file is never reported as this run'
 imports exactly that path, checks the expected per-BSSID basename and verifies size/CRC;
 `complete:false` imports nothing; old firmware keeps the listing diff, labeled. No
 wall-clock capture time is claimed. Needs S05 with live APs.
+- Batch 13 merge note: on the main tree, m5stack-core4mb built 2,660,944 B vs 2,661,552 B from
+  fresh libdeps (608 B) with nothing quarantined, so a library resolved to a different version
+  within its declared range. Exact version pins would close it.

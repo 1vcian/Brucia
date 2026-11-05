@@ -1,5 +1,7 @@
 package app.brucia
 
+import app.brucia.ui.rememberRetained
+import app.brucia.ui.LeaveEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -89,14 +91,15 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var templateIdx by rememberSaveable { mutableIntStateOf(0) }
     var deauth by rememberSaveable { mutableStateOf(false) }
     var channel by rememberSaveable { mutableStateOf("1") }
-    var showTargets by remember { mutableStateOf(false) }
+    // Retained: the target scan keeps running across a rotation, so its list stays open too.
+    var showTargets by rememberRetained { mutableStateOf(false) }
     // Custom captive page authored in-app: index just past the built-ins selects it.
     val customIdx = PORTAL_TEMPLATES.size
     var customHtml by rememberSaveable { mutableStateOf(DEFAULT_CUSTOM_PORTAL) }
     var previewHtml by remember { mutableStateOf(false) }
     var tplName by rememberSaveable { mutableStateOf("") }
-    // Stop a target scan when leaving the screen.
-    DisposableEffect(Unit) { onDispose { if (vm.wardriving.value) vm.setWardriving(false) } }
+    // Stop a target scan when leaving the screen (not on a rotation: LeaveEffect).
+    LeaveEffect { if (vm.wardriving.value) vm.setWardriving(false) }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),

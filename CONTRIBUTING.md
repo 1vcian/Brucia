@@ -126,8 +126,14 @@ elsewhere) and the libraries into `.pio/libdeps`. The build wrapper installs dir
 dependencies first and fixes malformed Arduino NimBLE/PN532-UART dependency
 declarations before recursive resolution, then lets PlatformIO install the
 owner-less registry libraries (for example `ESP8266Audio`) before the build, so
-`patch_library_conflicts.py` patches them on the first build. Use the wrapper for
-a new checkout or after deleting `.pio`; plain `pio run` is fine afterwards.
+`patch_library_conflicts.py` patches them on the first build. Before `pio run` it
+also moves every library in `.pio/libdeps/<env>` that the env's `lib_deps` (or their
+own declared dependencies) do not account for to `.pio/libdeps-orphans/<env>/` and
+prints each one: an undeclared library left over from an older config or a manual
+`pio pkg install` would otherwise be linked by the Library Dependency Finder through
+a `__has_include` and change the firmware (it did for the Cardputer and M5Unified).
+Use the wrapper for a new checkout, after deleting `.pio`, or whenever libraries
+were installed by hand; plain `pio run` does not clean `.pio/libdeps`.
 
 The flashable images are `.pio/build/lilygo-t-embed-cc1101/firmware.factory.bin`
 (merged, used by the web flasher) and `Bruce-lilygo-t-embed-cc1101.bin` in the

@@ -1,5 +1,7 @@
 package app.brucia
 
+import app.brucia.ui.rememberRetained
+import app.brucia.ui.LeaveEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -43,18 +45,20 @@ internal fun RfFingerprintScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
     var name by rememberSaveable { mutableStateOf("") }
     var compareWith by remember { mutableStateOf<RfFingerprint?>(null) }
-    var bleStartedHere by remember { mutableStateOf(false) }
+    var bleStartedHere by rememberRetained { mutableStateOf(false) }
 
-    // Scan Wi-Fi + BLE while this screen is open; stop what we started on leave.
-    DisposableEffect(connected) {
+    // Scan Wi-Fi + BLE while this screen is open; stop what we started on leave. Starts only what is
+    // not already on, so a screen recreated by a rotation re-binds (no second SUB ON); a rotation
+    // is not leaving (LeaveEffect). A disconnect is cleaned up by the ViewModel.
+    LaunchedEffect(connected) {
         if (connected) {
             if (!vm.wardriving.value) vm.setWardriving(true)
-            vm.setBleScan(true); bleStartedHere = true
+            if (!vm.bleScanning.value) { vm.setBleScan(true); bleStartedHere = true }
         }
-        onDispose {
-            if (vm.wardriving.value) vm.setWardriving(false)
-            if (bleStartedHere) { vm.setBleScan(false); bleStartedHere = false }
-        }
+    }
+    LeaveEffect {
+        if (vm.wardriving.value) vm.setWardriving(false)
+        if (bleStartedHere) { vm.setBleScan(false); bleStartedHere = false }
     }
 
     val curBssids = remember(aps) { aps.map { it.bssid }.filter { it.isNotBlank() }.toSet() }

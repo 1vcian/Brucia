@@ -1,5 +1,7 @@
 package app.brucia
 
+import app.brucia.ui.rememberRetained
+import app.brucia.ui.LeaveEffect
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -33,12 +35,11 @@ internal fun ChannelAnalyzerScreen(vm: WardriveViewModel, onConnect: () -> Unit)
     val aps by vm.aps.collectAsState()
     val scanning by vm.wardriving.collectAsState()
 
-    // Start scanning on enter; stop on leave (unless the wardrive was already running).
-    DisposableEffect(Unit) {
-        val wasScanning = vm.wardriving.value
-        if (connected && !wasScanning) vm.setWardriving(true)
-        onDispose { if (!wasScanning && vm.wardriving.value) vm.setWardriving(false) }
-    }
+    // Start scanning on enter; stop on leave (unless the wardrive was already running). Whether it
+    // was running is retained across a rotation, which neither restarts nor stops the scan.
+    val wasScanning = rememberRetained { vm.wardriving.value }
+    LaunchedEffect(Unit) { if (connected && !wasScanning && !vm.wardriving.value) vm.setWardriving(true) }
+    LeaveEffect { if (!wasScanning && vm.wardriving.value) vm.setWardriving(false) }
 
     val band24 = aps.filter { it.channel in 1..14 }
     val counts = remember(band24) { ChannelAdvisor.congestion(band24) }

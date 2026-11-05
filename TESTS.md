@@ -15,6 +15,25 @@ versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 4
 matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
 
+### Batch 13 (REPRO) - builds independent of leftover libraries, software only
+
+`tools/build_firmware.py` quarantines packages in `.pio/libdeps/<env>` that `pio pkg list -e
+<env> --only-libraries -v` does not list (declared lib_deps plus their declared dependencies) to
+`.pio/libdeps-orphans/<env>/` before `pio run`. Evidence: `test_build_firmware.py` 14 tests (8 new,
+fake libdeps tree with M5Unified/M5GFX next to declared and transitive packages); `unittest
+discover` 148 tests and every `tools/test_*.py` pass. Cardputer built from an APFS clone of the main
+tree's libdeps: M5GFX and M5Unified quarantined, app 4,223,152 B / 82.62% (was 4,320,368 B / 84.52%
+with them), static RAM 155,588 B, sha256 5b6cada1... identical to a build from empty libdeps (nothing
+quarantined there). Fresh builds, nothing quarantined: T-Embed CC1101 4,313,744 B / 92.71% (same as
+batch 12), core4mb 2,661,552 B / 67.69%. AAC noise bounds pass on all three. A stale CYD libdeps
+(installed before the git pins) was updated in place by `pio pkg install` and then had no orphans.
+The upstream Bruce 1.16.1 Cardputer release contains no M5Unified strings (its core2 image does), so
+the clean build matches upstream's configuration. Nothing hardware-verified; no device behavior is
+meant to change for a build from clean libdeps.
+
+- [ ] Cardputer flashed from a wrapper build: menu beeps and the speaker test play (NS4168 via
+      ESP8266Audio), and on a Cardputer ADV the keyboard and I2C scan on Grove still work.
+
 ### Hardware run 2026-11-05 - batch 12 merge
 
 T-Embed CC1101 flashed from the Mac with the merged batch 12 firmware (dirty build on 401a94f6,
@@ -23,6 +42,70 @@ serial device claimed for the companion session (caps, provenance, evidence, dia
 200/200 median 3.01 ms p99 4.12 ms, malformed, fs list/read/upload 3072-byte chunk, streams
 clean, heap stable 102,639 B, diag counters match). Script and console-input items below
 still need the app.
+
+### Batch 13 (STREAMS) - device streams and Device switches across rotation, software and emulator only
+
+Every tool hook that stopped a device stream or radio loop in `onDispose` (23 in 9 files)
+now uses `LeaveEffect`: skipped while the Activity is recreated, parked in `ParkedLeaves`,
+claimed back by the recreated screen or run by `SettleParkedLeaves` after two frames when
+the tool did not come back. Auto-starting tools start only what is not on; leaving sends an
+OFF only for a stream that may run. Device screen/LED switches read `DeviceOutputs` in the
+ViewModel. JVM evidence (fake transport, virtual clock, real `StreamSubscriptions` and
+`ParkedLeaves`), `StreamRotationTest` 11, exact SUB frames:
+- Sub-GHz Listen: start, rotate, rotate, Stop -> `subghz.raw on`, `subghz.raw off`; leaving
+  afterwards sends nothing. Start, rotate, leave -> `on`, `off`. Start, rotate with the tool
+  left meanwhile -> `off` sent when the new UI settles. Start, disconnect -> `on`, then the
+  best-effort `off` on the closing link; rotating and leaving later send nothing.
+- BLE scan: start, rotate x2, stop, leave -> `ble.scan on`, `ble.scan off`; start, rotate,
+  leave or disconnect -> `on`, `off`.
+- Audio mic (opened tool starts mic.pcm): open, rotate x2 -> one `mic.pcm on`; leave -> one
+  `off`; open, rotate, disconnect, rotate, leave -> `on`, `off`.
+- RF timeline: open, rotate x2 -> `wifi.ap on`, `ble.scan on` once; leave -> both `off`.
+- Stop all after a rotation: one `off` per stream, nothing more on leave; a start whose ACK
+  never came is still stopped on leave.
+Also `StreamLeaveHooksTest` 3 (no `onDispose` in production code calls a stream stop; the
+stream tools stop in `LeaveEffect`), `ParkedLeavesTest` 3, `DeviceOutputsTest` 3,
+`StreamSubscriptionsTest` +2 (`disconnect` with a failing send, `mayRun`). Mutations:
+Sub-GHz screen reverted to `DisposableEffect(Unit) { onDispose { ... } }` -> 2 of 3
+`StreamLeaveHooksTest` fail; `ParkedLeaves.leave` ignoring the configuration change (the
+old dispose behavior for every tool) -> 6 of 11 `StreamRotationTest` fail (for example
+`[subghz.raw on, subghz.raw off]` after two rotations, mic `on, off, on, off, on`);
+`settle` not running parked leaves -> the left-during-rotation tests fail. Totals:
+`:app:testDebugUnitTest` 870/870 (126 suites), Kotlin warnings 0, `lintDebug` 0 errors /
+3 warnings (OldTargetApi, Gradle 9.8.2, NewerVersionAvailable; none new),
+`verifyPaparazziDebug` pass, `assembleDebug` pass, `tools/test_android_logic.py` 199,
+`connectedDebugAndroidTest` 12/12 on the API 36.1 emulator. Emulator, no device (`wm
+user-rotation`, MainActivity destroyed and recreated each time per the event log, same
+process): Sub-GHz and BLE tools kept across portrait -> landscape -> portrait with Listen /
+Scan off and disabled (offline, consistent); Back sent together with a rotation lands on
+the dashboard; Device screen switches show on (offline default) across two rotations; no
+crash or exception in logcat. Process death: the app cannot send anything; the firmware
+leaves companion mode after 60 s without frames and stops all streams (companion.cpp),
+not tested here. Not covered: anything with a connected device.
+
+Phone + T-Embed CC1101 (connected over USB, companion mode):
+- [ ] Sub-GHz: Listen on, note the Cmds log; rotate to landscape and back (two rotations):
+      Listen stays on, signals keep arriving, the Cmds log shows exactly one `SUB
+      subghz.raw on` and no `off`; tap Listen off: one `SUB subghz.raw off`, the device
+      status screen shows the Sub-GHz stream stopped. Then leave the tool: no further SUB.
+- [ ] BLE: Scan on, rotate once: Scan still on, the list keeps updating, one `SUB ble.scan
+      on` in Cmds; leave the tool: exactly one `SUB ble.scan off`.
+- [ ] Leave mid-rotation: Sub-GHz Listen on, then press Back and rotate the phone at the
+      same moment (or rotate, then Back as soon as the dashboard redraws): the device stops
+      Sub-GHz (one `SUB subghz.raw off` in Cmds, device status screen idle) within a
+      second; reopening Sub-GHz shows Listen off.
+- [ ] Audio dashboard open (mic level moving), rotate twice: the level keeps moving
+      without a gap longer than a rotation, one `SUB mic.pcm on`; leave: one `off`.
+- [ ] RF timeline open, rotate: Wi-Fi and BLE counts keep rising, no second `on`; leave:
+      `wifi.ap off` and `ble.scan off` once each.
+- [ ] Device screen: turn the device screen and LED off (device dark), rotate twice: both
+      switches still show off and the device stays dark; turn the screen on: lights up.
+      Turn both off, tap Disconnect, reconnect within 15 s: the device is lit again and
+      the switches show on.
+- [ ] Sub-GHz Listen on, tap Disconnect: the device status screen shows the stream stopped;
+      reconnect with the tool still open and rotate: Listen shows off, no SUB sent. Listen
+      on, then force-stop the app: the device leaves companion mode within about 60 s with
+      everything stopped.
 
 ### Batch 12 (DEPS) - library updates, software only
 
@@ -77,7 +160,7 @@ PCAP open across a rotation (needs a file on the emulator), a real phone or tabl
 - [ ] Phone with device: Files -> open a text file, edit, rotate: edits kept; Save to device
       writes the edited text. Remote: Start, rotate: Stop still enabled and mirror running.
 - [ ] Phone: SSTV receive with a transmission in progress, rotate: images decoded so far
-      kept (the mic stream restarts; a skewed line around the rotation is possible).
+      kept (since batch 13 the mic stream is not restarted by the rotation).
 
 ### Batch 12 (FWJS) - companion serial input, LAUNCHER flash budget; software only
 

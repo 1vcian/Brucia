@@ -74,6 +74,7 @@ import app.brucia.audio.SessionPcmLink
 import app.brucia.device.ClockService
 import app.brucia.device.DiagnosticsService
 import app.brucia.device.DeviceAppearanceService
+import app.brucia.device.DeviceOutputs
 import app.brucia.device.EspNowService
 import app.brucia.device.ScriptService
 import app.brucia.ibutton.IButtonService
@@ -339,6 +340,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _wardriving = MutableStateFlow(false)
     val wardriving: StateFlow<Boolean> = _wardriving.asStateFlow()
+
+    /** ble.scan is on (or its ON awaits the ACK); follows the real SUB outcome like [wardriving]. */
+    private val _bleScanning = MutableStateFlow(false)
+    val bleScanning: StateFlow<Boolean> = _bleScanning.asStateFlow()
 
     private val _subghz = MutableStateFlow<List<DecodedSignal>>(emptyList())
     val subghz: StateFlow<List<DecodedSignal>> = _subghz.asStateFlow()
@@ -843,8 +848,22 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         _console.value = (_console.value + "> $cmd").takeLast(500)
     }
 
-    fun setDeviceScreen(on: Boolean) = dispatchCmd("scr ${if (on) 1 else 0}")
-    fun setDeviceLed(on: Boolean) = dispatchCmd("led ${if (on) 1 else 0}")
+    // Device screen/LED power (lite mode): kept here so the Device screen's switches show the
+    // device's state after a rotation instead of resetting to on.
+    private val outputs = DeviceOutputs()
+    val deviceOutputs: StateFlow<DeviceOutputs.State> = outputs.state
+
+    fun setDeviceScreen(on: Boolean) = setDeviceOutput(DeviceOutputs.Output.SCREEN, on)
+    fun setDeviceLed(on: Boolean) = setDeviceOutput(DeviceOutputs.Output.LED, on)
+
+    private fun setDeviceOutput(output: DeviceOutputs.Output, on: Boolean) {
+        val captured = session ?: return
+        val token = outputs.request(output, on)
+        val runner = CommandRunner { command, timeout ->
+            withContext(Dispatchers.IO) { sendAwait(command, timeout, captured) }
+        }
+        callbackCommands.run(runner, DeviceOutputs.command(output, on), 650_000) { ok, _ -> outputs.finish(output, token, on, ok) }
+    }
     /** Send one command and suspend until its ACK (or a timeout). Used by the spam burst loops. */
     // Default ACK wait must exceed the burst duration: bounded ops (spam/deauth/jammer) only ACK
     // AFTER running for SPAM_BURST_SECS, so a shorter timeout would always report "no response".
@@ -1841,6 +1860,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private fun updateStreamState(stream: String, on: Boolean) {
         when (stream) {
             "wifi.ap" -> _wardriving.value = on
+            "ble.scan" -> _bleScanning.value = on
             "wifi.sta" -> _sniffing.value = on
             "wifi.probe" -> _probing.value = on
             "wifi.monitor" -> _monitoring.value = on
@@ -1865,6 +1885,12 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Shared SUB owner covers individual and composite screens. */
     private fun setStream(stream: String, on: Boolean, channel: Int? = null, bssid: String? = null): Boolean =
         subscriptions.set(stream, on, channel, bssid)
+
+    /**
+     * The device may still be running [stream] (on, starting, or unconfirmed). Tool screens check it
+     * when they are left, so leaving sends one OFF for a started stream and none for a stopped one.
+     */
+    fun streamMayRun(stream: String): Boolean = subscriptions.mayRun(stream)
 
     // --- "Monitor my network" (raw 802.11 frames via the "wifi.monitor" stream) ---
     /**
@@ -2811,11 +2837,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         // Stop any running short-burst loops first so nothing keeps looping / sending after the link drops.
         stopAllBurstLoops(silent = true)
         // Include streams with missing ACKs: a timeout does not prove hardware stopped.
-        val cleanupStreams = subscriptions.detach()
-        val c = client
-        if (c != null && transport?.isOpen == true) {
-            cleanupStreams.forEach { stream ->
-                try { c.sub(stream, false) } catch (e: Exception) { BruciaLog.d("VM", "stream unsubscribe: ${e.message}") }
+        val c = client?.takeIf { transport?.isOpen == true }
+        subscriptions.disconnect { stream ->
+            try { c?.sub(stream, false) } catch (e: Exception) { BruciaLog.d("VM", "stream unsubscribe: ${e.message}") }
+        }
+        // Screen/LED the app turned off: restore them now so a quick reconnect does not find the
+        // device dark while the switches show on (the device itself waits 15 s of silence).
+        val restoreOutputs = outputs.disconnect()
+        if (c != null) {
+            restoreOutputs.forEach { cmd ->
+                try { c.cmd(cmd) } catch (e: Exception) { BruciaLog.d("VM", "restore $cmd: ${e.message}") }
             }
         }
         fileReader.disconnect()
@@ -3577,10 +3608,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val _micPcmStatus = MutableStateFlow("")
     val micPcmStatus: StateFlow<String> = _micPcmStatus.asStateFlow()
 
-    /** Subscribe the device-mic PCM stream (caps.mic). Safe to call repeatedly. */
+    /**
+     * Subscribe the device-mic PCM stream (caps.mic). Safe to call repeatedly: while mic.pcm is on
+     * or starting it does nothing, so an Audio screen recreated by a rotation sends no second ON.
+     */
     fun startMicPcm() {
         if (client == null) return
         if (_device.value?.caps?.mic != true) return
+        if (subscriptions.isOn("mic.pcm")) return
         // Spam loops and the live mic.pcm stream contend for the single-threaded companion loop on
         // current firmware (spam running => mic.pcm never serviced => audio tools show nothing), so
         // opening an audio tool auto-stops any running spam.

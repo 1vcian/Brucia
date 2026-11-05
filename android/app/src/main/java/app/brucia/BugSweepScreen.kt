@@ -1,5 +1,7 @@
 package app.brucia
 
+import app.brucia.ui.rememberRetained
+import app.brucia.ui.LeaveEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -38,7 +40,9 @@ internal fun BugSweepScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var useWifi by rememberSaveable { mutableStateOf(true) }
     var useBle by rememberSaveable { mutableStateOf(true) }
     var useSub by rememberSaveable { mutableStateOf(true) }
-    var sweeping by remember { mutableStateOf(false) }
+    // Retained (not remember): the sweep's device streams keep running across a rotation, so the
+    // recreated screen must still know it is sweeping, what it started, and its peak hold.
+    var sweeping by rememberRetained { mutableStateOf(false) }
 
     // Latest strength per band (dBm; null = nothing seen) and who the strongest emitter is.
     val wifiTop = if (useWifi) aps.maxByOrNull { it.rssi } else null
@@ -55,9 +59,9 @@ internal fun BugSweepScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val strongest = bands.filter { it.rssi != null }.maxByOrNull { it.rssi!! }
 
     // Peak-hold and hotter/colder direction, sampled so the arrow is readable.
-    var peakHold by remember { mutableStateOf<Int?>(null) }
-    var prevSample by remember { mutableStateOf<Int?>(null) }
-    var trend by remember { mutableIntStateOf(0) } // -1 colder, 0 flat, +1 hotter
+    var peakHold by rememberRetained { mutableStateOf<Int?>(null) }
+    var prevSample by rememberRetained { mutableStateOf<Int?>(null) }
+    var trend by rememberRetained { mutableIntStateOf(0) } // -1 colder, 0 flat, +1 hotter
     // Keep a live handle to the latest overall RSSI so the long-running sampling loop sees updates
     // as the aps/ble/spectrum flows emit (otherwise it would read the value captured at launch).
     val overallLive = rememberUpdatedState(overall)
@@ -76,7 +80,7 @@ internal fun BugSweepScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     }
 
     // Track whether THIS screen turned BLE on, so we don't stop a scan started elsewhere.
-    var bleStartedHere by remember { mutableStateOf(false) }
+    var bleStartedHere by rememberRetained { mutableStateOf(false) }
     // Start/stop the three ESP streams with the sweep.
     fun startSweep() {
         if (!connected) return
@@ -92,7 +96,7 @@ internal fun BugSweepScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         if (bleStartedHere) { vm.setBleScan(false); bleStartedHere = false }
         if (vm.wardriving.value) vm.setWardriving(false)
     }
-    DisposableEffect(Unit) { onDispose { if (sweeping) stopSweep() } }
+    LeaveEffect { if (sweeping) stopSweep() }
 
     // Map an RSSI (~ -95 far .. -30 near) to 0..1 for the meter.
     fun pct(rssi: Int?): Float = if (rssi == null) 0f else ((rssi + 95) / 65f).coerceIn(0f, 1f)

@@ -35,6 +35,10 @@ ENV_THRESHOLDS = {
     # Batch 12 measured all 17 LAUNCHER_* envs (table in the maintenance backlog): 13 at
     # 96.69-97.74%, the 4 elecrow envs at 98.54-98.66% (FAIL). Not tightened: the fail line
     # would fail CYD-3248S035C (97.74%) too, and every env is above 95%.
+    # Elecrow (must precede LAUNCHER_*, first match wins): the 4 elecrow LAUNCHER envs measured
+    # 98.54-98.66% in batch 12 (largest 2,521,536 B, 34,368 B free); the owner chose to accept
+    # that at a 99% fail line instead of investigating. Not investigated; see the backlog item.
+    'LAUNCHER_elecrow-*': (95.0, 99.0),
     'LAUNCHER_*': (95.0, 98.0),
 }
 

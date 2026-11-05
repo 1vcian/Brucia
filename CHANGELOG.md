@@ -7,6 +7,12 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Firmware builds no longer depend on leftover libraries: before building, `tools/build_firmware.py`
+  moves any library in `.pio/libdeps/<env>` that the board's declared dependencies do not
+  account for to `.pio/libdeps-orphans/<env>/` and prints it. A local Cardputer build had
+  linked an undeclared M5Unified/M5GFX left in that directory (about 97 KB larger, and UI
+  beeps routed to M5Unified's speaker, which is never started on the Cardputer); it now gives
+  the same firmware as a clean or CI build, byte for byte. T-Embed and core4mb unchanged.
 - Android build moved to AGP 9.3.3 (built-in Kotlin, still Kotlin 2.4.21) and Gradle 9.7.1,
   compiling against Android 17 (SDK 37) with AndroidX core 1.19.1, activity 1.13.0,
   lifecycle 2.11.0 and Compose BOM 2026.09.00 (Compose UI 1.12.1; Material3 stays 1.4.0).
@@ -74,6 +80,25 @@ that offloads computation to the phone. Format loosely follows
   still running after a rotation. Leaving a tool still stops and clears it as before.
   Passwords and keys typed into forms are deliberately not kept. Checked with JVM tests and
   on the API 36 emulator; not yet on a phone.
+- Device streams keep running across rotation, resizing and folding. Before, turning the
+  phone stopped Sub-GHz Listen, the spectrum and the jammer, the BLE scan, GATT exploration
+  and iBeacon, the device mic in the Audio, SSTV, Oscilloscope and Tone tools (and a
+  recording in progress), Bug sweep, RF timeline and RF fingerprint scans, the station,
+  probe and Wi-Fi monitor sniffers, the channel analyzer, the Evil Portal target scan, WIDS,
+  the IR and NRF24 jammers and scans, LoRa receive, FM and ARP spoofing; the switch then
+  showed off. Now the device gets no extra stream start or stop from a rotation, the
+  screen shows the running stream and Stop works; leaving the tool stops it as before (also
+  when the tool is left while the screen is turning), and so do Stop all and disconnecting.
+  Leaving a tool no longer sends a stop for a stream that was not running. The BLE Scan
+  switch now follows the device's answer like Sub-GHz Listen (it turns off if the device
+  refuses the scan).
+- Device screen: the device screen and LED switches no longer jump back to on after a
+  rotation; they show what was last set on the device and go back if the device refuses.
+  Disconnecting from the app turns a screen or LED that the app switched off back on at once
+  (the device itself does it after 15 s without the app), so reconnecting quickly no
+  longer finds the device dark with the switches showing on.
+  Both checked with JVM tests and on the API 36 emulator without a device; not yet on a
+  phone with the T-Embed.
 
 ## [0.1.5] - 2026-11-05
 
@@ -99,8 +124,9 @@ that offloads computation to the phone. Format loosely follows
   (`tools/test_companion_serial_input.py`); not yet checked on hardware.
 - All 17 `LAUNCHER_*` firmware builds measured against their 2,496 KiB app slot: 13 fit
   (96.7-97.7%); the four Elecrow CrowPanel LAUNCHER builds compile but are over the 98% budget
-  (98.5-98.7%, 34-37 KB still free) and fail the build's size check. No change to them yet;
-  the options are in the maintenance backlog.
+  (98.5-98.7%, 34-37 KB still free). Their size check now fails above 99% instead of 98%
+  (accepted as is, not reduced), so they report a warning instead of failing the build; all
+  other `LAUNCHER_*` builds still fail above 98%.
 - Firmware builds from a clean checkout now apply the bundled library fixes on the
   first build (the AAC decoder bounds fixes were previously skipped until a second
   build); the build stops if an expected library fix no longer applies.

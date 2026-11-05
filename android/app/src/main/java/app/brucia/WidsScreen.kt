@@ -1,5 +1,6 @@
 package app.brucia
 
+import app.brucia.ui.LeaveEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -45,8 +46,8 @@ internal fun WidsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
     val alerting = active && widsStatus.startsWith("ALERT")
 
-    // Stop the monitor when leaving the screen.
-    DisposableEffect(Unit) { onDispose { if (vm.widsActive.value) vm.stopWids() } }
+    // Stop the monitor when leaving the screen (not on a rotation: LeaveEffect).
+    LeaveEffect { if (vm.widsActive.value) vm.stopWids() }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),

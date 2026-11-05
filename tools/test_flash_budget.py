@@ -142,6 +142,19 @@ class ThresholdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             thresholds_for('other', table, warn=99)
 
+    def test_elecrow_launcher_envs_fail_at_99_percent_other_launchers_at_98(self):
+        # Batch 12: elecrow LAUNCHER envs at 98.54-98.66%, accepted by the owner at 99%.
+        slot = 2555904
+        for env in ('LAUNCHER_elecrow-24B', 'LAUNCHER_elecrow-28B', 'LAUNCHER_elecrow-35B',
+                    'LAUNCHER_elecrow-35Bv2_2'):
+            self.assertEqual((95.0, 99.0), thresholds_for(env), env)
+        warn, fail = thresholds_for('LAUNCHER_elecrow-24B')
+        self.assertEqual('warn', classify(2521536, slot, warn, fail))
+        self.assertEqual('fail', classify(2530346, slot, warn, fail))
+        self.assertEqual((95.0, 98.0), thresholds_for('LAUNCHER_CYD-2432S028'))
+        self.assertEqual('fail', classify(2521536, slot, *thresholds_for('LAUNCHER_CYD-2432S028')))
+        self.assertEqual((92.0, 98.0), thresholds_for('elecrow-24B'))
+
 
 class ConfigResolutionTest(unittest.TestCase):
     def setUp(self):

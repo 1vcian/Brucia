@@ -18,7 +18,7 @@ class ThemeContrastTest {
     private fun ratio(fg: Color, bg: Color): Double {
         val a = fg.luminance() + 0.05
         val b = bg.luminance() + 0.05
-        return maxOf(a, b).toDouble() / minOf(a, b).toDouble()
+        return maxOf(a, b) / minOf(a, b)
     }
 
     private val accents = listOf(null, 0xF81F /* magenta */, 0x07E0 /* green */, 0x001F /* blue */, 0xFFFF /* white */)
