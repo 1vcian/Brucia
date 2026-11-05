@@ -84,6 +84,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -227,7 +228,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Draw edge-to-edge on every API level (Android 15+ enforces it for targetSdk 35). The UI is
+        // Draw edge-to-edge on every API level (Android 15+ enforces it for targetSdk 35+, and
+        // targetSdk 36 removes the windowOptOutEdgeToEdgeEnforcement opt-out). The UI is
         // always dark, so both bars keep light icons over a transparent background; AppRoot pads its
         // content by the system bar, cutout and IME insets.
         enableEdgeToEdge(
@@ -1486,8 +1488,10 @@ private fun capModuleName(cap: String?): String = when (cap) {
 @Composable
 private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    var tab by remember { mutableIntStateOf(HOME) }     // HOME = dashboard, else tool id
-    var category by remember { mutableIntStateOf(-1) }  // -1 = all, 0..4 = one category
+    // Saveable so a rotation, fold/unfold or window resize (Activity recreation; Android 16 ignores
+    // orientation/resizability limits on large screens) keeps the open tool instead of going home.
+    var tab by rememberSaveable { mutableIntStateOf(HOME) }     // HOME = dashboard, else tool id
+    var category by rememberSaveable { mutableIntStateOf(-1) }  // -1 = all, 0..4 = one category
     val context = LocalContext.current
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
@@ -2394,6 +2398,11 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     if (ed != null) {
         FileEditorScreen(vm = vm, state = ed, currentPath = path, onClose = { editor = null; refresh() })
         return
+    }
+    // System Back in a subfolder goes up one level (same as the Up button); at "/" it falls through
+    // to AppRoot's handler and returns to the dashboard. Registered after AppRoot's, so it wins.
+    BackHandler(enabled = path != "/") {
+        path = path.trimEnd('/').substringBeforeLast('/').ifEmpty { "/" }
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {

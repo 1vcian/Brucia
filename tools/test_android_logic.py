@@ -14,7 +14,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = [
-    # Keep in step with the Kotlin Gradle plugin in android/build.gradle.kts; the compiler's
+    # Keep in step with the Kotlin Gradle plugin in android/build.gradle.kts (AGP built-in
+    # Kotlin: the org.jetbrains.kotlin.plugin.compose version selects it); the compiler's
     # own runtime dependencies (kotlin-reflect, coroutines) follow its published POM.
     ("org.jetbrains.kotlin", "kotlin-compiler-embeddable", "2.4.21"),
     ("org.jetbrains.kotlin", "kotlin-stdlib", "2.4.21"),

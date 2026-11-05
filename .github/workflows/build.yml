@@ -43,12 +43,13 @@ jobs:
   android:
     runs-on: ubuntu-24.04
     env:
-      # AGP 8.13.2 default build-tools; compileSdk/targetSdk 35 (android/app/build.gradle.kts).
-      ANDROID_BUILD_TOOLS: '35.0.0'
+      # AGP 9.3.3 default build-tools; compileSdk 37, targetSdk 36 (android/app/build.gradle.kts).
+      ANDROID_BUILD_TOOLS: '36.0.0'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      # JDK 21 LTS: supported by Gradle 9.2.1, AGP 8.13.2 and Kotlin 2.4.21
-      # (app bytecode targets 17). Local builds with JDK 23 are also used.
+      # JDK 21 LTS: the minimum for Paparazzi 2.0 (screenshot tests in testDebugUnitTest);
+      # Gradle 9.7.1, AGP 9.3.3 and Kotlin 2.4.21 need 17+ (app bytecode targets 17).
+      # Local builds with JDK 23 are also used.
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
@@ -56,7 +57,7 @@ jobs:
       # Explicit SDK setup instead of relying on whatever the runner image ships.
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
-          packages: platform-tools platforms;android-35 build-tools;${{ env.ANDROID_BUILD_TOOLS }}
+          packages: platform-tools platforms;android-37.0 build-tools;${{ env.ANDROID_BUILD_TOOLS }}
       - name: Unit tests (offload logic)
         working-directory: android
         run: ./gradlew :app:testDebugUnitTest --no-daemon

@@ -48,7 +48,7 @@ See [[Building]] for the full toolchain setup.
   cd android && ./gradlew :app:assembleDebug
   ```
 
-  Requires JDK 17-25 (per Gradle/AGP; verified with 23 locally and 21 in CI) and Android SDK 35.
+  Requires JDK 21-25 (Paparazzi 2.0 needs 21+; verified with 23 locally and 21 in CI) and Android SDK platform 37.
   See [[Building]].
 
 ## 3. Connect

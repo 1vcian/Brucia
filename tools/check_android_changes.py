@@ -6,6 +6,7 @@ not regenerate Room/KSP output, run lint, package resources or build an APK.
 """
 import os
 import argparse
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -22,16 +23,20 @@ def main():
     modules = cache / "modules-2/files-2.1"
     compiler = [str(next((modules / g / a / v).glob(f"*/{a}-{v}.jar"))) for g, a, v in ARTIFACTS]
     build = ROOT / "android/app/build"
-    original = build / "tmp/kotlin-classes" / args.variant
+    # AGP 9 built-in Kotlin output (AGP 8 used build/tmp/kotlin-classes/<variant>).
+    original = build / "intermediates/built_in_kotlinc" / args.variant / f"compile{args.variant.capitalize()}Kotlin/classes"
     sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
     if not sdk:
         props = ROOT / "android/local.properties"
         if props.exists():
             sdk = next((line.split("=", 1)[1] for line in props.read_text().splitlines() if line.startswith("sdk.dir=")), None)
     sdk = Path(sdk) if sdk else Path.home() / "Library/Android/sdk"
-    android_jar = sdk / "platforms/android-34/android.jar"
-    if not original.is_dir() or not android_jar.exists():
-        raise SystemExit(f"A previous {args.variant} build and Android SDK 34 are required")
+    # Type-check against the same platform as the app (compileSdk in app/build.gradle.kts);
+    # newer sdkmanager platforms use an android-<api>.<minor> directory.
+    compile_sdk = re.search(r"^\s*compileSdk\s*=\s*(\d+)", (ROOT / "android/app/build.gradle.kts").read_text(), re.M).group(1)
+    android_jar = next((p for p in (sdk / f"platforms/android-{compile_sdk}.0/android.jar", sdk / f"platforms/android-{compile_sdk}/android.jar") if p.exists()), None)
+    if not original.is_dir() or android_jar is None:
+        raise SystemExit(f"A previous {args.variant} build and Android SDK platform {compile_sdk} are required")
     classpath = [original, build / f"intermediates/javac/{args.variant}/compile{args.variant.capitalize()}JavaWithJavac/classes", android_jar]
     classpath += list(cache.glob("*/transforms/**/classes.jar"))
     classpath += [p for p in modules.rglob("*.jar") if not p.name.endswith(("-sources.jar", "-javadoc.jar"))]

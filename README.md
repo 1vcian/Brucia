@@ -238,7 +238,7 @@ the [supported list](ROADMAP.md) works; this is just the one Brucia is verified 
 
 **2. Install the app** - download the APK from
 [Releases](https://github.com/1vcian/BruciaDev/releases), or build it:
-`cd android && ./gradlew :app:assembleDebug` (JDK 17-23 and Android SDK 35; see
+`cd android && ./gradlew :app:assembleDebug` (JDK 21-25 and Android SDK platform 37; see
 [CONTRIBUTING.md](CONTRIBUTING.md#build--test)).
 
 **3. Connect** - plug the device into the phone and open the app. The device switches into

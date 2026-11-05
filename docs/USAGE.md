@@ -17,7 +17,7 @@ Pick one:
 ## 2. Install the app
 
 Download the APK from the repo Releases and install it (allow unknown sources), or
-build it: `cd android && ./gradlew :app:assembleDebug` (JDK 17-23, Android SDK 35; see
+build it: `cd android && ./gradlew :app:assembleDebug` (JDK 21-25, Android SDK platform 37; see
 [CONTRIBUTING.md](../CONTRIBUTING.md#build--test)).
 
 ## 3. Connect

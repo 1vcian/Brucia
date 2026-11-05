@@ -94,7 +94,7 @@ class ConnectionServiceInstrumentedTest {
 
         ConnectionService.stop(ctx, companion)
         waitUntil("service stopped") { DeviceState.serviceRecord().isEmpty() }
-        assertNull("notification removed", notification())
+        awaitNotificationRemoved()
         assertFalse("wake lock released", DeviceState.wakeLockHeld(WAKE_LOCK))
         assertNull(ConnectionService.live)
     }
@@ -143,7 +143,7 @@ class ConnectionServiceInstrumentedTest {
         val svc = ConnectionService.live!!
         assertEquals(Service.START_NOT_STICKY, onMain { svc.onStartCommand(null, 0, lastStartId) })
         waitUntil("service stopped") { DeviceState.serviceRecord().isEmpty() }
-        assertNull(notification())
+        awaitNotificationRemoved()
         assertFalse(DeviceState.wakeLockHeld(WAKE_LOCK))
     }
 
@@ -180,12 +180,23 @@ class ConnectionServiceInstrumentedTest {
         assertEquals("Brucia - Flashing retry", title())
         ConnectionService.stop(ctx, ConnectionServiceCommand.flashOwner(6))
         waitUntil("service stopped") { DeviceState.serviceRecord().isEmpty() }
-        assertNull(notification())
+        awaitNotificationRemoved()
         assertFalse(DeviceState.wakeLockHeld(WAKE_LOCK))
     }
 
     private fun notification(): Notification? =
         nm.activeNotifications.firstOrNull { it.id == NOTIF_ID && it.packageName == ctx.packageName }?.notification
+
+    /**
+     * The stopped service's notification must disappear. Bounded poll, not a single read: the
+     * service calls stopForeground(STOP_FOREGROUND_REMOVE) before stopSelf, but system_server
+     * drops the service record synchronously while NotificationManagerService cancels the
+     * notification later on its own handler, so right after the record is gone the notification
+     * can still be listed for a moment. A notification left behind (e.g. STOP_FOREGROUND_DETACH)
+     * never goes away and fails here after the deadline.
+     */
+    private fun awaitNotificationRemoved() =
+        waitUntil("notification removed", detail = { "still listed: ${notification()}" }) { notification() == null }
 
     private fun title(): String? = notification()?.extras?.getString(Notification.EXTRA_TITLE)
     private fun text(): String? = notification()?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()

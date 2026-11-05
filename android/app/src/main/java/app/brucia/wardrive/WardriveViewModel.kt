@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Base64
 import android.location.Location
 import android.os.Looper
+import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.brucia.data.ApEntity
@@ -480,7 +481,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             _wigleStatus.value = WigleUploadStatus.Error("No wardrive data to upload")
             return
         }
-        wiglePrefs.edit().putString("api_name", name).putString("api_token", token).apply()
+        wiglePrefs.edit { putString("api_name", name); putString("api_token", token) }
         _wigleStatus.value = WigleUploadStatus.Uploading
         viewModelScope.launch(Dispatchers.IO) {
             val csv = WigleCsv.build(observations).toByteArray(Charsets.UTF_8)
@@ -1418,7 +1419,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 put("command", b.command); put("raw", b.raw); put("frequency", b.frequency); put("data", b.data)
             })
         }
-        remotePrefs.edit().putString("keys", arr.toString()).apply()
+        remotePrefs.edit { putString("keys", arr.toString()) }
     }
 
     /** Capture one IR signal (ir_rx) and add it to the custom remote under [label]. */
@@ -1467,7 +1468,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         _customSongs.value.forEach { s ->
             arr.put(org.json.JSONObject().apply { put("name", s.name); put("rtttl", s.rtttl) })
         }
-        songPrefs.edit().putString("songs", arr.toString()).apply()
+        songPrefs.edit { putString("songs", arr.toString()) }
     }
 
     /** Save a composed melody (RTTTL) under [name]; survives app restarts. */
@@ -1506,7 +1507,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun saveMacros() {
-        macroPrefs.edit().putString("macros", app.brucia.automation.Macro.listToJson(_macros.value)).apply()
+        macroPrefs.edit { putString("macros", app.brucia.automation.Macro.listToJson(_macros.value)) }
     }
 
     /** Save (or replace by name) a macro. */
@@ -1547,7 +1548,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private fun saveSavedPortals() {
         val arr = org.json.JSONArray()
         _savedPortals.value.forEach { p -> arr.put(org.json.JSONObject().apply { put("name", p.name); put("html", p.html) }) }
-        portalPrefs.edit().putString("portals", arr.toString()).apply()
+        portalPrefs.edit { putString("portals", arr.toString()) }
     }
 
     /** Save (replace by name) a custom captive-portal template. */
@@ -1594,7 +1595,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 put("bssids", org.json.JSONArray(fp.bssids)); put("bleMacs", org.json.JSONArray(fp.bleMacs))
             })
         }
-        fpPrefs.edit().putString("fps", arr.toString()).apply()
+        fpPrefs.edit { putString("fps", arr.toString()) }
     }
 
     /** Snapshot the currently-seen Wi-Fi BSSIDs + BLE MACs as a named place-fingerprint. */
@@ -1655,7 +1656,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 put("firstSeen", s.firstSeen); put("lastSeen", s.lastSeen); put("count", s.count)
             })
         }
-        timelinePrefs.edit().putString("sightings", arr.toString()).apply()
+        timelinePrefs.edit { putString("sightings", arr.toString()) }
     }
 
     private fun mergeSighting(key: String, type: String, label: String, now: Long) {
@@ -1728,7 +1729,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 put("lat", g.lat); put("lon", g.lon); put("at", g.at)
             })
         }
-        geoPrefs.edit().putString("geo", arr.toString()).apply()
+        geoPrefs.edit { putString("geo", arr.toString()) }
     }
 
     /** Pin a saved signal to the current GPS location. Fails if no GPS fix yet. */

@@ -41,10 +41,10 @@ Notes:
 - Firmware additions such as deauth, battery reporting and lite mode require flashing
   the latest build.
 
-## Android app (JDK 17-25)
+## Android app (JDK 21-25)
 
-JDK 17 to 25 is required (per Gradle 9.2.1/AGP 8.13.2; verified with 23 locally and 21 in CI), plus the
-Android SDK with `platforms;android-35` and `build-tools;35.0.0`. Set `ANDROID_HOME`
+JDK 21 to 25 is required (Paparazzi 2.0 needs 21+; Gradle 9.7.1/AGP 9.3.3 need 17+; verified with 23
+locally and 21 in CI), plus the Android SDK with `platforms;android-37.0` and `build-tools;36.0.0`. Set `ANDROID_HOME`
 (or `sdk.dir` in `android/local.properties`), otherwise Gradle stops with
 "SDK location not found".
 

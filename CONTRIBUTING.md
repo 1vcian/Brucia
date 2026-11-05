@@ -30,8 +30,8 @@ written for bash/zsh on macOS and Linux.
 | Tool | Version | Needed for |
 |------|---------|------------|
 | Git | any | clone; PlatformIO fetches Git-pinned libraries |
-| JDK | 17 to 25 per Gradle 9.2.1/AGP 8.13.2 requirements; verified with 23 locally and 21 (Temurin) in CI | Android |
-| Android SDK | `platform-tools`, `platforms;android-35`, `build-tools;35.0.0` | Android |
+| JDK | 21 to 25 (Paparazzi 2.0 requires 21+; Gradle 9.7.1/AGP 9.3.3 require 17+); verified with 23 locally and 21 (Temurin) in CI | Android |
+| Android SDK | `platform-tools`, `platforms;android-37.0`, `build-tools;36.0.0` | Android |
 | Python | 3.10 to 3.14 (CI: 3.11). The pinned pioarduino platform rejects 3.15+ | firmware, host tests |
 | PlatformIO Core | 6.2.0 (CI pin), installed with pip | firmware |
 | pyserial | any (`pip install pyserial`) | `test_protocol_e2e.py`, `companion_test.py` |
@@ -56,7 +56,7 @@ a current Homebrew `platformio`) fails with `ERROR: Python version must be 3.10,
 
 ### Android app
 
-Point Gradle at a JDK 17-23 and the SDK. Use the lines for your OS; the SDK paths
+Point Gradle at a JDK 21-25 and the SDK. Use the lines for your OS; the SDK paths
 are the Android Studio defaults:
 
 ```sh
@@ -70,7 +70,7 @@ Without `ANDROID_HOME`, Gradle fails with "SDK location not found"; writing
 `sdk.dir=/path/to/sdk` to `android/local.properties` (git-ignored) also works.
 Without Android Studio, install the SDK packages with the command-line tools:
 `sdkmanager --licenses` then
-`sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"`.
+`sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;36.0.0"`.
 
 ```sh
 cd android
@@ -81,7 +81,7 @@ cd android
 cd ..
 ```
 
-The first run downloads Gradle 9.2.1 and all dependencies (about 2.5 GB in
+The first run downloads Gradle 9.7.1 and all dependencies (about 2.5 GB in
 `~/.gradle`, a few minutes). Check a built APK's applicationId,
 `VERSION`-derived versionName/versionCode, min/target SDK and debuggable flag
 (uses `aapt2` from `ANDROID_HOME`; CI runs the same check):

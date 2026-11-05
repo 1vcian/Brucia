@@ -15,6 +15,40 @@ versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 4
 matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
 
+### Batch 10 (TARGET36) - targetSdk 36, software and emulator only
+
+targetSdk 35 -> 36 after a review of the Android 16 behavior changes (developer.android.com
+about/versions/16/behavior-changes-16 and behavior-changes-all). No `onBackPressed`,
+`onKeyDown` or `KEYCODE_BACK` in the app; back goes through Compose `BackHandler`, Compose
+dialogs (ComponentDialog) and Compose popups (registers an OnBackInvokedCallback on API 33+),
+so predictive back works unchanged. No `screenOrientation`, `resizeableActivity`,
+aspect-ratio or edge-to-edge opt-out attributes. New: System Back leaves the MITM request
+detail to the list and goes one folder up in Files; the open tool and category survive
+rotation / resize (`rememberSaveable`). Evidence: `:app:testDebugUnitTest` 790/790 (111
+suites; one earlier run hit the `SessionFileLinkTest` upload timeout while the host was
+swapping, passed on rerun), `lintDebug` 0 errors / 7 warnings (unchanged set), `verifyPaparazziDebug`
+pass (snapshots unchanged), `assembleDebug`/`assembleRelease` pass, `check_apk_identity.py`
+targetSdk 36 on both APKs, `connectedDebugAndroidTest` 12/12 on the API 36 emulator. Emulator
+UI (gesture navigation): Help, command log and Files "New" dialogs close on Back; Files
+editor -> Files -> Device category -> dashboard -> launcher, with the predictive
+back-to-home animation shown mid-gesture; injected KEYCODE_BACK behaves the same; MITM
+detail -> list -> dashboard; Sub-GHz kept across a phone rotation; 1920x1200 at 240 dpi
+(sw800dp) in landscape and portrait: home, Sub-GHz and Files render without clipping
+(stretched to full width, as before), Files kept across the landscape -> portrait resize.
+Not covered: Files subfolder Back (needs a device listing), a DropdownMenu on Back (both
+menus need a connected device), a real tablet/foldable, a physical Android 16 phone.
+
+- [ ] targetSdk 36 on an Android 16 phone with gesture navigation: from the dashboard a slow
+      back swipe shows the app shrinking (back-to-home preview) and releasing exits; from a
+      tool, a category list, the Files editor, a dialog and an open dropdown (Updates > Board
+      image, Theme effect) Back closes only that layer.
+- [ ] Same with 3-button navigation (tap Back; long-press Back shows the preview on Android 16).
+- [ ] Files: open a subfolder, Back goes up one folder at a time, then to the dashboard.
+- [ ] Rotate the phone with a tool open (and with the device connected): same tool stays
+      open, USB link and running streams continue.
+- [ ] If a tablet, foldable or desktop window is available: dashboard and two tools in
+      both orientations and after fold/unfold or window resize; nothing clipped.
+
 ### S07 (ROOMHIST) - Room v1/v2 migrations, software only
 
 Room schemas 1 and 2 generated from their source commits (`85a74629`, `0c705937`; see
@@ -61,8 +95,23 @@ host-runner acceptance below was then run on a T-Embed; the app items remain ope
       tx +267 = received, no rejects. Limits: the three streams saw 0 events in 5 s each, so
       receive itself is not demonstrated (no probe traffic or Sub-GHz source was arranged); the
       app was not involved (host runner only).
-- [ ] App: upload a file larger than 3 KB to the device; Diagnostics shows "0 noise bytes" after
-      Sub-GHz Listen on/off; speaker PCM/SSTV transmit still plays.
+- [x] App: upload a file larger than 3 KB to the device; Diagnostics shows "0 noise bytes" after
+      Sub-GHz Listen on/off; speaker PCM/SSTV transmit still plays. Owner phone test of release
+      0.1.5, 2026-11-05 (see "Phone test" below).
+
+### Phone test 2026-11-05 - release 0.1.5 (owner-reported)
+
+Owner test on their Android phone with the T-Embed CC1101, release v0.1.5 (9f4eefa4), reported as
+all passing; no logs or Diagnostics export were collected:
+1. App updated to 0.1.5; "What's new" shows the release notes.
+2. T-Embed flashed to 0.1.5 from the phone over USB (Device > Updates); boot screen 0.1.5.
+3. File larger than 3 KB uploaded from the app in companion mode.
+4. Sub-GHz Listen on/off; Diagnostics shows 0 noise bytes.
+5. Speaker tone/DTMF and an SSTV transmit play normally.
+6. Saved raw IR button replays.
+7. Material3 progress bars/sliders, orange outlined buttons; USB unplug mid-session recovers.
+Not covered: phone model/Android version not recorded, cancel mid-download, wake lock through a
+flash, swipe-away, over-the-air RF/IR reception by another receiver.
 
 ### Hardware run 2026-11-05 - batch 9 merge (candidate 0.1.5)
 
@@ -130,6 +179,8 @@ suites), `lintDebug` 0 errors. Limits: Brucia's own encoder and FM discriminator
 - [ ] USB: permission prompt once, flash takes the port from the companion link, wake lock held
       through a flash, service gone after the app is swiped away.
 - [ ] In-app update: APK + firmware download, cancel mid-download, flash after verification.
+      Partly covered 2026-11-05 (0.1.5 phone test): APK update with release notes and firmware
+      flash from the phone to the T-Embed passed; cancel mid-download not exercised.
 - [ ] FM PCM (needs a Si4713 board): accepted/lost counts, no silent loss.
 
 ## Latest software checkpoint — 2026-11-04

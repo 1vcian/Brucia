@@ -1,5 +1,6 @@
 package app.brucia
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -307,6 +308,8 @@ private fun MitmRow(t: MitmTxn, onClick: () -> Unit) {
 @Composable
 private fun MitmDetail(t: MitmTxn, onBack: () -> Unit) {
     val cs = MaterialTheme.colorScheme
+    // System Back returns to the transaction list (same as "Back to list"), not to the dashboard.
+    BackHandler { onBack() }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
     ) {

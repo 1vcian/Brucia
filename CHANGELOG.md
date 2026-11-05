@@ -7,6 +7,25 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Android build moved to AGP 9.3.3 (built-in Kotlin, still Kotlin 2.4.21) and Gradle 9.7.1,
+  compiling against Android 17 (SDK 37) with AndroidX core 1.19.1, activity 1.13.0,
+  lifecycle 2.11.0 and Compose BOM 2026.09.00 (Compose UI 1.12.1; Material3 stays 1.4.0).
+  This move kept the Android 15 (SDK 35) target (raised separately, next entry); no behavior
+  change intended, back navigation checked on the API 36 emulator. Database schema unchanged. Building now needs JDK 21 or
+  newer: the screenshot tests use Paparazzi 2.0.0-alpha05.1 (a pre-release; no stable
+  Paparazzi renders with SDK 36+), whose newer renderer changes text antialiasing slightly
+  and wraps one home-screen line one word later. Snapshots re-recorded after review.
+- App targets Android 16 (SDK 36). Reviewed against the Android 16 behavior changes: back
+  is handled only through the AndroidX back dispatcher, so the predictive back gesture (on by
+  default for SDK 36) keeps working; the app has no orientation or resizability limits, so
+  tablets and foldables are unaffected by Android 16 ignoring them; it already draws edge to
+  edge. System Back now also leaves the MITM request detail to the request list and moves
+  one folder up in Files (both previously went straight to the dashboard), and the open tool
+  is kept across rotation, fold/unfold and window resizing instead of returning to the
+  dashboard. Checked on the API 36 emulator (gesture navigation, phone and a 1920x1200
+  tablet-size window in both orientations; the Files subfolder case needs a connected
+  device and was not exercised); not yet checked on a phone.
+
 ## [0.1.5] - 2026-11-05
 
 - App database: a database left at schema version 1 or 2 by a pre-0.1 development build
