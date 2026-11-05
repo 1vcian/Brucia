@@ -33,7 +33,7 @@ keep both sides aware of it.
 See [[Building]] for the full commands. In short:
 
 ```sh
-pio run -e lilygo-t-embed-cc1101            # firmware build
+python3 tools/build_firmware.py -e lilygo-t-embed-cc1101   # firmware build
 cd android && ./gradlew :app:testDebugUnitTest   # app unit + screenshot tests
 ```
 

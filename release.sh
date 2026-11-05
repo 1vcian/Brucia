@@ -105,9 +105,14 @@ python3 tools/test_firmware_storage.py
 python3 tools/test_firmware_framing.py
 python3 tools/test_protocol_e2e.py
 ./android/gradlew -p android :app:testDebugUnitTest :app:lintDebug
-pio_bin="${PIO_BIN:-pio}"
-if ! command -v "$pio_bin" >/dev/null 2>&1 && [ -x "$HOME/.pio-venv/bin/pio" ]; then
+# Prefer an explicit PIO_BIN, then the project venv (a Homebrew pio may run on a Python the
+# toolchain rejects), then whatever pio is on PATH.
+if [ -n "${PIO_BIN:-}" ]; then
+  pio_bin="$PIO_BIN"
+elif [ -x "$HOME/.pio-venv/bin/pio" ]; then
   pio_bin="$HOME/.pio-venv/bin/pio"
+else
+  pio_bin="pio"
 fi
 PIO_BIN="$pio_bin" python3 tools/build_firmware.py -e lilygo-t-embed-cc1101
 python3 tools/test_audio_noise_bounds.py -e lilygo-t-embed-cc1101

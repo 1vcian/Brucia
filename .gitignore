@@ -34,3 +34,6 @@ __pycache__/
 
 # Legacy WebUI build intermediates
 /embedded_resources/web_interface/*.gz
+
+# Local hardware acceptance runner reports (tools/hw_acceptance.py)
+hw-acceptance-reports/

@@ -16,13 +16,19 @@ host-side protocol tools. See [[Contributing]] for project rules and
 
 ## Firmware (ESP32-S3, LilyGo T-Embed CC1101)
 
-PlatformIO with the pioarduino core (a Python 3.11 venv is recommended). The target
-environment is `lilygo-t-embed-cc1101`.
+PlatformIO Core 6.2.0 with the pioarduino platform, installed with pip in a
+Python 3.10-3.14 venv (3.15+ is rejected by the platform). The target environment
+is `lilygo-t-embed-cc1101`.
 
 ```sh
-pio run -e lilygo-t-embed-cc1101            # build
-pio run -e lilygo-t-embed-cc1101 -t upload  # flash over USB
+python3.11 -m venv ~/.venvs/brucia && . ~/.venvs/brucia/bin/activate
+pip install platformio==6.2.0 pyserial
+python3 tools/build_firmware.py -e lilygo-t-embed-cc1101   # build (use this on a new checkout)
+pio run -e lilygo-t-embed-cc1101 -t upload                 # flash over USB
 ```
+
+The wrapper makes sure every library is installed before the build so the
+pre-build library patches apply on the first build.
 
 A merged, flashable image is produced at
 `.pio/build/lilygo-t-embed-cc1101/firmware.factory.bin` - this is what the browser
@@ -35,9 +41,12 @@ Notes:
 - Firmware additions such as deauth, battery reporting and lite mode require flashing
   the latest build.
 
-## Android app (JDK 17+)
+## Android app (JDK 17-23)
 
-JDK 17 or newer is required (21 and 23 are tested).
+JDK 17 to 23 is required (CI uses 21; Gradle 8.11.1 does not run on 24+), plus the
+Android SDK with `platforms;android-35` and `build-tools;34.0.0`. Set `ANDROID_HOME`
+(or `sdk.dir` in `android/local.properties`), otherwise Gradle stops with
+"SDK location not found".
 
 ```sh
 cd android
@@ -82,7 +91,7 @@ python3 tools/companion_test.py /dev/tty.usbmodemXXXX
 # Live Wi-Fi AP stream from a real device
 python3 tools/companion_test.py /dev/tty.usbmodemXXXX --wardrive
 
-# Mock-device end-to-end protocol test (no hardware)
+# Mock-device end-to-end protocol test (no hardware; needs pyserial)
 python3 tools/test_protocol_e2e.py
 ```
 

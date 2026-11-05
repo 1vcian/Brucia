@@ -232,11 +232,14 @@ the [supported list](ROADMAP.md) works; this is just the one Brucia is verified 
 
 - **Browser** (easiest): open **https://1vcian.me/BruciaDev/** in Chrome/Edge, plug in the
   T-Embed CC1101 with a *data* USB-C cable, click *Connect & Flash*.
-- **PlatformIO**: `pio run -e lilygo-t-embed-cc1101 -t upload`
+- **From source**: build with `python3 tools/build_firmware.py -e lilygo-t-embed-cc1101`,
+  then `pio run -e lilygo-t-embed-cc1101 -t upload`. Prerequisites and exact steps:
+  [CONTRIBUTING.md](CONTRIBUTING.md#build--test).
 
 **2. Install the app** - download the APK from
 [Releases](https://github.com/1vcian/BruciaDev/releases), or build it:
-`cd android && ./gradlew :app:assembleDebug` (JDK 21+).
+`cd android && ./gradlew :app:assembleDebug` (JDK 17-23 and Android SDK 35; see
+[CONTRIBUTING.md](CONTRIBUTING.md#build--test)).
 
 **3. Connect** - plug the device into the phone and open the app. The device switches into
 companion mode and the app links up automatically; if it doesn't, tap **Connect over USB**.

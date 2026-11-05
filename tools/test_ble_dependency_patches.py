@@ -20,11 +20,14 @@ class BleDependencyPatchesTest(unittest.TestCase):
                 path = tmp / board / "ESP PN32BLE/src/pn532_ble.cpp"
                 path.parent.mkdir(parents=True)
                 path.write_text("class scanCallbacks {}; new scanCallbacks();")
+                (path.parent / "pn532_ble.h").write_text("#include <NimBLEDevice.h>\n")
                 paths.append(path)
 
             class Env:
                 def subst(self, value): return str(tmp)
                 def get(self, key): return "active"
+                def AddBuildMiddleware(self, callback, pattern=None): pass
+                def Exit(self, code): raise SystemExit(code)
 
             with redirect_stdout(io.StringIO()):
                 runpy.run_path(str(ROOT / "patch_library_conflicts.py"),
@@ -42,6 +45,8 @@ class BleDependencyPatchesTest(unittest.TestCase):
             ]:
                 path = tmp / ".pio/libdeps/test" / folder / "src" / name
                 path.parent.mkdir(parents=True)
+                # Installed libraries must contain every patched file.
+                path.with_suffix(".h").write_text("#include <NimBLEDevice.h>\n")
                 path.write_text('''
 #ifdef NIMBLE_V2_PLUS
 #define NimBLEAdvertisedDeviceCallbacks NimBLEScanCallbacks

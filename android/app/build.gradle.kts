@@ -19,12 +19,12 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "app.brucia"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "app.brucia"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         // Single source of truth: the repo-root VERSION file (same one the firmware reads via
         // pre_build_version.py). Bump VERSION once and both the app and the firmware pick it up.
         val bruciaVersion = rootProject.file("../VERSION").readText().trim()
@@ -83,15 +83,15 @@ ksp {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.activity:activity-compose:1.9.2")
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.activity:activity-compose:1.10.1")
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("com.github.mik3y:usb-serial-for-android:3.8.1")
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
@@ -101,15 +101,15 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     // Instrumentation tests (emulator/device): ConnectionService lifecycle, Activity recreation.
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test:rules:1.6.1")
-    androidTestImplementation("androidx.test:core-ktx:1.6.1")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("androidx.test:core-ktx:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 
     // Room persistence
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-runtime:2.7.2")
+    implementation("androidx.room:room-ktx:2.7.2")
+    ksp("androidx.room:room-compiler:2.7.2")
 
     // Map
     implementation("org.osmdroid:osmdroid-android:6.1.20")

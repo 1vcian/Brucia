@@ -31,6 +31,7 @@ app's **Updates** screen.
 ### PlatformIO
 
 ```sh
+python3 tools/build_firmware.py -e lilygo-t-embed-cc1101   # first build
 pio run -e lilygo-t-embed-cc1101 -t upload
 ```
 
@@ -47,7 +48,8 @@ See [[Building]] for the full toolchain setup.
   cd android && ./gradlew :app:assembleDebug
   ```
 
-  Requires JDK 17 or newer (21/23 tested). See [[Building]].
+  Requires JDK 17-23 (Gradle 8.11.1 does not run on 24+) and Android SDK 35.
+  See [[Building]].
 
 ## 3. Connect
 

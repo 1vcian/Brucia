@@ -16,6 +16,11 @@ matrix run. Reproducible: two checkouts of one commit gave identical firmware.bi
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
 
 ### Batches 1-4 - verify on hardware
+- [ ] Run `python3 tools/hw_acceptance.py --port <port>` first (passive, allowlisted; see
+      docs/HARDWARE_VERIFICATION.md) and attach its report; it covers the protocol side of
+      the diag, evidence and file items below. UI, Stop all/unplug and RF items stay manual.
+- [ ] targetSdk 35 build: edge-to-edge layout on an Android 15+ phone with a camera cutout and
+      on an API 26-34 phone; keyboard over Console/Macros; signed upgrade from 0.1.4.
 - [ ] `diag` card: Refresh shows reset reason (power-on, then after a reset/brownout if
       reproducible), heap, link counters rising with traffic; busy 409 during a long op.
 - [ ] Wi-Fi handshake/PMKID capture with descriptor: imported file matches size/CRC; a second

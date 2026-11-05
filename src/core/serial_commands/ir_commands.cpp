@@ -28,10 +28,10 @@ uint32_t irRxCallback(cmd *c) {
 
     serialDevice->println("Waiting for signal...");
     String r = i->loop_headless(10); // 10s timeout
+    delete i; // Brucia: also on timeout (the reader was leaked when nothing was received)
     if (r.length() == 0) return false;
 
     serialDevice->println(r);
-    delete i;
     return true;
 }
 

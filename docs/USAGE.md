@@ -11,12 +11,14 @@ Pick one:
 - **Browser** (easiest): open https://1vcian.me/BruciaDev/ in desktop Chrome or Edge, plug the LilyGo T-Embed CC1101 with a **data**
   USB-C cable, click *Connect & Flash*.
 - **Android app**: use Device → Updates with the board connected over USB-OTG.
-- **PlatformIO**: `pio run -e lilygo-t-embed-cc1101 -t upload`.
+- **From source**: `python3 tools/build_firmware.py -e lilygo-t-embed-cc1101`, then
+  `pio run -e lilygo-t-embed-cc1101 -t upload` (setup in [CONTRIBUTING.md](../CONTRIBUTING.md#build--test)).
 
 ## 2. Install the app
 
 Download the APK from the repo Releases and install it (allow unknown sources), or
-build it: `cd android && ./gradlew :app:assembleDebug` (JDK 21).
+build it: `cd android && ./gradlew :app:assembleDebug` (JDK 17-23, Android SDK 35; see
+[CONTRIBUTING.md](../CONTRIBUTING.md#build--test)).
 
 ## 3. Connect
 

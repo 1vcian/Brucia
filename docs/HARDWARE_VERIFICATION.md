@@ -68,3 +68,48 @@ pio run -e lilygo-t-embed-cc1101 -t upload
 python3 tools/companion_test.py /dev/tty.usbmodemXXXX           # handshake + PING
 python3 tools/companion_test.py /dev/tty.usbmodemXXXX --wardrive # live AP stream
 ```
+
+## Passive acceptance runner (S05 helper)
+
+`tools/hw_acceptance.py` runs the passive part of device acceptance from a host and writes a
+JSON and a Markdown report (firmware build/provenance, UTC timestamps, PASS/FAIL/SKIP per
+check, raw evidence and every frame it sent). It needs pyserial and a board connected to
+the computer by USB and already in companion mode (tap `Brucia` on the device).
+
+```sh
+python3 tools/hw_acceptance.py --port /dev/cu.usbmodemXXXX --dry-run   # print the frames, open nothing
+python3 tools/hw_acceptance.py --port /dev/cu.usbmodemXXXX --out hw-acceptance-reports
+python3 tools/hw_acceptance.py --port /dev/cu.usbmodemXXXX --only caps,ping,diag_counters
+python3 tools/hw_acceptance.py --port /dev/cu.usbmodemXXXX --only busy  # opt-in, see below
+```
+
+Checks: `caps` (CAPS shape, features, modules), `provenance` (`build`), `evidence` (levels,
+probes, pin conflicts), `diag_shape`, `ping` (200 sequential PINGs: latency distribution and
+loss; a 20-frame burst must come back in order), `malformed` (one bad-JSON frame gives ERR
+400 and `rx_bad_json` +1), `fs_list` (`storage list /`), `fs_read` (smallest file at `/`
+up to 64 KiB, or `--read-path`; DATA id/seq, size and CRC32 verified), `fs_upload` (a
+transactional upload of `/brucia-acceptance-<UTC>-<hex>.txt`, commit, read-back, remove,
+listing confirms it is gone), `streams` (receive-only `wifi.probe` by default, also
+`wifi.sta` or `subghz.raw` with `--streams`: ON/OFF ACKed, no events after OFF), `heap`
+(no downward trend over repeated `diag`), `diag_counters` (link counters across the run
+equal what the runner sent and received, no rejects, no reboot). File checks are skipped
+without `features.verified_files` / `features.transactional_uploads`, diag checks without
+`features.diag`.
+
+Safety: every frame passes an explicit allowlist (`check_allowed`); any other command or
+stream raises before anything is written. Nothing that transmits is allowed: no deauth,
+jamming, beacons, BLE advertising, IR/RF/Sub-GHz TX, replay or speaker. `wifi.ap` and
+`ble.scan` are refused because they are active scans (probe/scan requests). The only
+storage change is the scratch file the run creates and removes. `--only busy` runs
+`jam_detect` (promiscuous receive) to check PONG and ERR 409 while busy and that `stop`
+ends it; it is opt-in because its Wi-Fi setup disconnects a joined AP, which sends a
+disassociation. Ctrl-C sends OFF for an active stream, `stop` for a busy operation and
+abort/remove for the scratch upload, then writes a report marked interrupted. Exit codes:
+0 no FAIL, 1 at least one FAIL, 2 link error, 130 interrupted.
+
+The runner covers the protocol/transport part of the TESTS.md items for the `diag` card,
+the hardware evidence card (recorded, plausibility is still a human judgement) and the
+Files transport. App UI behavior, captures, Mifare, speaker, Sub-GHz UI, USB
+permission/flash, in-app update, FM PCM and anything that transmits remain manual.
+`tools/test_hw_acceptance.py` exercises it against `tools/mock_device.py`; a simulated pass
+is not hardware evidence.

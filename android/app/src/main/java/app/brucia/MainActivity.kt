@@ -14,6 +14,8 @@ import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -42,6 +44,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -217,6 +224,13 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Draw edge-to-edge on every API level (Android 15+ enforces it for targetSdk 35). The UI is
+        // always dark, so both bars keep light icons over a transparent background; AppRoot pads its
+        // content by the system bar, cutout and IME insets.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
         ContextCompat.registerReceiver(
@@ -1511,7 +1525,13 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
     BackHandler(enabled = tab != HOME || category != -1) {
         if (tab != HOME) tab = HOME else category = -1
     }
-    Column(modifier = Modifier.fillMaxSize().background(cs.background)) {
+    // Edge-to-edge: the background fills the whole window, content stays inside the safe area. The
+    // bottom inset (navigation bar or IME, whichever is taller) is applied by BottomNav so its surface
+    // color extends under the gesture/button bar.
+    Column(
+        modifier = Modifier.fillMaxSize().background(cs.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+    ) {
         TopStatusBar(
             status = status,
             battery = device?.battery ?: -1,
@@ -2218,7 +2238,9 @@ private fun BottomNav(runningCount: Int, deviceUpdate: Boolean, onHome: () -> Un
     Column {
         Box(Modifier.fillMaxWidth().height(1.dp).background(cs.surfaceVariant))
         Row(
-            modifier = Modifier.fillMaxWidth().background(cs.surface).padding(vertical = 6.dp),
+            modifier = Modifier.fillMaxWidth().background(cs.surface)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                .padding(vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
             // Device (left) · Home (center) · Cmds (right). Help stays on the top bar "?".

@@ -8,8 +8,12 @@ the printed device path.
 
 Responds to HELLO->CAPS, PING->PONG, CMD->ACK(+out), `diag` (recovery diagnostics
 with the firmware's key set and real link counters of this mock), and SUB streams
-(wifi.ap / ble.scan / subghz.raw) with synthetic events. Bad JSON gets ERR 400 and an
-invalid length prefix is counted and drops the buffered bytes, as on the device.
+(wifi.ap / ble.scan / subghz.raw / wifi.probe / wifi.sta) with synthetic events. Bad JSON
+gets ERR 400 and an invalid length prefix is counted and drops the buffered bytes, as on
+the device. A small in-memory file system backs `storage list|remove`, `fs_read` and the
+transactional `fs_upload_*` commands; `jam_detect <secs>` behaves as a blocking operation
+(PING answered, `stop` ends it, other CMDs get ERR 409 "device busy"). `MockDevice` can be
+served from a thread (tools/test_hw_acceptance.py) and accepts optional injected faults.
 
     python3 tools/mock_device.py            # prints the PTY path and serves
     python3 tools/mock_device.py --path-file /tmp/brucia_pty
@@ -146,16 +150,322 @@ def diag_reply(counters, uptime_s):
 
 COUNTERS = LinkCounters()
 
+# Files the mock's storage CLI (`storage list|remove`), fs_read and the transactional upload see.
+# A small text file at the root gives the host something to read back and verify (size/CRC).
+MOCK_FILES = {
+    "/brucia-mock-small.txt": b"BRUCIA mock small file\n" * 12,
+    "/BrucePCAP/readme.txt": b"mock capture folder\n",
+}
+PROBE_SAMPLES = [
+    {"mac": "DA:A1:19:00:11:22", "ssid": "HomeNet", "rssi": -61, "ch": 6},
+    {"mac": "DA:A1:19:00:11:23", "ssid": "", "rssi": -77, "ch": 1},
+]
+STA_SAMPLES = [
+    {"mac": "3C:22:FB:00:00:01", "bssid": "E4:4E:12:7E:CF:6F", "rssi": -58, "ch": 2},
+]
+# Fault injection for host tests (tools/test_hw_acceptance.py); none is active by default.
+#   rx_undercount            PING frames are not counted in diag rx_frames (counter mismatch)
+#   heap_leak                diag heap.free drops 4096 bytes per call
+#   event_after_off          one more event of a stream arrives after its OFF ACK
+#   no_transactional_uploads CAPS does not advertise features.transactional_uploads
+FAULTS = ("rx_undercount", "heap_leak", "event_after_off", "no_transactional_uploads")
+UPLOAD_MAX_CHUNK = 3072
 
-def send(fd, kind, msg_id, d):
+
+def _write_all(fd, data):
+    off = 0
+    while off < len(data):
+        try:
+            off += os.write(fd, data[off:])
+        except BlockingIOError:
+            time.sleep(0.002)
+
+
+def send(fd, kind, msg_id, d, counters=None):
     payload = json.dumps({"v": 0, "t": kind, "id": msg_id, "d": d}).encode()
-    os.write(fd, struct.pack("<I", len(payload)) + payload)
-    COUNTERS.note_sent(kind, d)
+    _write_all(fd, struct.pack("<I", len(payload)) + payload)
+    (counters or COUNTERS).note_sent(kind, d)
+
+
+def _dir_of(path):
+    return path.rsplit("/", 1)[0] or "/"
+
+
+class MockDevice:
+    """One mock device serving the companion protocol on a PTY master fd.
+
+    main() runs one on a fresh PTY; tests run one in a thread with a stop event."""
+
+    def __init__(self, faults=(), counters=None, poll_interval=0.02, emit_interval=1.0):
+        unknown = set(faults) - set(FAULTS)
+        if unknown:
+            raise ValueError(f"unknown mock faults: {sorted(unknown)}")
+        self.faults = set(faults)
+        self.counters = counters or LinkCounters()
+        self.poll_interval = poll_interval
+        self.emit_interval = emit_interval
+        self.files = dict(MOCK_FILES)
+        self.subs = set()
+        self.upload = None  # {token, size, crc, path, data}
+        self.started = time.time()
+        self.diag_calls = 0
+        self.received_cmds = []   # every CMD string, in order (tests audit what the host sent)
+        self.received_subs = []   # every SUB body, in order
+        self._buf = b""
+        self._after_off = []      # (due time, stream) for the event_after_off fault
+
+    def _send(self, fd, kind, msg_id, d):
+        send(fd, kind, msg_id, d, self.counters)
+
+    def _next_frame(self):
+        """Pop one complete frame from the buffer: payload bytes, or None if incomplete."""
+        while len(self._buf) >= 4:
+            n = struct.unpack("<I", self._buf[:4])[0]
+            if n == 0 or n > MAX_FRAME:
+                self.counters.note("rx_zero_len" if n == 0 else "rx_oversize")
+                self._buf = b""  # frame boundary unknown
+                return None
+            if len(self._buf) < 4 + n:
+                return None
+            raw = self._buf[4:4 + n]
+            self._buf = self._buf[4 + n:]
+            return raw
+        return None
+
+    def _read(self, fd):
+        try:
+            chunk = os.read(fd, 4096)
+            if chunk:
+                self._buf += chunk
+        except (BlockingIOError, OSError):
+            pass
+
+    @staticmethod
+    def _parse(raw):
+        msg = json.loads(raw.decode(errors="replace"))
+        if not isinstance(msg, dict):
+            raise ValueError("not an object")
+        return msg
+
+    def _count_rx(self, msg):
+        if "rx_undercount" in self.faults and isinstance(msg, dict) and msg.get("t") == PING:
+            return
+        self.counters.note("rx_frames")
+
+    def _caps(self):
+        features = {"verified_files": True, "transactional_uploads": True,
+                    "mifare_keycheck_report": True, "mifare_keycheck_stop": True,
+                    "capture_descriptor": True, "diag": True}
+        if "no_transactional_uploads" in self.faults:
+            del features["transactional_uploads"]
+        return {
+            "board": "Lilygo T-Embed CC1101 (mock)", "chip": "esp32-s3",
+            "fw": "mock", "proto": 0,
+            "modules": ["wifi", "ble", "rf", "ir"], "transports": ["usb"], "mtu": 8192,
+            "features": features,
+            # Release provenance as a build without Git metadata reports it (no dirty flag).
+            "build": {"commit": "unknown", "id": "mock", "time": "unknown",
+                      "time_src": "unknown", "env": "mock"},
+            "evidence": MOCK_EVIDENCE,
+        }
+
+    def _diag(self):
+        reply = diag_reply(self.counters, time.time() - self.started)
+        if "heap_leak" in self.faults:
+            reply["heap"]["free"] -= 4096 * self.diag_calls
+        self.diag_calls += 1
+        return reply
+
+    def _storage(self, fd, mid, cmd):
+        parts = cmd.split(" ", 2)
+        verb = parts[1] if len(parts) > 1 else ""
+        path = (parts[2].strip() if len(parts) > 2 else "") or "/"
+        if not path.startswith("/"):
+            path = "/" + path
+        if verb == "list":
+            base = path.rstrip("/") or "/"
+            names = {}
+            for f, body in self.files.items():
+                if _dir_of(f) == base:
+                    names[f.rsplit("/", 1)[1]] = str(len(body))
+                elif f.startswith(base.rstrip("/") + "/"):
+                    names[f[len(base.rstrip("/")) + 1:].split("/", 1)[0]] = "<DIR>"
+            ok = bool(names) or base == "/"
+            out = "".join(f"{k}\t{v}\n" for k, v in sorted(names.items()))
+            self._send(fd, ACK, mid, {"ok": ok, "out": out})
+        elif verb == "remove":
+            if path in self.files:
+                del self.files[path]
+                self._send(fd, ACK, mid, {"ok": True, "out": "File removed\n"})
+            else:
+                self._send(fd, ACK, mid, {"ok": False, "out": "File does not exist\n"})
+        else:
+            self._send(fd, ACK, mid, {"ok": True, "out": f"mock output for: {cmd}"})
+
+    def _upload(self, fd, mid, cmd):
+        parts = cmd.split(" ")
+        verb = parts[0]
+        up = self.upload
+        if verb == "fs_upload_begin" and len(parts) >= 5:
+            token, path = parts[1], " ".join(parts[4:])
+            if up is not None and up["token"] != token:
+                return self._send(fd, ERR, mid, {"code": 409, "msg": "upload busy"})
+            if not (len(token) == 32 and all(c in "0123456789abcdef" for c in token)) \
+                    or not path.startswith("/") or path.lower().startswith("/.brucia-upload."):
+                return self._send(fd, ERR, mid, {"code": 400, "msg": "invalid upload metadata"})
+            self.upload = {"token": token, "size": int(parts[2]), "crc": int(parts[3]), "path": path,
+                           "data": b""}
+            return self._send(fd, ACK, mid, {"ok": True, "token": token, "size": 0})
+        if verb == "fs_upload_chunk" and len(parts) == 4:
+            if up is None or up["token"] != parts[1] or int(parts[2]) != len(up["data"]):
+                return self._send(fd, ERR, mid, {"code": 409, "msg": "upload token/offset mismatch"})
+            try:
+                chunk = base64.b64decode(parts[3], validate=True)
+            except ValueError:
+                chunk = b""
+            if not chunk or len(chunk) > UPLOAD_MAX_CHUNK or len(up["data"]) + len(chunk) > up["size"]:
+                return self._send(fd, ERR, mid, {"code": 400, "msg": "invalid upload chunk encoding/size"})
+            up["data"] += chunk
+            return self._send(fd, ACK, mid, {"ok": True, "token": up["token"], "size": len(up["data"])})
+        if verb in ("fs_upload_commit", "fs_upload_abort") and len(parts) == 2:
+            if up is None or up["token"] != parts[1]:
+                return self._send(fd, ERR, mid, {"code": 409, "msg": "no active upload"})
+            self.upload = None
+            if verb == "fs_upload_abort":
+                return self._send(fd, ACK, mid, {"ok": True, "token": up["token"], "size": len(up["data"])})
+            if len(up["data"]) != up["size"] or (zlib.crc32(up["data"]) & 0xFFFFFFFF) != up["crc"]:
+                return self._send(fd, ERR, mid, {"code": 409, "msg": "staging size/crc mismatch"})
+            self.files[up["path"]] = up["data"]
+            return self._send(fd, ACK, mid, {"ok": True, "token": up["token"], "size": up["size"],
+                                             "crc32": up["crc"], "committed": True, "cleanup_pending": False})
+        return self._send(fd, ERR, mid, {"code": 400, "msg": "invalid upload command"})
+
+    def _blocking_op(self, fd, mid, secs, stop):
+        """A receive-only blocking command (`jam_detect`): drains one frame per poll as
+        companionPollStop does - PING answered, stop/*_stop ends it, other CMDs get ERR 409."""
+        deadline = time.time() + secs
+        while time.time() < deadline and not (stop and stop.is_set()):
+            self._read(fd)
+            raw = self._next_frame()
+            if raw is None:
+                time.sleep(self.poll_interval)
+                continue
+            try:
+                msg = self._parse(raw)
+            except ValueError:
+                self.counters.note("rx_frames")
+                self.counters.note("rx_bad_json")  # dropped without reply while busy
+                continue
+            self._count_rx(msg)
+            t, cid, d = msg.get("t"), msg.get("id", 0), msg.get("d") or {}
+            if t == PING:
+                self._send(fd, PONG, cid, {})
+            elif t == CMD:
+                cs = d.get("cmd", "") if isinstance(d, dict) else ""
+                self.received_cmds.append(cs)
+                if cs == "stop" or cs.endswith("_stop"):
+                    break
+                self.counters.note("busy_409")
+                self._send(fd, ERR, cid, {"code": 409, "msg": "device busy"})
+        self._send(fd, ACK, mid, {"ok": True, "out": "deauth=0 total=0"})
+
+    def _handle(self, fd, msg, stop):
+        t, mid, d = msg.get("t"), msg.get("id", 0), msg.get("d", {})
+        if t == HELLO:
+            self._send(fd, CAPS, mid, self._caps())
+        elif t == PING:
+            self._send(fd, PONG, mid, {})
+        elif t == CMD:
+            cmd = d.get("cmd", "")
+            self.received_cmds.append(cmd)
+            if cmd == "diag":
+                self._send(fd, ACK, mid, self._diag())
+            elif cmd.startswith("fs_read"):
+                path = cmd[len("fs_read"):].strip()
+                content = self.files.get(path, CAPTURES.get(path, b"BRUCIA-MOCK-FILE-" + (b"x" * 2000)))
+                # DATA frames echo the CMD id (proto/PROTOCOL.md fs_read, features.verified_files).
+                for i in range(0, len(content), 768):
+                    self._send(fd, DATA, mid, {"stream": "file", "seq": i // 768,
+                                               "chunk": base64.b64encode(content[i:i+768]).decode()})
+                self._send(fd, ACK, mid, {"ok": True, "size": len(content),
+                                          "crc32": zlib.crc32(content) & 0xFFFFFFFF})
+            elif cmd.startswith("fs_upload_"):
+                self._upload(fd, mid, cmd)
+            elif cmd.startswith("storage "):
+                self._storage(fd, mid, cmd)
+            elif cmd.startswith("jam_detect"):
+                secs = cmd[len("jam_detect"):].strip()
+                self._blocking_op(fd, mid, min(max(int(secs) if secs.isdigit() else 5, 1), 120), stop)
+            elif cmd.startswith("wifi_handshake") or cmd.startswith("wifi_pmkid"):
+                pmkid = cmd.startswith("wifi_pmkid")
+                desc = _capture_descriptor(cmd, pmkid)
+                self._send(fd, ACK, mid, {"ok": True, "out": "mock capture written", "desc": desc})
+            else:
+                self._send(fd, ACK, mid, {"ok": True, "out": f"mock output for: {cmd}"})
+        elif t == SUB:
+            stream, on = d.get("stream"), d.get("on")
+            self.received_subs.append(dict(d))
+            if on:
+                self.subs.add(stream)
+            else:
+                if stream in self.subs and "event_after_off" in self.faults:
+                    self._after_off.append((time.time() + 0.2, stream))
+                self.subs.discard(stream)
+            self._send(fd, ACK, mid, {"ok": True})
+
+    def _emit(self, fd, stream):
+        if stream == "wifi.ap":
+            for ap_ in AP_SAMPLES:
+                self._send(fd, EVENT, 0, {"ev": "wifi.ap", "data": ap_})
+        elif stream == "ble.scan":
+            for b in BLE_SAMPLES:
+                self._send(fd, EVENT, 0, {"ev": "ble.dev", "data": b})
+        elif stream == "subghz.raw":
+            self._send(fd, EVENT, 0, {"ev": "subghz.raw", "data": {"freq": 433920000, "timings": SUBGHZ_TIMINGS}})
+        elif stream == "wifi.probe":
+            for p in PROBE_SAMPLES:
+                self._send(fd, EVENT, 0, {"ev": "wifi.probe", "data": p})
+        elif stream == "wifi.sta":
+            for s in STA_SAMPLES:
+                self._send(fd, EVENT, 0, {"ev": "wifi.sta", "data": s})
+
+    def serve(self, fd, stop=None):
+        os.set_blocking(fd, False)
+        last_emit = 0.0
+        while not (stop and stop.is_set()):
+            self._read(fd)
+            while True:
+                raw = self._next_frame()
+                if raw is None:
+                    break
+                try:
+                    msg = self._parse(raw)
+                except ValueError:
+                    self.counters.note("rx_frames")
+                    self.counters.note("rx_bad_json")
+                    self._send(fd, ERR, 0, {"code": 400, "msg": "bad json"})
+                    continue
+                self._count_rx(msg)
+                self._handle(fd, msg, stop)
+
+            now = time.time()
+            for due, stream in list(self._after_off):
+                if now >= due:
+                    self._after_off.remove((due, stream))
+                    self._emit(fd, stream)
+            if now - last_emit > self.emit_interval:
+                last_emit = now
+                for stream in ("wifi.ap", "ble.scan", "subghz.raw", "wifi.probe", "wifi.sta"):
+                    if stream in self.subs:
+                        self._emit(fd, stream)
+            time.sleep(self.poll_interval)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--path-file", help="write the PTY device path here")
+    ap.add_argument("--fault", action="append", default=[], choices=FAULTS,
+                    help="inject a fault (host-tool testing); repeatable")
     args = ap.parse_args()
 
     master, slave = pty.openpty()
@@ -164,92 +474,7 @@ def main():
         with open(args.path_file, "w") as f:
             f.write(dev)
     print(f"mock device at: {dev}", flush=True)
-
-    buf = b""
-    subs = set()
-    os.set_blocking(master, False)
-    last_emit = 0.0
-    started = time.time()
-    while True:
-        try:
-            chunk = os.read(master, 4096)
-            if chunk:
-                buf += chunk
-        except (BlockingIOError, OSError):
-            pass
-
-        while len(buf) >= 4:
-            n = struct.unpack("<I", buf[:4])[0]
-            if n == 0 or n > MAX_FRAME:
-                COUNTERS.note("rx_zero_len" if n == 0 else "rx_oversize")
-                buf = b""  # frame boundary unknown
-                break
-            if len(buf) < 4 + n:
-                break
-            raw = buf[4:4 + n]
-            buf = buf[4 + n:]
-            COUNTERS.note("rx_frames")
-            try:
-                msg = json.loads(raw.decode(errors="replace"))
-                if not isinstance(msg, dict):
-                    raise ValueError("not an object")
-            except ValueError:
-                COUNTERS.note("rx_bad_json")
-                send(master, ERR, 0, {"code": 400, "msg": "bad json"})
-                continue
-            t, mid, d = msg.get("t"), msg.get("id", 0), msg.get("d", {})
-            if t == HELLO:
-                send(master, CAPS, mid, {
-                    "board": "Lilygo T-Embed CC1101 (mock)", "chip": "esp32-s3",
-                    "fw": "mock", "proto": 0,
-                    "modules": ["wifi", "ble", "rf", "ir"], "transports": ["usb"], "mtu": 8192,
-                    "features": {"verified_files": True, "transactional_uploads": True,
-                                 "mifare_keycheck_report": True, "mifare_keycheck_stop": True,
-                                 "capture_descriptor": True, "diag": True},
-                    # Release provenance as a build without Git metadata reports it (no dirty flag).
-                    "build": {"commit": "unknown", "id": "mock", "time": "unknown",
-                              "time_src": "unknown", "env": "mock"},
-                    "evidence": MOCK_EVIDENCE,
-                })
-            elif t == PING:
-                send(master, PONG, mid, {})
-            elif t == CMD:
-                cmd = d.get("cmd", "")
-                if cmd == "diag":
-                    send(master, ACK, mid, diag_reply(COUNTERS, time.time() - started))
-                elif cmd.startswith("fs_read"):
-                    path = cmd[len("fs_read"):].strip()
-                    content = CAPTURES.get(path, b"BRUCIA-MOCK-FILE-" + (b"x" * 2000))
-                    for i in range(0, len(content), 768):
-                        send(master, DATA, 0, {"stream": "file", "seq": i // 768, "chunk": base64.b64encode(content[i:i+768]).decode()})
-                    send(master, ACK, mid, {"ok": True, "size": len(content), "crc32": zlib.crc32(content) & 0xFFFFFFFF})
-                elif cmd.startswith("wifi_handshake") or cmd.startswith("wifi_pmkid"):
-                    pmkid = cmd.startswith("wifi_pmkid")
-                    desc = _capture_descriptor(cmd, pmkid)
-                    send(master, ACK, mid, {"ok": True, "out": "mock capture written", "desc": desc})
-                else:
-                    send(master, ACK, mid, {"ok": True, "out": f"mock output for: {cmd}"})
-            elif t == SUB:
-                stream, on = d.get("stream"), d.get("on")
-                if on:
-                    subs.add(stream)
-                    send(master, ACK, mid, {"ok": True})
-                else:
-                    subs.discard(stream)
-                    send(master, ACK, mid, {"ok": True})
-
-        now = time.time()
-        if now - last_emit > 1.0:
-            last_emit = now
-            if "wifi.ap" in subs:
-                for ap_ in AP_SAMPLES:
-                    send(master, EVENT, 0, {"ev": "wifi.ap", "data": ap_})
-            if "ble.scan" in subs:
-                for b in BLE_SAMPLES:
-                    send(master, EVENT, 0, {"ev": "ble.dev", "data": b})
-            if "subghz.raw" in subs:
-                send(master, EVENT, 0, {"ev": "subghz.raw", "data": {"freq": 433920000, "timings": SUBGHZ_TIMINGS}})
-        time.sleep(0.02)
+    MockDevice(faults=args.fault, counters=COUNTERS).serve(master)
 
 
 if __name__ == "__main__":

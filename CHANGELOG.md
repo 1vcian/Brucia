@@ -7,6 +7,18 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- App targets Android 15 (SDK 35) and draws edge to edge; the bottom bar stays above
+  the keyboard. AndroidX core, activity, lifecycle and Room updated (database schema
+  unchanged).
+- Firmware builds from a clean checkout now apply the bundled library fixes on the
+  first build (the AAC decoder bounds fixes were previously skipped until a second
+  build); the build stops if an expected library fix no longer applies.
+- Builds report firmware size against the board's app partition and fail when it is
+  nearly full.
+- `ir rx` no longer leaks its reader when no signal arrives.
+- `tools/hw_acceptance.py`: passive, allowlisted acceptance checks for a connected board.
+- Contributor setup documented from a fresh clone (prerequisites and exact steps).
+
 ## [0.1.4] - 2026-11-05
 
 Software-only release: everything below passed unit, host, emulator and build checks;

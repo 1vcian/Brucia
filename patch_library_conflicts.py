@@ -1,13 +1,24 @@
+"""Apply Brucia's source patches to installed third-party libraries.
+
+Runs as a PlatformIO pre-script and again from a build middleware: PlatformIO
+installs owner-less registry specs (for example ``ESP8266Audio@2.4.1``) only in
+its Library Dependency Finder, after every pre-script. The second pass runs
+once all dependencies are installed and before any source is compiled. A
+pattern that no longer matches an installed library fails the build.
+"""
 import os
 import re
 import glob
+import sys
 
 try:
     Import("env")
 except NameError:
     env = None  # standalone maintenance/tests
 
-print("Patching library conflicts with ESP32 core...")
+
+class PatchError(RuntimeError):
+    """An installed library no longer matches an expected patch pattern."""
 
 def cache_sbr_noise_bounds(content):
     """Keep validated loop bounds stable across calls through other input pointers."""
@@ -36,19 +47,24 @@ def cache_sbr_noise_bounds(content):
     function = function[:opening] + '\n    /* Brucia: cached validated noise bounds */\n    const int noiseFloors = sbrGrid->numNoiseFloors;\n    const int previousFloors = sbrGrid->numNoiseFloorsPrev;\n    const int noiseBands = sbrFreq->numNoiseFloorBands;' + function[opening:]
     return content[:start] + function + content[end:]
 
-# List of conflicts: (file_pattern, search_pattern, replace_pattern)
+# List of conflicts: (file_pattern, search_pattern, replace_pattern[, applied_marker]).
+# A file counts as already patched when it contains applied_marker, which
+# defaults to the literal replacement. Replacements using regex group
+# references are not literal, so they must name an explicit marker.
 conflicts = [
     # Reject malformed SBR state before indexing the 2x5 noise arrays. The
     # public routine is void, so invalid direct calls return without mutation.
     (
         ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbrhuff.c",
         r'(void DecodeSBRNoise\([^\n]+\) \{)(?!\n    /\* Brucia:)',
-        r'\1\n    /* Brucia: bound SBR noise state before array access. */\n    if (ch < 0 || ch > 1 || sbrGrid->numNoiseFloors < 1 ||\n        sbrGrid->numNoiseFloors > MAX_NUM_NOISE_FLOORS ||\n        sbrGrid->numNoiseFloorsPrev > MAX_NUM_NOISE_FLOORS ||\n        sbrFreq->numNoiseFloorBands < 1 || sbrFreq->numNoiseFloorBands > MAX_NUM_NOISE_FLOOR_BANDS) return;'
+        r'\1\n    /* Brucia: bound SBR noise state before array access. */\n    if (ch < 0 || ch > 1 || sbrGrid->numNoiseFloors < 1 ||\n        sbrGrid->numNoiseFloors > MAX_NUM_NOISE_FLOORS ||\n        sbrGrid->numNoiseFloorsPrev > MAX_NUM_NOISE_FLOORS ||\n        sbrFreq->numNoiseFloorBands < 1 || sbrFreq->numNoiseFloorBands > MAX_NUM_NOISE_FLOOR_BANDS) return;',
+        '/* Brucia: bound SBR noise state before array access. */'
     ),
     (
         ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbrfreq.c",
         r'(static int CalcFreqNoise\([^\n]+\) \{)(?!\n    /\* Brucia:)',
-        r'\1\n    /* Brucia: invalid frequency state must not index log/table arrays. */\n    if (nLow < 1 || nLow > MAX_QMF_BANDS / 2 || kStart < 1 || kStart > 64 ||\n        k2 < 1 || k2 > 64 || noiseBands < 0 || noiseBands > 3) return 0;'
+        r'\1\n    /* Brucia: invalid frequency state must not index log/table arrays. */\n    if (nLow < 1 || nLow > MAX_QMF_BANDS / 2 || kStart < 1 || kStart > 64 ||\n        k2 < 1 || k2 > 64 || noiseBands < 0 || noiseBands > 3) return 0;',
+        '/* Brucia: invalid frequency state must not index log/table arrays. */'
     ),
     (
         ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbrfreq.c",
@@ -58,7 +74,8 @@ conflicts = [
     (
         ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbrfreq.c",
         r'(sbrFreq->numNoiseFloorBands = CalcFreqNoise\([^\n]+;)(?!\n    if \(sbrFreq->numNoiseFloorBands < 1\))',
-        r'\1\n    if (sbrFreq->numNoiseFloorBands < 1) return -1; /* Brucia: propagate invalid noise table */'
+        r'\1\n    if (sbrFreq->numNoiseFloorBands < 1) return -1; /* Brucia: propagate invalid noise table */',
+        '/* Brucia: propagate invalid noise table */'
     ),
     (
         ".pio/libdeps/*/ESP8266Audio/src/libhelix-aac/sbr.c",
@@ -319,27 +336,116 @@ conflicts = [
     ),
 ]
 
-for file_pattern, search, replace in conflicts:
-    if env is not None:
-        # Do not rewrite another board's dependencies during an unrelated build.
-        lib_root = os.path.join(env.subst("$PROJECT_LIBDEPS_DIR"), env.get("PIOENV"))
-        file_pattern = file_pattern.replace(".pio/libdeps/*/", lib_root + os.sep, 1)
-    files = glob.glob(file_pattern)
-    for file_path in files:
+
+LIBDEPS_PREFIX = ".pio/libdeps/*/"
+SBR_CACHE_MARKER = 'Brucia: cached validated noise bounds'
+GROUP_REFERENCE = re.compile(r'\\(?:\d|g<)')
+
+
+def patch_entries():
+    """Normalize the table to (relative path, search, replace, applied marker)."""
+    entries = []
+    for item in conflicts:
+        file_pattern, search, replace = item[:3]
+        marker = item[3] if len(item) > 3 else None
+        if not file_pattern.startswith(LIBDEPS_PREFIX):
+            raise PatchError(f"Unexpected patch path: {file_pattern}")
+        if marker is None:
+            if GROUP_REFERENCE.search(replace):
+                raise PatchError(f"Group-reference replacement needs a marker: {file_pattern}")
+            marker = replace
+        entries.append((file_pattern[len(LIBDEPS_PREFIX):], search, replace, marker))
+    return entries
+
+
+def patch_tree(root, log=print):
+    """Patch one environment's libdeps directory. Returns a list of errors.
+
+    Libraries that are not installed in ``root`` are skipped. For an installed
+    library every targeted file must exist and every entry must either already
+    be applied (marker present) or still match its search pattern.
+    """
+    errors = []
+    for relative, search, replace, marker in patch_entries():
+        library = relative.split("/", 1)[0]
+        if not os.path.isdir(os.path.join(root, library)):
+            continue
+        file_path = os.path.join(root, *relative.split("/"))
+        if not os.path.isfile(file_path):
+            errors.append(f"{file_path}: missing from installed library {library}")
+            continue
         try:
             with open(file_path, 'r') as f:
                 content = f.read()
-
-            if replace in content:
-                print(f"Already patched: {file_path}")
+            if marker in content:
+                new_content = content
+                log(f"Already patched: {file_path}")
+            elif re.search(search, content):
+                new_content = re.sub(search, replace, content)
+            else:
+                errors.append(f"{file_path}: pattern no longer matches: {search[:80]}")
                 continue
-
-            new_content = re.sub(search, replace, content)
             if file_path.endswith('libhelix-aac/sbrhuff.c'):
                 new_content = cache_sbr_noise_bounds(new_content)
+                if SBR_CACHE_MARKER not in new_content:
+                    errors.append(f"{file_path}: DecodeSBRNoise not found for bound caching")
+                    continue
             if new_content != content:
                 with open(file_path, 'w') as f:
                     f.write(new_content)
-                print(f"Patched: {file_path}")
-        except Exception as e:
-            print(f"Failed to patch {file_path}: {e}")
+                log(f"Patched: {file_path}")
+        except (OSError, UnicodeDecodeError, re.error) as error:
+            errors.append(f"{file_path}: {error}")
+    return errors
+
+
+def patch_roots(roots, log=print):
+    errors = []
+    for root in roots:
+        errors.extend(patch_tree(root, log))
+    if errors:
+        raise PatchError("Library patch failed:\n  " + "\n  ".join(errors))
+
+
+def _scons_patch(build_env, stage, log=print):
+    # Do not rewrite another board's dependencies during an unrelated build.
+    root = os.path.join(build_env.subst("$PROJECT_LIBDEPS_DIR"), build_env.get("PIOENV"))
+    print(f"Patching library conflicts with ESP32 core ({stage})...")
+    try:
+        patch_roots([root], log)
+    except PatchError as error:
+        sys.stderr.write(f"Error: {error}\n")
+        build_env.Exit(1)
+    return root
+
+
+def register_post_install_pass(build_env, root):
+    """Re-run the table when the first libdeps source is collected for compiling.
+
+    PlatformIO collects library sources only after the Library Dependency
+    Finder has installed every dependency, and compiles them only after all
+    SConscripts are read, so this pass sees late installs and precedes every
+    compile. It patches the whole table, including installed libraries this
+    environment does not compile.
+    """
+    prefix = os.path.realpath(root) + os.sep
+    state = {"done": False}
+
+    def after_dependency_install(node):
+        if not state["done"]:
+            source = os.path.realpath(node.srcnode().get_abspath())
+            if source.startswith(prefix):
+                state["done"] = True
+                _scons_patch(build_env, "after dependency install",
+                             lambda message: None if message.startswith("Already") else print(message))
+        return node
+
+    build_env.AddBuildMiddleware(after_dependency_install)
+    return after_dependency_install
+
+
+if env is not None:
+    register_post_install_pass(env, _scons_patch(env, "pre-script"))
+elif __name__ in ("__main__", "<run_path>"):
+    print("Patching library conflicts with ESP32 core...")
+    patch_roots(sorted(p for p in glob.glob(".pio/libdeps/*") if os.path.isdir(p)))
