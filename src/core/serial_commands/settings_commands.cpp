@@ -16,6 +16,14 @@ uint32_t settingsCallback(cmd *c) {
 
     if (setting_name.length() == 0 && setting_value.length() == 0) {
         // no args, just prints current config
+        // Brucia: in companion mode Serial carries the app's frames; print through serialDevice,
+        // which a routed CMD captures into ACK.d.out (cut at its 3500-byte cap).
+        if (g_companionActive) {
+            String json;
+            serializeJsonPretty(jsonDoc, json);
+            serialDevice->println(json);
+            return true;
+        }
         serializeJsonPretty(jsonDoc, Serial);
         serialDevice->println("");
         return true;

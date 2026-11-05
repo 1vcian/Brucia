@@ -27,6 +27,8 @@ object PcapReader {
         val be = beMagic == 0xa1b2c3d4L || beMagic == 0xa1b23c4dL
         if (!le && !be) return emptyList() // not a classic pcap
         fun rd32(o: Int) = if (le) u32le(o) else u32be(o)
+        // Magic a1b23c4d: the record fraction is nanoseconds, not microseconds.
+        val nanos = leMagic == 0xa1b23c4dL || (!le && beMagic == 0xa1b23c4dL)
 
         val linktype = rd32(20).toInt()
         val out = ArrayList<Record>()
@@ -36,13 +38,13 @@ object PcapReader {
             val tsFrac = rd32(off + 4)
             val caplen = rd32(off + 8).toInt()
             off += 16
-            if (caplen <= 0 || off + caplen > bytes.size) break
+            if (caplen <= 0 || off.toLong() + caplen > bytes.size) break
             var frame = bytes.copyOfRange(off, off + caplen)
             if (linktype == LINKTYPE_RADIOTAP && frame.size >= 4) {
                 val itLen = (frame[2].toInt() and 0xFF) or ((frame[3].toInt() and 0xFF) shl 8)
                 if (itLen in 1 until frame.size) frame = frame.copyOfRange(itLen, frame.size)
             }
-            out.add(Record(tsSec * 1_000_000 + tsFrac, frame))
+            out.add(Record(tsSec * 1_000_000 + if (nanos) tsFrac / 1000 else tsFrac, frame))
             off += caplen
             if (out.size >= MAX_RECORDS) break
         }

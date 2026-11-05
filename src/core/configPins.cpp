@@ -313,7 +313,9 @@ void BruceConfigPins::loadFile(JsonDocument &jsonDoc, bool checkFS) {
     }
     file.close();
 
-    serializeJsonPretty(jsonDoc, Serial);
+    // Brucia: a pin setter (CLI `settings irRx ...`, companion config commands) saves, which loads
+    // and printed the whole file onto Serial: the app's frame stream in companion mode.
+    if (!g_companionActive) serializeJsonPretty(jsonDoc, Serial);
 }
 
 void BruceConfigPins::fromFile(bool checkFS) {
@@ -327,7 +329,7 @@ void BruceConfigPins::fromFile(bool checkFS) {
 void BruceConfigPins::createFile() {
     JsonDocument jsonDoc;
     toJson(jsonDoc.to<JsonObject>());
-    serializeJsonPretty(jsonDoc, Serial);
+    if (!g_companionActive) serializeJsonPretty(jsonDoc, Serial); // Brucia: see loadFile
 
     // Open file for writing
     FS *fs = &LittleFS;

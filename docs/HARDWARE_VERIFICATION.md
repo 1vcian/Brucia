@@ -122,3 +122,70 @@ Files transport. App UI behavior, captures, Mifare, speaker, Sub-GHz UI, USB
 permission/flash, in-app update, FM PCM and anything that transmits remain manual.
 `tools/test_hw_acceptance.py` exercises it against `tools/mock_device.py`; a simulated pass
 is not hardware evidence.
+
+### Soak mode (`--soak <minutes>`, long-session evidence for S08)
+
+`--soak` repeats the same passive, allowlisted operations for a set time and records how the
+device holds up. It needs `features.diag`; without `--only` it runs `caps`, `provenance`,
+`diag_shape`, the soak, then `diag_counters` over the whole run.
+
+```sh
+python3 tools/hw_acceptance.py --port /dev/cu.usbmodemXXXX --dry-run --soak 20 \
+    --streams wifi.probe,wifi.sta,subghz.raw                     # print the interval frames
+python3 tools/hw_acceptance.py --port /dev/cu.usbmodemXXXX --soak 20 \
+    --streams wifi.probe,wifi.sta,subghz.raw --out hw-acceptance-reports
+```
+
+Each interval (`--soak-interval`, default 30 s) sends, in this order: 20 sequential PINGs and a
+10-PING pipelined burst (`--soak-pings`, `--soak-burst`); `storage list /`; `fs_read` of the
+smallest file at `/` (or `--read-path`), whose size and CRC32 must equal the first read; one
+scratch upload cycle exactly as the `fs_upload` check (new token and
+`/brucia-acceptance-<UTC>-<hex>.txt` each time, commit, read-back, `storage remove`, listing
+confirms it is gone); one receive-only stream ON, `--stream-secs` of listening, OFF and
+`--quiet-secs` that must stay silent, taking `--streams` in turn (`wifi.probe`, `wifi.sta`,
+`subghz.raw` only); then PINGs whenever `--soak-keepalive` (default 5 s) passed since the last
+frame, until the interval ends; then `diag`. The device leaves companion mode after 60 s without
+a host frame, so the keepalive must stay at or under 30 s and `--stream-secs`/`--quiet-secs`
+under 30 s with `--soak`. Nothing outside the existing allowlist is sent: no active scan
+(`wifi.ap`, `ble.scan`), no `jam_detect`, nothing that transmits.
+
+Recorded per interval (one row per `diag`, in the JSON report and in
+`hw-acceptance-<UTC>-soak.csv`): heap free/min_free/largest, uptime and reset reason, device
+`rx_frames`/`tx_frames` deltas next to the frames the runner sent/received, reject, ERR,
+noise-byte, resync and undecodable-frame deltas, PING count/loss and p50/p95/p99/max, the
+stream and its event count, and the duration of every operation (all operations with their
+start time and result are in the JSON `soak.ops`). The Markdown report adds a soak summary,
+findings, an operation-timing table and the time series.
+
+Every finding FAILs the soak (exit 1): a failed or timed-out operation (lost PING, burst out
+of order, fs_read CRC change, upload/remove failure, SUB not ACKed, events after OFF), device
+link counters that differ from the runner's frame counts in any interval, any reject
+(`rx_zero_len`, `rx_oversize`, `rx_alloc_fail`, `rx_stale`, `rx_bad_json`), ERR, `busy_409`,
+new session, non-frame byte or resync (device text in companion mode is a regression since
+batch 8), an unexpected reboot (reset reason changed, uptime or counters went back; the soak
+stops there), an overall PING p99 above `--max-p99-ms`, or a heap leak. A single interval with
+p99 above the limit, a falling largest free block and a heap trend that could not be assessed
+are warnings.
+
+Heap leak rule: samples from the first `max(1, number of streams)` intervals are a warm-up and
+are excluded (the first ON of each stream sets up Wi-Fi/CC1101 driver memory once). Over the
+remaining samples the runner fits a Theil-Sen slope of `heap.free` (median of pairwise slopes,
+robust against single outliers) and reports it in bytes per hour with the least-squares slope.
+It FAILs when the decline is steeper than `max(--soak-max-leak, --heap-tolerance / hours)`:
+`--soak-max-leak` defaults to 2048 B/h (the T-Embed had about 100-115 KB free in companion
+mode; 2 KB/h would take about half of that in a 24-hour session), and `--heap-tolerance`
+(4096 B, the allocator noise floor the `heap` check already uses) keeps short runs from
+failing on noise. The report states this detection limit: about 13-14 KB/h for a 20-minute
+run, 2048 B/h from about 2 hours on. A leak smaller than the limit is not ruled out.
+
+Ctrl-C (or a lost link) ends the soak, sends OFF for an active stream and aborts or removes the
+scratch upload, then writes the JSON, Markdown and CSV reports marked interrupted (exit 130).
+
+What a soak PASS proves: over that time, on that board and firmware, the companion link
+carried the passive mix with exact frame accounting, no rejects or device noise, no reboot, no
+heap decline above the stated limit, scratch files cleaned up and streams silent after OFF. It
+does not prove radio receive quality (the streams may see 0 events), app-side behaviour, USB
+unplug/replug, battery/thermal behaviour, long sessions with transmitting features, or that a
+leak below the detection limit is absent. `tools/test_hw_acceptance.py` runs seconds-long soaks
+against `tools/mock_device.py` (heap leak, reboot, noise, idle exit, Ctrl-C); those prove the
+runner, not the device.

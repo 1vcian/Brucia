@@ -118,8 +118,8 @@ object EspProtocol {
     /**
      * Extract the MD5 digest from a SPI_FLASH_MD5 response as a lowercase 32-char hex
      * string. The ROM loader returns the digest as 32 ASCII hex characters; the software
-     * stub returns it as 16 raw bytes. The trailing [statusLen] status bytes are dropped
-     * first. Returns null if the payload is too short to hold a digest.
+     * stub returns it as 16 raw bytes. The trailing [statusLen] status bytes (4 ROM, 2 stub)
+     * are dropped first. Returns null if the payload is too short to hold a digest.
      */
     fun parseMd5(resp: Response, statusLen: Int = 2): String? {
         val n = resp.data.size - statusLen
@@ -159,8 +159,9 @@ object EspProtocol {
     }
 
     /**
-     * Parse a de-SLIP'd response frame. [statusLen] is 2 for the ROM loader and 4
-     * for the software stub; the status/error bytes are the tail of the data field.
+     * Parse a de-SLIP'd response frame. [statusLen] is 4 for the ESP32-family ROM loader
+     * (status, error, two reserved bytes) and 2 for the esptool stub; the status/error
+     * bytes start that many bytes before the end of the data field.
      */
     fun parseResponse(frame: ByteArray, statusLen: Int = 2): Response? {
         if (frame.size < 8) return null
@@ -175,6 +176,11 @@ object EspProtocol {
         if (data.size >= statusLen) {
             status = data[data.size - statusLen].toInt() and 0xFF
             error = data[data.size - statusLen + 1].toInt() and 0xFF
+        } else if (data.size >= 2) {
+            // Shorter than expected (a 2-byte stub reply while 4 ROM bytes were expected): the
+            // status is still its first two bytes, as esptool's check_command reads it.
+            status = data[0].toInt() and 0xFF
+            error = data[1].toInt() and 0xFF
         }
         return Response(command, value, data, status, error)
     }

@@ -19,6 +19,13 @@ uint32_t decryptFileCallback(cmd *c) {
 
     if (!filepath.startsWith("/")) filepath = "/" + filepath;
 
+    // Brucia: an empty password makes readDecryptedFile() ask for one on the device keyboard; in
+    // companion mode nobody is at the device.
+    if (g_companionActive && password.length() == 0) {
+        serialDevice->println("a password is required in companion mode (no keyboard prompt)");
+        return false;
+    }
+
     cachedPassword = password;
 
     FS *fs;
@@ -82,6 +89,13 @@ uint32_t typeFileCallback(cmd *c) {
     password.trim();
 
     if (!filepath.startsWith("/")) filepath = "/" + filepath;
+
+    // Brucia: an empty password makes readDecryptedFile() ask for one on the device keyboard; in
+    // companion mode nobody is at the device.
+    if (g_companionActive && password.length() == 0) {
+        serialDevice->println("a password is required in companion mode (no keyboard prompt)");
+        return false;
+    }
 
     cachedPassword = password;
 

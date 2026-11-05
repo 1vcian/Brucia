@@ -190,9 +190,15 @@ object SubFile {
      * txp path is used, otherwise there is no USB push and TX is unavailable.
      */
     fun transmitCommand(sig: SubSignal, repeat: Int = 10): String? {
+        // The firmware splits the command on spaces and converts frequency/key with std::stoul /
+        // std::stoull, which throw (aborting the device) on text or out-of-range values. File-supplied
+        // fields are checked here: uint32 frequency, a single-token name, at most 64 bits of hex key.
+        if (sig.frequencyHz !in 1..0xFFFFFFFFL) return null
         if (!sig.isRaw) {
             if (sig.keyHex.isEmpty() || sig.bits <= 0) return null
+            if (!TX_KEY.matches(sig.keyHex)) return null
             val name = OokProtocols.byAnyName(sig.protocol)?.canonical ?: sig.protocol
+            if (name.isEmpty() || name.any { it.isWhitespace() }) return null
             val te = if (sig.te > 0) sig.te else 0
             return "subghz txp $name ${sig.frequencyHz} ${sig.bits} ${sig.keyHex} $te $repeat"
         }
@@ -202,6 +208,9 @@ object SubFile {
         val name = OokProtocols.byAnyName(decoded.flipperProtocol)?.canonical ?: decoded.protocol
         return "subghz txp $name ${sig.frequencyHz} ${decoded.bits} ${decoded.codeHex} ${decoded.teMicros} $repeat"
     }
+
+    /** Hex key the firmware's stoull accepts without overflow: up to 64 significant bits. */
+    private val TX_KEY = Regex("0*[0-9A-Fa-f]{1,16}")
 
     /** One-line human summary for the UI. */
     fun summary(sig: SubSignal): String {

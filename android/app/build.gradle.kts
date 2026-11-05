@@ -52,6 +52,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Opt-in JaCoCo for host unit tests: `./gradlew -Pbrucia.coverage :app:createDebugUnitTestCoverageReport`
+            // (report in app/build/reports/coverage/test/debug). Off by default so the normal
+            // testDebugUnitTest/assembleDebug run is not instrumented. See TESTS.md "Unit-test coverage".
+            enableUnitTestCoverage = providers.gradleProperty("brucia.coverage").isPresent
+        }
         release {
             isMinifyEnabled = false
             if (hasKeystore) signingConfig = signingConfigs.getByName("release")

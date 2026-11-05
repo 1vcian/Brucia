@@ -25,6 +25,17 @@ Checked here (static, sibling of test_companion_serial_input.py):
   - `bjs_prompt_unavailable` itself: false outside companion mode, and writes the note into the
     script output.
 
+  - the CMD path: every Bruce CLI callback (what the app's routed CMD, a script's serial.cmd() and
+    the CLI-backed JS helpers run) is followed through the module code it calls (heuristic call
+    graph over src/: free functions, methods of the same class, constructors written `X{`,
+    `X(` or `new X(`, and member calls whose name is defined once; `gset*Pin(true)` is the pin
+    menu, `gset*Pin(false)` is not). Each prompt it can reach needs a companion guard that
+    returns first (`if (... g_companionActive ...) ... return`, not negated, or
+    `bjs_prompt_unavailable(`) in the callback or in a function on the way, before the call that
+    leads to the prompt; or a CMD_ALLOWLIST entry (callback, function holding the prompt) with a
+    reason. Not followed: virtual calls through an interface pointer with several
+    implementations, function pointers and lambdas stored elsewhere, third-party libraries.
+
 Not covered: prompts inside Bruce module code reached only from the on-device menus, third-party
 libraries, and waits that end on their own (radio reads with a timeout argument; see the table in
 proto/PROTOCOL.md "Console input and scripts in companion mode").
@@ -72,6 +83,143 @@ JS_ALLOWLIST = {
 
 # (file, function) -> reason. Prompt callers in the CLI that need no companion guard.
 CLI_ALLOWLIST = {}
+
+
+# --- CMD path: CLI callbacks followed into the module code they call -------------------------
+# A prompt for the CMD scan: the PROMPT helpers plus a pin chooser asked to open its menu.
+CMD_PROMPT = re.compile(PROMPT.pattern + r"|\bgset\w+Pin\s*\(\s*true\s*\)")
+# Companion guard that returns before the prompt: a non-negated g_companionActive in an if condition
+# whose body returns, or the script helper.
+CMD_GUARD = re.compile(
+    r"\bif\s*\((?:[^;{}]*?[^!\w\s]|\s*)?\s*g_companionActive\b[^;{}]*\)\s*(\{[^{}]*?)?\breturn\b"
+    r"|\bbjs_prompt_unavailable\s*\(")
+CALL = re.compile(r"\b([A-Za-z_]\w*)\s*[({]")
+# Helpers that are themselves the prompt: reported where they are called, not entered.
+PROMPT_HELPERS = {"keyboard", "hex_keyboard", "num_keyboard", "loopOptions", "loopSD", "displayMessage",
+                  "viewFile", "wifiConnectMenu", "optionsMenu", "loopOptionsWebUi", "qrcode_display", "readFs"}
+NOT_CALLS = {"if", "for", "while", "switch", "return", "sizeof", "catch", "defined"}
+# Member names too generic to resolve by name alone.
+GENERIC_MEMBERS = {"close", "begin", "end", "load", "open", "read", "write", "setup", "available", "print",
+                   "println", "printf", "flush", "remove", "exists", "clear", "push_back", "size", "loop",
+                   "init", "stop", "start", "run", "send", "get", "set", "update", "draw", "show",
+                   "c_str", "length", "substring", "indexOf", "toInt", "trim", "save", "erase", "emulate",
+                   "clone", "reset", "parse"}
+CTOR = re.compile(r"^(\w+)::(\1)\s*\([^;{}]*\)\s*(?::[^{;]*)?\{", re.M)
+MAX_DEPTH = 7
+
+
+def _span_end(code, brace):
+    depth, i = 0, brace
+    while i < len(code):
+        if code[i] == "{":
+            depth += 1
+        elif code[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return len(code) - 1
+
+
+def index_functions(texts):
+    """{short name: [(qualified name, file, body)]} for every function (and constructor) in texts
+    ({rel path: stripped code})."""
+    defs = {}
+    for rel, code in texts.items():
+        spans = list(functions(code))
+        for m in CTOR.finditer(code):
+            spans.append((f"{m.group(1)}::{m.group(1)}", m.start(), _span_end(code, m.end() - 1)))
+        for name, a, b in spans:
+            defs.setdefault(name.split("::")[-1], []).append((name, rel, code[a:b + 1]))
+    return defs
+
+
+def _callees(qual, body, defs):
+    """[(callee key, call offset in body)], first call of each callee."""
+    cls = qual.split("::")[0] if "::" in qual else None
+    out, seen = [], set()
+    for m in CALL.finditer(body, body.index("{")):
+        n = m.group(1)
+        if n in NOT_CALLS or n in PROMPT_HELPERS or re.match(r"gset\w+Pin$", n):
+            continue
+        cands = defs.get(n, [])
+        if not cands:
+            continue
+        pre = body[max(0, m.start() - 2):m.start()]
+        member = pre.endswith(".") or pre.endswith("->")
+        if member and (len(cands) > 1 or n in GENERIC_MEMBERS):
+            continue
+        if cls and not member:
+            own = [c for c in cands if c[0] == f"{cls}::{n}"]
+            if own:
+                cands = own
+        ctor = [c for c in cands if c[0] == f"{n}::{n}"]
+        if ctor:
+            cands = ctor
+        if len(cands) > 3:
+            continue
+        for c in cands:
+            key = (c[0], c[1])
+            if key not in seen:
+                seen.add(key)
+                out.append((key, m.start()))
+    return out
+
+
+def reachable_prompts(texts, cli_dir=CLI_DIR):
+    """[(callback, owner function, owner file, line, call text, guarded, path)] for every prompt the
+    CLI callbacks in cli_dir can reach."""
+    defs = index_functions(texts)
+    bodies = {(q, f): b for v in defs.values() for q, f, b in v}
+    found = []
+    for rel in sorted(t for t in texts if t.startswith(cli_dir + "/")):
+        for name, _, _ in functions(texts[rel]):
+            if not name.endswith("Callback"):
+                continue
+            # (node, path of (qualified name, body, offset of the call/prompt in it) so far)
+            stack = [((name, rel), [])]
+            visited = set()
+            while stack:
+                node, path = stack.pop()
+                if node in visited or len(path) >= MAX_DEPTH:
+                    continue
+                visited.add(node)
+                body = bodies[node]
+                for m in CMD_PROMPT.finditer(body):
+                    hops = path + [(node[0], body, m.start())]
+                    guarded = any(CMD_GUARD.search(b[:off]) for _, b, off in hops)
+                    code = texts[node[1]]
+                    line = code.count("\n", 0, code.index(body)) + body.count("\n", 0, m.start()) + 1
+                    found.append((name, node[0], node[1], line, m.group(0).strip(), guarded,
+                                  " > ".join(q for q, _, _ in hops)))
+                for key, off in _callees(node[0], body, defs):
+                    stack.append((key, path + [(node[0], body, off)]))
+    return found
+
+
+def src_texts():
+    return {str(p.relative_to(ROOT)): strip_code(p.read_text(errors="replace"))
+            for p in sorted((ROOT / "src").rglob("*")) if p.suffix in EXTS and p.is_file()}
+
+
+# (callback, function holding the prompt) -> reason. CMD-path prompts that need no companion guard.
+CMD_ALLOWLIST = {
+    ("snifferCallback", "sniffer_setup"):
+        "raw sniffer mode: runs until ESC at the device by design (the app's console sniffer); "
+        "refused in a companion script; its capture-mode menu opens only when a person presses SEL",
+    ("irTxFileCallback", "txIrFile"):
+        "pause loop entered only after a person presses SEL at the device during the transmission; "
+        "without a person the file is sent to its end",
+    ("irTxBufferCallback", "txIrFile"):
+        "same txIrFile pause, entered only after a person presses SEL; the buffer is empty in "
+        "companion mode anyway (no console input)",
+    ("rfRxCallback", "rfReceiveSignal"):
+        "`while (!check(EscPress))` receive loop bounded by its timeout argument (the CLI passes 10 s); "
+        "ESC only ends it early, and a stopped companion script sees ESC",
+    ("rfScanCallback", "rf_scan"):
+        "`while (!check(EscPress))` sweep bounded by its step count (the CLI passes 10000 steps); ESC "
+        "only ends it early",
+}
 
 
 def strip_code(s):
@@ -161,6 +309,95 @@ class CompanionPrompts(unittest.TestCase):
         body = body_of(helpers, "bool cliFromCompanionScript()")
         self.assertIn("g_companionActive && interpreterTaskHandler != NULL", body)
         self.assertIn("xTaskGetCurrentTaskHandle() == interpreterTaskHandler", body)
+
+    def test_cmd_path_prompts_fail_fast_in_companion_mode(self):
+        rows = reachable_prompts(src_texts())
+        bad = [r for r in rows if not r[5] and (r[0], r[1]) not in CMD_ALLOWLIST]
+        self.assertEqual(bad, [], "a CLI command (routed CMD / serial.cmd()) reaches an on-device prompt "
+                         "with no companion guard returning first on the way; guard it (`if "
+                         "(g_companionActive) { serialDevice->println(\"<why>\"); return false; }`) or add a "
+                         "CMD_ALLOWLIST entry with a reason:\n" +
+                         "\n".join(f"{r[2]}:{r[3]} {r[4]}  via {r[6]}" for r in bad))
+        # The batch 14 leftovers, now guarded on the way (not allowlisted).
+        guarded = {(r[0], r[1]) for r in rows if r[5]}
+        for key in (("irRxCallback", "IrRead::setup"), ("scanHostsCallback", "ARPScanner::setup"),
+                    ("listenTCPCallback", "listenTcpPort"), ("decryptFileCallback", "readDecryptedFile"),
+                    ("loaderCallback", "loaderCallback")):
+            self.assertIn(key, guarded, key)
+        self.assertGreater(len(rows), 15, "the call graph stopped finding CLI prompts")
+        for key, reason in CMD_ALLOWLIST.items():
+            self.assertIn(key, {(r[0], r[1]) for r in rows if not r[5]}, f"stale CMD_ALLOWLIST entry: {key}")
+            self.assertGreater(len(reason), 40, key)
+
+    def test_cmd_path_detector(self):
+        texts = {
+            CLI_DIR + "/x_commands.cpp": strip_code(
+                'uint32_t aCallback(cmd *c) {\n  helperA();\n  return true;\n}\n'
+                'uint32_t bCallback(cmd *c) {\n  if (g_companionActive) {\n    p("no");\n    return false;\n  }\n'
+                '  helperA();\n  return true;\n}\n'
+                'uint32_t cCallback(cmd *c) {\n  Reader{1};\n  return true;\n}\n'
+                'uint32_t dCallback(cmd *c) {\n  if (!g_companionActive) return false;\n  helperA();\n  return true;\n}\n'
+                'uint32_t eCallback(cmd *c) {\n  gsetIrRxPin(false);\n  r->onlyHere();\n  return true;\n}\n'),
+            "src/modules/m.cpp": strip_code(
+                'void helperA() {\n  helperB(3);\n}\n'
+                'int helperB(int n) {\n  return loopOptions(options);\n}\n'
+                'Reader::Reader(int x) {\n  setup();\n}\n'
+                'void Reader::setup() {\n  if (headless && g_companionActive) {\n    missing = true;\n    return;\n  }\n'
+                '  gsetIrRxPin(true);\n}\n'
+                'void Other::onlyHere() {\n  String s = keyboard("x");\n}\n'),
+        }
+        rows = {(r[0], r[1], r[4], r[5]) for r in reachable_prompts(texts)}
+        self.assertIn(("aCallback", "helperB", "loopOptions(", False), rows)
+        self.assertIn(("bCallback", "helperB", "loopOptions(", True), rows)
+        self.assertIn(("cCallback", "Reader::setup", "gsetIrRxPin(true)", True), rows)
+        self.assertIn(("dCallback", "helperB", "loopOptions(", False), rows)  # negated: not a guard
+        self.assertIn(("eCallback", "Other::onlyHere", "keyboard(", False), rows)  # unique member name
+        self.assertFalse(any(r[0] == "eCallback" and "gsetIrRxPin" in r[2] for r in rows))
+        texts[CLI_DIR + "/x_commands.cpp"] = texts[CLI_DIR + "/x_commands.cpp"].replace(
+            "if (headless && g_companionActive)", "if (headless)")
+        texts["src/modules/m.cpp"] = texts["src/modules/m.cpp"].replace("if (headless && g_companionActive)", "if (headless)")
+        rows = {(r[0], r[1], r[4], r[5]) for r in reachable_prompts(texts)}
+        self.assertIn(("cCallback", "Reader::setup", "gsetIrRxPin(true)", False), rows)
+
+    def test_cmd_path_specific_behavior(self):
+        # The routed `listen` is refused in companion mode (not only in a script): it always asks for
+        # the port on the device keyboard.
+        wifi = strip_code((ROOT / CLI_DIR / "wifi_commands.cpp").read_text())
+        listen = body_of(wifi, "uint32_t listenTCPCallback(")
+        self.assertLess(listen.index("if (g_companionActive)"), listen.index("listenTcpPort()"))
+        webui = body_of(wifi, "uint32_t webuiCallback(")
+        self.assertLess(webui.index("if (g_companionActive && noAp && !WiFi.isConnected())"), webui.index("startWebUi("))
+        # IR: no pin menu in companion mode; the read fails at once and the companion ir_rx says why.
+        ir = strip_code((ROOT / "src/modules/ir/ir_read.cpp").read_text())
+        setup = body_of(ir, "void IrRead::setup()")
+        self.assertLess(setup.index("if (headless && g_companionActive)"), setup.index("gsetIrRxPin(true)"))
+        self.assertIn("if (rxPinMissing)", body_of(ir, "String IrRead::loop_headless(int max_loops)"))
+        infra = strip_code((ROOT / "src/companion/infrared.cpp").read_text())
+        rx = body_of(infra, "static void runIrRx(uint32_t id)")
+        self.assertLess(rx.index("if (!reader->rxPinReady())"), rx.index("loop_headless("))
+        # BadUSB payload: WAIT_FOR_BUTTON_PRESS ends the payload in companion mode before its loop.
+        ducky = strip_code((ROOT / "src/modules/badusb_ble/ducky_typer.cpp").read_text())
+        wait = ducky[ducky.index("PriCmd->type == DuckyCommandType_WaitForButtonPress"):]
+        self.assertLess(wait.index("if (g_companionActive)"), wait.index("while (!waitSelect)"))
+        self.assertLess(wait.index("goto EXIT;"), wait.index("while (!waitSelect)"))
+        # `js <file>` in companion mode would leave a task waiting for a foreground nobody gives it
+        # (and later script_runs `interpreter busy`): refused before a script is started.
+        js = body_of(strip_code((ROOT / CLI_DIR / "interpreter_commands.cpp").read_text()), "static uint32_t jsCallback(")
+        self.assertLess(js.index("interpreter_state = -1;"), js.index("if (g_companionActive) {"))
+        self.assertLess(js.index("if (g_companionActive) {"), js.index("run_bjs_script_headless(*fs, filepath)"))
+        # ARPScanner::setup (Bruce `arp`, Ethernet ARP scan): every early return between taking the
+        # lwIP core lock (CONFIG_LWIP_TCPIP_CORE_LOCKING=1 in the pinned sdkconfig) and releasing
+        # it releases it first (backlog F04).
+        arp = strip_code((ROOT / "src/modules/ethernet/ARPScanner.cpp").read_text())
+        setup = body_of(arp, "void ARPScanner::setup()")
+        locked = setup[setup.index("LOCK_TCPIP_CORE();"):setup.index("\n    UNLOCK_TCPIP_CORE();")]
+        returns = [m.start() for m in re.finditer(r"\breturn\b", locked)]
+        self.assertEqual(len(returns), 3)
+        for pos in returns:
+            self.assertTrue(locked[:pos].rstrip().endswith("UNLOCK_TCPIP_CORE();"), locked[max(0, pos - 120):pos])
+        # `settings` with no arguments printed the JSON straight to Serial (the frame stream).
+        settings = body_of(strip_code((ROOT / CLI_DIR / "settings_commands.cpp").read_text()), "uint32_t settingsCallback(")
+        self.assertLess(settings.index("if (g_companionActive)"), settings.index("serializeJsonPretty(jsonDoc, Serial)"))
 
     def test_allowlists_are_live_and_reasoned(self):
         for allow, rows in ((JS_ALLOWLIST, scan_dir(JS_DIR, JS_GUARD)), (CLI_ALLOWLIST, scan_dir(CLI_DIR, CLI_GUARD))):

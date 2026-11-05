@@ -77,16 +77,27 @@ static String getParsedProtocolName(const decode_results &r) {
 }
 
 void IrRead::setup() {
-    irrecv.enableIRIn();
-
-#ifdef USE_BOOST
-    PPM.enableOTG();
-#endif
+    // Brucia: the pin check comes first (it has no side effects), so a headless read in companion
+    // mode with no usable pin returns before the receiver is armed on that pin.
     const std::vector<std::pair<String, int>> pins = IR_RX_PINS;
     int count = 0;
     for (auto pin : pins) {
         if (pin.second == bruceConfigPins.irRx) count++;
     }
+    if (count == 0) {
+        // Brucia: the pin menu waits for a person at the device. A headless read in companion mode
+        // (routed `ir rx`, companion `ir_rx`, a script's ir.read) fails instead; see loop_headless().
+        if (headless && g_companionActive) {
+            rxPinMissing = true;
+            return;
+        }
+    }
+
+    irrecv.enableIRIn();
+
+#ifdef USE_BOOST
+    PPM.enableOTG();
+#endif
     if (count == 0) gsetIrRxPin(true);
 
     setup_ir_pin(bruceConfigPins.irRx, INPUT);
@@ -448,6 +459,10 @@ void IrRead::save_device() {
 }
 
 String IrRead::loop_headless(int max_loops) {
+    if (rxPinMissing) {
+        usbConsole().println("IR RX pin not configured (settings irRx <pin>)");
+        return "";
+    }
 
     while (!irrecv.decode(&results)) {
         max_loops -= 1;
@@ -455,7 +470,15 @@ String IrRead::loop_headless(int max_loops) {
             usbConsole().println("timeout"); // `ir rx` CLI output; captured into the ACK in companion mode
             return "";
         }
-        delay(1000);
+        // Brucia: one second in 100 ms steps; in companion mode ESC ends the wait early (a stopped
+        // companion script sees ESC, see check() in globals.h). Outside companion mode unchanged.
+        for (int step = 0; step < 10; step++) {
+            if (g_companionActive && check(EscPress)) {
+                usbConsole().println("timeout");
+                return "";
+            }
+            delay(100);
+        }
     }
 
     irrecv.disableIRIn();

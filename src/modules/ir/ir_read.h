@@ -12,6 +12,9 @@ public:
     void quickLoop();
 
     String loop_headless(int max_loops);
+    // Brucia: false when headless in companion mode with no usable IR RX pin; the pin menu is not
+    // opened there (nobody is at the device) and loop_headless() fails at once.
+    bool rxPinReady() const { return !rxPinMissing; }
 
 private:
     bool _read_signal = false;
@@ -25,6 +28,7 @@ private:
     String strDeviceContent = "";
     bool headless = false;
     bool raw = false;
+    bool rxPinMissing = false;
 
     void cls();
     void display_banner();

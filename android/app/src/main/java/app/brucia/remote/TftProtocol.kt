@@ -111,7 +111,8 @@ object TftProtocol {
         TftFn.DRAWELLIPSE -> DrawOp.Ellipse(a[0], a[1], a[2], a[3], rgb565ToArgb(a[4]), false)
         TftFn.FILLELLIPSE -> DrawOp.Ellipse(a[0], a[1], a[2], a[3], rgb565ToArgb(a[4]), true)
         TftFn.DRAWIMAGE -> DrawOp.Image(a[0], a[1])
-        TftFn.SCREEN_INFO -> DrawOp.ScreenInfo(a[0], a[1], a[2])
+        // getTftInfo() sends rotation as one byte after width/height (packet size 8), not a uint16.
+        TftFn.SCREEN_INFO -> DrawOp.ScreenInfo(a[0], a[1], if (size >= 8) buf[off + 7].toInt() and 0xFF else 0)
         TftFn.DRAWSTRING, TftFn.PRINT, TftFn.DRAWCENTRESTRING, TftFn.DRAWRIGHTSTRING -> {
             // x,y,size,fg,bg then string bytes (5 uint16 = 10 bytes after fn)
             val textStart = off + 3 + 10

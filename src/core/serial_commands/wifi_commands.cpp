@@ -66,6 +66,12 @@ uint32_t webuiCallback(cmd *c) {
         return false;
     }
 #endif
+    // Brucia: `webui -noAp` without Wi-Fi opens the network menu at the device; in companion mode
+    // nobody is there. Connect first (wifi_connect); the default AP mode needs no menu.
+    if (g_companionActive && noAp && !WiFi.isConnected()) {
+        serialDevice->println("webui -noAp needs Wi-Fi first in companion mode (connect with wifi_connect)");
+        return false;
+    }
     serialDevice->println(String("Starting Web UI ") + !noAp ? "AP" : "STA");
     serialDevice->println("Press ESC to quit");
     startWebUi(!noAp); // MEMO: will quit when check(EscPress)
@@ -74,6 +80,12 @@ uint32_t webuiCallback(cmd *c) {
 }
 #if !defined(LITE_VERSION)
 uint32_t scanHostsCallback(cmd *c) {
+    // Brucia: the scan ends in a host menu at the device (and the scan itself stops only on ESC
+    // there); in companion mode nobody is at the device and the companion loop would wait for one.
+    if (g_companionActive) {
+        serialDevice->println("arp opens a host menu at the device; not available in companion mode");
+        return false;
+    }
     esp_netif_t *esp_netinterface = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (esp_netinterface == nullptr) {
         usbConsole().println("Failed to get netif handle\nTry connecting to a network first");
@@ -102,9 +114,10 @@ uint32_t listenTCPCallback(cmd *c) {
         return false;
     }
 
-    // Brucia: asks for the port on the on-device keyboard; a companion script would hang there.
-    if (cliFromCompanionScript()) {
-        serialDevice->println("listen is not available in a companion script");
+    // Brucia: asks for the port on the on-device keyboard; in companion mode (routed CMD or a
+    // companion script) nobody is at the device to type it.
+    if (g_companionActive) {
+        serialDevice->println("listen asks for the port at the device; not available in companion mode");
         return false;
     }
     listenTcpPort();

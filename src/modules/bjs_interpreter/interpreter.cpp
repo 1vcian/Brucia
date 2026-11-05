@@ -2,9 +2,52 @@
 #include "interpreter.h"
 #include "core/utils.h"
 
+#include "bjs_abort_core.h"
+
 // Brucia companion: headless output capture + execution bound (see interpreter.h).
 String *g_bjsCaptureBuf = nullptr;
 volatile uint32_t g_bjsDeadlineMs = 0;
+volatile bool g_bjsAbort = false;
+
+bool bjs_abort_requested() {
+    if (g_bjsAbort) return true;
+    const uint32_t deadline = g_bjsDeadlineMs;
+    return deadline != 0 && bjsDeadlinePassed(deadline, millis()); // no clock read in interactive use
+}
+
+namespace {
+struct BjsTaskClock {
+    uint32_t now() { return millis(); }
+    void sleep(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
+    bool aborted() { return bjs_abort_requested() || interpreter_state < 0; }
+};
+} // namespace
+
+bool bjs_sleep_ms(int32_t ms) {
+    if (g_bjsDeadlineMs == 0 && !g_bjsAbort) { // interactive use: unchanged
+        vTaskDelay(pdMS_TO_TICKS(ms));
+        return true;
+    }
+    BjsTaskClock clock;
+    return bjsSleepSliced(ms > 0 ? (uint32_t)ms : 0, clock);
+}
+
+// Only ever called on the interpreter task (checked first), so the toggles need no lock.
+static BjsStopKeys s_stopKeys;
+bool bjsStopKeyPressed(volatile bool &btn) {
+    if (interpreterTaskHandler == NULL || xTaskGetCurrentTaskHandle() != interpreterTaskHandler) return false;
+    return s_stopKeys.read(&btn == &EscPress, &btn == &AnyKeyPress);
+}
+
+// Every exit of the interpreter task: drop the companion bound and the abort with it (they belong
+// to this run), and the task handle, so a later script_run is not refused as busy after a run it
+// gave up on. Then the state the waiting loops look for.
+static void bjs_task_finished() {
+    g_bjsDeadlineMs = 0;
+    g_bjsAbort = false;
+    interpreterTaskHandler = NULL;
+    interpreter_state = -1;
+}
 static const size_t BJS_CAPTURE_MAX = 2000; // keep the captured output within one ACK frame
 
 void bjs_capture_begin(String *buf) { g_bjsCaptureBuf = buf; }
@@ -40,13 +83,13 @@ char *scriptName = NULL;
 
 TaskHandle_t interpreterTaskHandler = NULL;
 
-// Brucia companion: stop a runaway headless script once its deadline passes. A zero
-// deadline (normal interactive use) never interrupts.
+// Brucia companion: stop a runaway headless script once its deadline passes or script_run asked
+// for an abort (stop CMD, or it gave up waiting). A zero deadline and no abort (normal interactive
+// use) never interrupts.
 static int bjs_interrupt_handler(JSContext *ctx, void *opaque) {
     (void)ctx;
     (void)opaque;
-    if (g_bjsDeadlineMs != 0 && (int32_t)(millis() - g_bjsDeadlineMs) >= 0) return 1;
-    return 0;
+    return bjs_abort_requested() ? 1 : 0;
 }
 
 void interpreterHandler(void *pvParameters) {
@@ -78,7 +121,7 @@ void interpreterHandler(void *pvParameters) {
     );
     if (mem_size < 2000) {
         print_errorMessage("Failed to allocate memory for JS engine, try restarting the device");
-        interpreter_state = -1;
+        bjs_task_finished();
         vTaskDelete(NULL);
         return;
     }
@@ -86,7 +129,7 @@ void interpreterHandler(void *pvParameters) {
     uint8_t *mem_buf = psramAvailable ? (uint8_t *)ps_malloc(mem_size) : (uint8_t *)malloc(mem_size);
     if (mem_buf == NULL) {
         print_errorMessage("Failed to allocate memory for JS engine, try restarting the device");
-        interpreter_state = -1;
+        bjs_task_finished();
         vTaskDelete(NULL);
         return;
     }
@@ -143,7 +186,7 @@ void interpreterHandler(void *pvParameters) {
 
     printMemoryUsage("deinit interpreter");
 
-    interpreter_state = -1;
+    bjs_task_finished();
     vTaskDelete(NULL);
     return;
 }
@@ -190,6 +233,7 @@ bool run_bjs_script_headless(char *code) {
     scriptName = strdup("index.js");
 
     returnToMenu = true;
+    g_bjsAbort = false; // Brucia: an abort belongs to the run it was requested for
     interpreter_state = 1;
     startInterpreterTask();
     return true;
@@ -208,6 +252,7 @@ bool run_bjs_script_headless(FS &fs, const String &filename) {
         scriptDirpath = strndup(filename.c_str(), slash == 0 ? 1 : slash);
     }
     returnToMenu = true;
+    g_bjsAbort = false; // Brucia: an abort belongs to the run it was requested for
     interpreter_state = 1;
     startInterpreterTask();
     return true;

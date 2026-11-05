@@ -8,6 +8,14 @@ firmware build/provenance, timestamps, a PASS/FAIL/SKIP per check and the raw ev
     python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101
     python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101 --only caps,ping,diag_counters
     python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101 --dry-run
+    python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101 --soak 20 --streams wifi.probe,wifi.sta,subghz.raw
+
+Soak (`--soak <minutes>`, opt-in): repeats intervals of the same passive operations (PINGs,
+`storage list /`, a CRC-checked `fs_read`, the scratch upload cycle, one receive-only stream
+ON/OFF, `diag`) for the given time, keeps the link alive with PINGs (the device leaves companion
+mode after 60 s without a host frame), and records heap, link counters, latency, reset/uptime
+and the timing of every operation per interval; the report adds a soak summary and a CSV time
+series. See Runner.check_soak() and docs/HARDWARE_VERIFICATION.md.
 
 Hard safety: every frame goes through `check_allowed()` (an explicit allowlist). No jam,
 deauth, beacon, BLE advertising/spam, IR/RF/Sub-GHz TX, replay, speaker or other emitting
@@ -28,6 +36,7 @@ not the device. Exit code: 0 no FAIL, 1 at least one FAIL, 2 link/usage error, 1
 """
 import argparse
 import base64
+import csv
 import json
 import platform
 import random
@@ -322,6 +331,11 @@ STREAM_EVENT_KEYS = {"wifi.probe": ("mac", "ssid", "rssi", "ch"), "wifi.sta": ("
                      "subghz.raw": ("freq", "timings")}
 
 
+def stream_module(stream):
+    """CAPS caps/modules flag a receive-only stream needs."""
+    return "cc1101" if stream == "subghz.raw" else "wifi"
+
+
 def _u32(v):
     return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= U32
 
@@ -487,6 +501,77 @@ def utc_now():
 
 
 # --------------------------------------------------------------------------------------------
+# Soak analysis (pure functions)
+# --------------------------------------------------------------------------------------------
+
+# Default --soak-max-leak: heap.free bytes lost per hour that fail a soak. The T-Embed reported
+# about 100-115 KB free in companion mode (TESTS.md, batch 8 hardware run). A steady 2 KB/h loss
+# would take about half of that in 24 hours, the longest session expected (a day of wardriving),
+# and leave the Wi-Fi/BLE stacks short of memory well before the end. Short runs cannot resolve
+# a slope that small against allocator noise: heap_trend() also requires the fitted decline to
+# exceed --heap-tolerance, so a run's real detection limit is max(this, tolerance / hours).
+SOAK_MAX_LEAK_BPH = 2048
+SOAK_MIN_TREND_SAMPLES = 3   # post-warm-up diag samples needed to assess the heap trend
+SOAK_FINDINGS_KEPT = 500     # findings stored in the report (all are counted)
+SOAK_CSV_COLUMNS = (
+    "interval", "utc", "elapsed_s", "uptime_s", "reset", "heap_free", "heap_min_free", "heap_largest",
+    "dev_rx_delta", "host_sent_delta", "dev_tx_delta", "host_recv_delta", "rejects_delta", "err_delta",
+    "noise_bytes_delta", "resyncs_delta", "bad_rx_json_delta", "pings", "pings_lost", "p50_ms", "p95_ms",
+    "p99_ms", "max_ms", "stream", "stream_events", "ping_round_ms", "fs_list_ms", "fs_read_ms",
+    "fs_upload_ms", "stream_ms", "diag_ms", "keepalives", "findings")
+
+
+def theil_sen(points):
+    """Median of pairwise slopes of (x, y) points: robust against single outliers."""
+    slopes = [(y2 - y1) / (x2 - x1) for i, (x1, y1) in enumerate(points) for x2, y2 in points[i + 1:] if x2 != x1]
+    return statistics.median(slopes) if slopes else None
+
+
+def ls_slope(points):
+    """Least-squares slope of (x, y) points (reported next to the robust one)."""
+    if len(points) < 2:
+        return None
+    mx = sum(x for x, _ in points) / len(points)
+    my = sum(y for _, y in points) / len(points)
+    sxx = sum((x - mx) ** 2 for x, _ in points)
+    return sum((x - mx) * (y - my) for x, y in points) / sxx if sxx else None
+
+
+def heap_trend(points, max_leak_bph, tolerance):
+    """Trend of (elapsed_s, bytes) samples taken after the warm-up.
+
+    `leak` is true when the Theil-Sen slope falls faster than the run's detection limit,
+    max(max_leak_bph, tolerance / window_hours): steeper than the per-hour threshold AND a fitted
+    decline over the observed window larger than the allocator noise floor (`tolerance`, the
+    heap check's --heap-tolerance). One-time allocations before the first sample (Wi-Fi/CC1101
+    driver set-up on the first ON of each stream) are excluded by the caller's warm-up."""
+    out = {"assessed": False, "samples": len(points), "max_leak_bph": max_leak_bph, "tolerance_bytes": tolerance,
+           "leak": False}
+    if len(points) < SOAK_MIN_TREND_SAMPLES or points[-1][0] <= points[0][0]:
+        out["reason"] = f"fewer than {SOAK_MIN_TREND_SAMPLES} samples after the warm-up"
+        return out
+    hours = [(x / 3600.0, y) for x, y in points]
+    window_h = hours[-1][0] - hours[0][0]
+    ts, ls = theil_sen(hours), ls_slope(hours)
+    ys = [y for _, y in points]
+    diffs = [b - a for a, b in zip(ys, ys[1:])]
+    limit = max(max_leak_bph, tolerance / window_h)
+    out.update({
+        "assessed": True, "window_h": round(window_h, 4), "slope_bph": round(ts, 1), "ls_slope_bph": round(ls, 1),
+        "fitted_decline_bytes": round(-ts * window_h), "detection_limit_bph": round(limit),
+        "falling_steps": sum(1 for d in diffs if d < 0), "rising_steps": sum(1 for d in diffs if d > 0),
+        "first": ys[0], "last": ys[-1], "min": min(ys), "max": max(ys), "leak": -ts > limit})
+    return out
+
+
+def latency_stats(values):
+    if not values:
+        return {"n": 0}
+    return {"n": len(values), "p50_ms": round(pct(values, 50), 2), "p95_ms": round(pct(values, 95), 2),
+            "p99_ms": round(pct(values, 99), 2), "max_ms": round(max(values), 2)}
+
+
+# --------------------------------------------------------------------------------------------
 # Checks
 # --------------------------------------------------------------------------------------------
 
@@ -503,12 +588,15 @@ CHECKS = (
     ("fs_upload", "Transactional upload of a scratch file, read-back, remove", True),
     ("streams", "Receive-only stream on/off, no events after OFF", True),
     ("busy", "Busy handling during receive-only jam_detect (opt-in)", False),
+    ("soak", "Long-session soak: heap, link counters, latency, reboots (--soak)", False),
     ("heap", "Heap not trending down across repeated diag", True),
     ("diag_counters", "diag link counters match the runner's traffic", True),
 )
 CHECK_IDS = [c[0] for c in CHECKS]
 DEFAULT_CHECKS = [c[0] for c in CHECKS if c[2]]
-DIAG_USERS = {"diag_shape", "malformed", "heap", "diag_counters", "busy"}
+# --soak without --only: the identity checks, the soak, then the whole-run counter cross-check.
+SOAK_DEFAULT_CHECKS = ["caps", "provenance", "diag_shape", "soak", "diag_counters"]
+DIAG_USERS = {"diag_shape", "malformed", "heap", "diag_counters", "busy", "soak"}
 
 # TESTS.md items this runner helps with; everything else in "Batches 1-4" stays manual.
 COVERAGE_NOTE = (
@@ -547,6 +635,9 @@ class Runner:
         self.active_subs = set()
         self.upload = None        # {"token", "path", "committed", "removed"}
         self.busy_mid = None
+        self.soak = None          # soak working state (check_soak)
+        self.soak_report = None   # soak summary, series, ops and findings for the report
+        self._ping_outstanding = set()
         self.interrupted = False
         self.link_error = None
         self.hello_evidence = {}
@@ -641,6 +732,7 @@ class Runner:
         self._run("fs_upload", self.check_fs_upload)
         self._run("streams", self.check_streams)
         self._run("busy", self.check_busy)
+        self._run("soak", self.check_soak)
         self._run("heap", self.check_heap)
         self._run("diag_counters", self.check_diag_counters)
 
@@ -737,9 +829,11 @@ class Runner:
         self.verdict(r, diag_problems(d), f"reset {d.get('reset')} uptime {d.get('uptime_s')} s heap free "
                                           f"{(d.get('heap') or {}).get('free')}")
 
-    def check_ping(self, r):
+    def ping_round(self, count, burst):
+        """`count` sequential PINGs (latency, loss) then a pipelined burst of `burst` PINGs whose
+        PONGs must come back in send order. A PONG for an earlier lost PING counts as late."""
         lat, lost, late, wrong = [], 0, 0, 0
-        outstanding = set()
+        outstanding = self._ping_outstanding
 
         def other(f):
             nonlocal late, wrong
@@ -750,7 +844,7 @@ class Runner:
                 else:
                     wrong += 1
 
-        for _ in range(self.o.pings):
+        for _ in range(count):
             t0 = time.perf_counter()
             mid = self.link.send(PING, {})
             f = self.link.wait(lambda x, m=mid: x.get("t") == PONG and x.get("id") == m, self.o.ping_timeout, other)
@@ -759,27 +853,33 @@ class Runner:
                 outstanding.add(mid)
             else:
                 lat.append((time.perf_counter() - t0) * 1000.0)
-        # Pipelined burst: replies must come back in send order.
-        burst = [self.link.send(PING, {}) for _ in range(self.o.ping_burst)]
+        ids = [self.link.send(PING, {}) for _ in range(burst)]
         got = []
-        deadline = time.time() + self.o.ping_timeout + 0.05 * len(burst)
-        while len(got) < len(burst):
+        deadline = time.time() + self.o.ping_timeout + 0.05 * len(ids)
+        while len(got) < len(ids):
             f = self.link.recv(deadline)
             if f is None:
                 break
-            if f.get("t") == PONG and f.get("id") in burst:
+            if f.get("t") == PONG and f.get("id") in ids:
                 got.append(f["id"])
             else:
                 other(f)
-        burst_lost = len(burst) - len(got)
-        out_of_order = sum(1 for a, b in zip(got, got[1:]) if b < a)
+        outstanding.update(set(ids) - set(got))
+        return {"lat": lat, "lost": lost, "late": late, "wrong": wrong, "burst_sent": len(ids),
+                "burst_got": got, "burst_lost": len(ids) - len(got),
+                "out_of_order": sum(1 for a, b in zip(got, got[1:]) if b < a)}
+
+    def check_ping(self, r):
+        p = self.ping_round(self.o.pings, self.o.ping_burst)
+        lat, lost, late, wrong, got = p["lat"], p["lost"], p["late"], p["wrong"], p["burst_got"]
+        burst_n, burst_lost, out_of_order = p["burst_sent"], p["burst_lost"], p["out_of_order"]
         stats = {}
         if lat:
             stats = {"n": len(lat), "min_ms": round(min(lat), 2), "median_ms": round(statistics.median(lat), 2),
                      "mean_ms": round(statistics.mean(lat), 2), "p95_ms": round(pct(lat, 95), 2),
                      "p99_ms": round(pct(lat, 99), 2), "max_ms": round(max(lat), 2)}
         r.evidence = {"sequential": {"sent": self.o.pings, "lost": lost, "late": late, "stats": stats},
-                      "burst": {"sent": len(burst), "received": len(got), "lost": burst_lost,
+                      "burst": {"sent": burst_n, "received": len(got), "lost": burst_lost,
                                 "out_of_order": out_of_order},
                       "unexpected_pong_ids": wrong, "max_p99_ms": self.o.max_p99_ms}
         problems = []
@@ -788,7 +888,7 @@ class Runner:
         if late:
             problems.append(f"{late} late PONGs")
         if burst_lost:
-            problems.append(f"{burst_lost}/{len(burst)} burst pings lost")
+            problems.append(f"{burst_lost}/{burst_n} burst pings lost")
         if out_of_order:
             problems.append(f"{out_of_order} burst PONGs out of order")
         if wrong:
@@ -796,7 +896,7 @@ class Runner:
         if stats and stats["p99_ms"] > self.o.max_p99_ms:
             problems.append(f"p99 {stats['p99_ms']} ms > {self.o.max_p99_ms} ms")
         self.verdict(r, problems, f"{len(lat)} ok, median {stats.get('median_ms')} ms, p99 {stats.get('p99_ms')} ms, "
-                                  f"burst {len(got)}/{len(burst)} in order")
+                                  f"burst {len(got)}/{burst_n} in order")
 
     def check_malformed(self, r):
         before = self.diag() if self.diag_ok else None
@@ -881,6 +981,17 @@ class Runner:
         ev["problems"] = problems
         return (None if problems else data), ev
 
+    def pick_read_file(self, entries):
+        """(path, listed size) of the smallest regular file at / up to --read-max, never a
+        staging or scratch file; (None, None) if there is none."""
+        files = [e for e in entries if not e["dir"] and 0 < e["size"] <= self.o.read_max
+                 and not e["name"].lower().startswith(".brucia-upload.")
+                 and not e["name"].startswith(SCRATCH_PREFIX[1:])]
+        if not files:
+            return None, None
+        pick = min(files, key=lambda e: (e["size"], e["name"]))
+        return "/" + pick["name"], pick["size"]
+
     def check_fs_read(self, r, listing):
         if self.features.get("verified_files") is not True:
             r.status, r.reason = "SKIP", "features.verified_files not advertised"
@@ -890,14 +1001,10 @@ class Runner:
             if "/" not in listing:
                 r.status, r.reason = "SKIP", "no root listing (run fs_list or pass --read-path)"
                 return
-            files = [e for e in listing["/"] if not e["dir"] and 0 < e["size"] <= self.o.read_max
-                     and not e["name"].lower().startswith(".brucia-upload.")
-                     and not e["name"].startswith(SCRATCH_PREFIX[1:])]
-            if not files:
+            path, listed = self.pick_read_file(listing["/"])
+            if path is None:
                 r.status, r.reason = "SKIP", f"no file of 1..{self.o.read_max} bytes at / (pass --read-path)"
                 return
-            pick = min(files, key=lambda e: (e["size"], e["name"]))
-            path, listed = "/" + pick["name"], pick["size"]
         data, ev = self.fs_read(path, self.o.fs_timeout)
         ev["listed_size"] = listed
         r.evidence = ev
@@ -998,47 +1105,14 @@ class Runner:
         r.evidence = {}
         problems, ran = [], 0
         for stream in self.o.streams:
-            ev_name = RECEIVE_ONLY_STREAMS[stream]
-            need = "cc1101" if stream == "subghz.raw" else "wifi"
+            need = stream_module(stream)
             if not self.caps_flag(need):
                 r.evidence[stream] = {"skipped": f"caps.{need} not true"}
                 continue
             ran += 1
             info = {"events": 0, "bad_events": [], "after_off": 0, "sample": []}
             r.evidence[stream] = info
-
-            def collect(f, info=info, ev_name=ev_name, stream=stream):
-                d = f.get("d") or {}
-                if f.get("t") == EVENT and d.get("ev") == ev_name:
-                    data = d.get("data")
-                    info["events"] += 1
-                    if len(info["sample"]) < 5:
-                        info["sample"].append(data)
-                    if not (isinstance(data, dict) and all(k in data for k in STREAM_EVENT_KEYS[stream])):
-                        info["bad_events"].append(data)
-
-            mid = self.link.send(SUB, {"stream": stream, "on": True})
-            self.active_subs.add(stream)
-            on = self.link.reply(mid, self.o.sub_timeout, collect)
-            info["on_reply"] = on.get("d") if on else None
-            if on is None or on.get("t") != ACK or (on.get("d") or {}).get("ok") is not True:
-                problems.append(f"{stream}: SUB on not ACKed ok ({info['on_reply']})")
-            else:
-                self.stream_listen(stream, collect)
-            mid = self.link.send(SUB, {"stream": stream, "on": False})
-            off = self.link.reply(mid, self.o.sub_timeout, collect)
-            info["off_reply"] = off.get("d") if off else None
-            if off is None or off.get("t") != ACK or (off.get("d") or {}).get("ok") is not True:
-                problems.append(f"{stream}: SUB off not ACKed ok ({info['off_reply']})")
-            else:
-                self.active_subs.discard(stream)
-            before_quiet = info["events"]
-            self.link.wait(lambda f: False, self.o.quiet_secs, collect)
-            info["after_off"] = info["events"] - before_quiet
-            if info["after_off"]:
-                problems.append(f"{stream}: {info['after_off']} events after the OFF ACK")
-            if info["bad_events"]:
-                problems.append(f"{stream}: {len(info['bad_events'])} events missing {STREAM_EVENT_KEYS[stream]}")
+            problems += self.stream_cycle(stream, info)
             if info["events"] == 0:
                 r.warnings.append(f"{stream}: no events in {self.o.stream_secs}s (nothing nearby, or not receiving)")
         if not ran:
@@ -1046,6 +1120,46 @@ class Runner:
             return
         summary = ", ".join(f"{s}: {v.get('events', 0)} events" for s, v in r.evidence.items())
         self.verdict(r, problems, f"{summary}; ON/OFF ACKed, silent after OFF")
+
+    def stream_cycle(self, stream, info):
+        """SUB ON, listen --stream-secs, SUB OFF, then --quiet-secs that must stay silent.
+        Fills `info` (events, bad_events, after_off, sample, replies); returns the problems."""
+        ev_name = RECEIVE_ONLY_STREAMS[stream]
+        problems = []
+
+        def collect(f):
+            d = f.get("d") or {}
+            if f.get("t") == EVENT and d.get("ev") == ev_name:
+                data = d.get("data")
+                info["events"] += 1
+                if len(info["sample"]) < 5:
+                    info["sample"].append(data)
+                if not (isinstance(data, dict) and all(k in data for k in STREAM_EVENT_KEYS[stream])):
+                    info["bad_events"].append(data)
+
+        mid = self.link.send(SUB, {"stream": stream, "on": True})
+        self.active_subs.add(stream)
+        on = self.link.reply(mid, self.o.sub_timeout, collect)
+        info["on_reply"] = on.get("d") if on else None
+        if on is None or on.get("t") != ACK or (on.get("d") or {}).get("ok") is not True:
+            problems.append(f"{stream}: SUB on not ACKed ok ({info['on_reply']})")
+        else:
+            self.stream_listen(stream, collect)
+        mid = self.link.send(SUB, {"stream": stream, "on": False})
+        off = self.link.reply(mid, self.o.sub_timeout, collect)
+        info["off_reply"] = off.get("d") if off else None
+        if off is None or off.get("t") != ACK or (off.get("d") or {}).get("ok") is not True:
+            problems.append(f"{stream}: SUB off not ACKed ok ({info['off_reply']})")
+        else:
+            self.active_subs.discard(stream)
+        before_quiet = info["events"]
+        self.link.wait(lambda f: False, self.o.quiet_secs, collect)
+        info["after_off"] = info["events"] - before_quiet
+        if info["after_off"]:
+            problems.append(f"{stream}: {info['after_off']} events after the OFF ACK")
+        if info["bad_events"]:
+            problems.append(f"{stream}: {len(info['bad_events'])} events missing {STREAM_EVENT_KEYS[stream]}")
+        return problems
 
     def stream_listen(self, stream, collect):
         self.link.wait(lambda f: False, self.o.stream_secs, collect)
@@ -1092,6 +1206,356 @@ class Runner:
                 problems.append("stop did not end the operation early")
         r.evidence = steps
         self.verdict(r, problems, f"PONG and ERR 409 while busy; stop ended it in {steps['stop_to_ack_s']} s")
+
+    # -- soak ------------------------------------------------------------------------------
+    def check_soak(self, r):
+        """--soak: repeat passive intervals for the given minutes. Each interval sends, in order:
+        --soak-pings sequential PINGs and a --soak-burst pipelined burst; `storage list /`;
+        `fs_read` of one small existing file (CRC must not change); one scratch upload cycle
+        (check_fs_upload); one receive-only stream ON/OFF, rotating through --streams; keepalive
+        PINGs until the interval ends; `diag`. Findings (each FAILs the check): a failed or lost
+        operation, link counters that differ from the frames sent/received, any reject, ERR,
+        noise byte or resync, an unexpected reboot (stops the soak), a heap.free decline above
+        the detection limit (heap_trend), an overall PING p99 above --max-p99-ms."""
+        if not self.diag_ok:
+            r.status, r.reason = "SKIP", "features.diag not advertised: the soak needs diag (heap, counters, reboots)"
+            return
+        o = self.o
+        streams = [st for st in o.streams if self.caps_flag(stream_module(st))]
+        s = {
+            "t0": time.time(), "started_utc": utc_now(), "k": 0, "row": None, "rows": [], "ops": [],
+            "findings": [], "findings_total": 0, "warnings": [], "lat": [], "first": None, "prev": None,
+            "stop": None, "interrupted": False, "streams": streams, "warmup_intervals": max(1, len(streams)),
+            "read": {"chosen": False, "path": None, "listed": None, "crc32": None, "size": None},
+            "uploads_on": True, "uploads": 0, "scratch_paths": [],
+            "stream_cycles": {st: 0 for st in streams}, "stream_events": {st: 0 for st in streams},
+            "config": {"minutes": o.soak, "interval_s": o.soak_interval, "keepalive_s": o.soak_keepalive,
+                       "pings_per_interval": o.soak_pings, "burst_per_interval": o.soak_burst,
+                       "streams_requested": o.streams, "streams": streams, "stream_secs": o.stream_secs,
+                       "quiet_secs": o.quiet_secs, "max_leak_bph": o.soak_max_leak,
+                       "heap_tolerance_bytes": o.heap_tolerance, "max_p99_ms": o.max_p99_ms,
+                       "warmup_intervals": max(1, len(streams))},
+        }
+        self.soak = s
+        try:
+            self._soak_loop(s)
+        except KeyboardInterrupt:
+            s["interrupted"] = True
+            raise
+        except LinkError as e:
+            s["stop"] = f"link error: {e}"
+            self._soak_finding(s, "link", str(e))
+            raise
+        finally:
+            self._soak_finish(r, s)
+
+    def _soak_loop(self, s):
+        o = self.o
+        end = s["t0"] + o.soak * 60
+        files = self.features.get("verified_files") is True
+        uploads = files and self.features.get("transactional_uploads") is True
+        if not files:
+            s["warnings"].append("features.verified_files not advertised: no fs_read/upload in the soak")
+        elif not uploads:
+            s["warnings"].append("features.transactional_uploads not advertised: no upload cycle in the soak")
+        if not s["streams"]:
+            s["warnings"].append(f"no requested stream ({', '.join(o.streams)}) is supported by CAPS: no stream cycles")
+        s["row"] = self._soak_row(0)
+        self._soak_op(s, "diag", lambda: self._soak_sample(s))  # interval 0: the soak baseline
+        self._soak_close_row(s)
+        self.log(f"[soak] {o.soak} min, intervals of {o.soak_interval} s, keepalive {o.soak_keepalive} s, "
+                 f"streams {', '.join(s['streams']) or 'none'}")
+        while not s["stop"] and time.time() < end:
+            s["k"] += 1
+            k, iv0 = s["k"], time.time()
+            s["row"] = self._soak_row(k)
+            self._soak_op(s, "ping_round", lambda: self._soak_pings(s, o.soak_pings, o.soak_burst))
+            if files:
+                self._soak_op(s, "fs_list", lambda: self._soak_fs_list(s))
+                if s["read"]["path"]:
+                    self._soak_op(s, "fs_read", lambda: self._soak_fs_read(s))
+            if uploads and s["uploads_on"]:
+                self._soak_op(s, "fs_upload", lambda: self._soak_upload(s))
+            if s["streams"]:
+                stream = s["streams"][(k - 1) % len(s["streams"])]
+                self._soak_op(s, "stream", lambda: self._soak_stream(s, stream))
+            # Rest of the interval: PING whenever --soak-keepalive passed since the last host frame
+            # (the device leaves companion mode after 60 s without one); frames are still read.
+            until = min(iv0 + o.soak_interval, end)
+            while True:
+                now = time.time()
+                if now >= until:
+                    break
+                due = (self.link.commands[-1]["t"] if self.link.commands else 0) + o.soak_keepalive
+                if now >= due:
+                    s["row"]["keepalives"] += 1
+                    self._soak_op(s, "keepalive", lambda: self._soak_pings(s, 1, 0))
+                else:
+                    self.link.wait(lambda f: False, min(due, until) - now)
+            self._soak_op(s, "diag", lambda: self._soak_sample(s))
+            self._soak_close_row(s)
+            done = time.time() - s["t0"]
+            self.log(f"[soak] interval {k}: {done / 60:.2f}/{o.soak} min, heap free {s['row'].get('heap_free')}, "
+                     f"findings {s['findings_total']}")
+
+    @staticmethod
+    def _soak_row(k):
+        return {"interval": k, "pings": 0, "pings_lost": 0, "keepalives": 0, "findings": 0, "_lat": []}
+
+    def _soak_close_row(self, s):
+        row = s["row"]
+        if row is None or row.get("_closed"):
+            return
+        lat = latency_stats(row.pop("_lat", []))
+        row.update({k: lat.get(k) for k in ("p50_ms", "p95_ms", "p99_ms", "max_ms")})
+        row["_closed"] = True
+        if row["interval"] and lat["n"] and lat["p99_ms"] > self.o.max_p99_ms:
+            s["warnings"].append(f"interval {row['interval']}: PING p99 {lat['p99_ms']} ms > {self.o.max_p99_ms} ms")
+        s["rows"].append(row)
+
+    def _soak_finding(self, s, kind, detail):
+        s["findings_total"] += 1
+        if s["row"] is not None:
+            s["row"]["findings"] = s["row"].get("findings", 0) + 1
+        if len(s["findings"]) < SOAK_FINDINGS_KEPT:
+            s["findings"].append({"interval": s["k"], "elapsed_s": round(time.time() - s["t0"], 2), "utc": utc_now(),
+                                  "kind": kind, "detail": detail})
+        self.log(f"[soak] finding ({kind}) in interval {s['k']}: {detail}")
+
+    def _soak_op(self, s, name, fn):
+        """Run one operation, record its timing; a failed operation is a finding."""
+        t = time.time()
+        ok, detail = False, "did not complete"
+        try:
+            ok, detail = fn()
+        finally:
+            ms = round((time.time() - t) * 1000, 1)
+            entry = {"interval": s["k"], "op": name, "t_s": round(t - s["t0"], 3), "ms": ms, "ok": bool(ok)}
+            if not ok:
+                entry["detail"] = detail
+            s["ops"].append(entry)
+            if f"{name}_ms" in SOAK_CSV_COLUMNS:
+                s["row"][f"{name}_ms"] = ms
+        if not ok:
+            self._soak_finding(s, "op", f"{name}: {detail}")
+        return ok
+
+    def _soak_pings(self, s, count, burst):
+        p = self.ping_round(count, burst)
+        s["lat"] += p["lat"]
+        s["row"]["_lat"] += p["lat"]
+        s["row"]["pings"] += count + burst
+        s["row"]["pings_lost"] += p["lost"] + p["burst_lost"]
+        problems = []
+        if p["lost"]:
+            problems.append(f"{p['lost']}/{count} PINGs lost (timeout {self.o.ping_timeout}s)")
+        if p["late"]:
+            problems.append(f"{p['late']} late PONGs")
+        if p["burst_lost"]:
+            problems.append(f"{p['burst_lost']}/{burst} burst PINGs lost")
+        if p["out_of_order"]:
+            problems.append(f"{p['out_of_order']} burst PONGs out of order")
+        if p["wrong"]:
+            problems.append(f"{p['wrong']} PONGs with an id never sent")
+        return not problems, "; ".join(problems)
+
+    def _soak_fs_list(self, s):
+        resp = self.cmd("storage list /", self.o.timeout)
+        if resp is None or resp.get("t") != ACK:
+            return False, "no ACK for storage list /"
+        d = resp.get("d") or {}
+        if d.get("ok") is not True:
+            return False, f"storage list / returned ok={d.get('ok')!r}: {str(d.get('out'))[:120]!r}"
+        entries = parse_listing(d.get("out"))
+        rd = s["read"]
+        if not rd["chosen"]:
+            rd["chosen"] = True
+            rd["path"], rd["listed"] = (self.o.read_path, None) if self.o.read_path else self.pick_read_file(entries)
+            if rd["path"] is None:
+                s["warnings"].append(f"no file of 1..{self.o.read_max} bytes at / (pass --read-path): no fs_read")
+        left = [p for p in s["scratch_paths"] if p[1:] in {e["name"] for e in entries}]
+        if left:
+            return False, f"scratch file(s) of this soak still listed: {left}"
+        return True, None
+
+    def _soak_fs_read(self, s):
+        rd = s["read"]
+        data, ev = self.fs_read(rd["path"], self.o.fs_timeout)
+        problems = list(ev["problems"])
+        if data is not None:
+            if rd["listed"] is not None and len(data) != rd["listed"]:
+                problems.append(f"read {len(data)} bytes but the listing says {rd['listed']}")
+            if rd["crc32"] is None:
+                rd["crc32"], rd["size"] = ev["crc32"], ev["bytes"]
+            elif (ev["crc32"], ev["bytes"]) != (rd["crc32"], rd["size"]):
+                problems.append(f"{rd['path']} changed: {ev['bytes']} bytes crc32 {ev['crc32']:08x}, first read "
+                                f"{rd['size']} bytes crc32 {rd['crc32']:08x}")
+        return not problems, "; ".join(problems)
+
+    def _soak_upload(self, s):
+        """One scratch upload cycle: the fs_upload check itself (same allowlist, unique name,
+        commit, read-back, remove, listing confirms it is gone)."""
+        tr = Result("fs_upload", "soak upload cycle")
+        self.check_fs_upload(tr)
+        path = tr.evidence.get("path") if isinstance(tr.evidence, dict) else None
+        if path:
+            s["scratch_paths"].append(path)
+            s["uploads"] += 1
+        for w in tr.warnings:
+            if w not in s["warnings"]:
+                s["warnings"].append(w)
+        if self.upload and self.upload.get("committed") and not self.upload.get("removed"):
+            s["uploads_on"] = False  # keep self.upload: cleanup() retries the remove at exit
+            return False, (f"{tr.reason}; scratch {self.upload['path']} not removed: no more uploads in this soak "
+                           "(cleanup retries at exit)")
+        return tr.status == "PASS", tr.reason
+
+    def _soak_stream(self, s, stream):
+        info = {"events": 0, "bad_events": [], "after_off": 0, "sample": []}
+        problems = self.stream_cycle(stream, info)
+        s["row"]["stream"], s["row"]["stream_events"] = stream, info["events"]
+        s["stream_cycles"][stream] += 1
+        s["stream_events"][stream] += info["events"]
+        return not problems, "; ".join(problems)
+
+    def _soak_sample(self, s):
+        """diag at the end of an interval: heap/uptime/reset into the row, link counters
+        compared with the previous sample (exact frame accounting, as diag_counters)."""
+        d = self.diag()
+        if d is None:
+            s["stop"] = "diag did not answer"
+            return False, f"no diag ACK within {self.o.timeout}s"
+        shape = diag_problems(d)
+        if shape:
+            s["stop"] = "malformed diag reply"
+            return False, "; ".join(shape)
+        now = time.time()
+        smp = {"reply": d, "sent": self.link.sent, "recv": self.link.received - 1, "noise": self.link.noise_bytes,
+               "resyncs": self.link.resyncs, "bad_rx": self.link.bad_rx_json, "errors": len(self.link.errors)}
+        heap = d["heap"]
+        s["row"].update({"utc": utc_now(), "elapsed_s": round(now - s["t0"], 2), "uptime_s": d["uptime_s"],
+                         "reset": d["reset"], "heap_free": heap["free"], "heap_min_free": heap["min_free"],
+                         "heap_largest": heap["largest"]})
+        if s["prev"] is None:
+            s["first"] = smp
+        else:
+            self._soak_compare(s, s["prev"], smp)
+        s["prev"] = smp
+        return True, None
+
+    def _soak_compare(self, s, prev, smp):
+        pd, d, first = prev["reply"], smp["reply"], s["first"]["reply"]
+        pl, al = pd["link"], d["link"]
+        row = s["row"]
+        drx, dtx = al["rx_frames"] - pl["rx_frames"], al["tx_frames"] - pl["tx_frames"]
+        exp_rx, exp_tx = smp["sent"] - prev["sent"], smp["recv"] - prev["recv"]
+        row.update({"dev_rx_delta": drx, "host_sent_delta": exp_rx, "dev_tx_delta": dtx, "host_recv_delta": exp_tx})
+        reboot = []
+        if (d["reset"], d["reset_code"]) != (first["reset"], first["reset_code"]):
+            reboot.append(f"reset reason {first['reset']}/{first['reset_code']} -> {d['reset']}/{d['reset_code']}")
+        if d["uptime_s"] < pd["uptime_s"]:
+            reboot.append(f"uptime went back {pd['uptime_s']} -> {d['uptime_s']} s")
+        if drx < 0 or dtx < 0 or al["sessions"] < pl["sessions"]:
+            reboot.append("link counters went back")
+        if reboot:
+            self._soak_finding(s, "reboot", "unexpected reboot: " + "; ".join(reboot))
+            s["stop"] = "unexpected reboot"
+            return
+        if drx != exp_rx:
+            self._soak_finding(s, "counters", f"rx_frames +{drx}, runner sent {exp_rx} frames")
+        if dtx != exp_tx:
+            self._soak_finding(s, "counters", f"tx_frames +{dtx}, runner received {exp_tx} frames")
+        rejects = {k: al[k] - pl[k] for k in REJECT_KEYS + ("rx_bad_json",) if al[k] != pl[k]}
+        row["rejects_delta"] = sum(rejects.values())
+        if rejects:
+            self._soak_finding(s, "reject", f"device rejected inbound frames: {rejects}")
+        if al["busy_409"] != pl["busy_409"]:
+            self._soak_finding(s, "counters", f"busy_409 +{al['busy_409'] - pl['busy_409']}")
+        if al["sessions"] != pl["sessions"]:
+            self._soak_finding(s, "session", f"sessions +{al['sessions'] - pl['sessions']}: companion mode re-entered")
+        err_dev = sum(al["err"].values()) - sum(pl["err"].values())
+        errs = self.link.errors[prev["errors"]:smp["errors"]]
+        row["err_delta"] = err_dev
+        if err_dev or errs:
+            self._soak_finding(s, "err", f"device err +{err_dev}, ERR replies received: "
+                                         f"{[(code, msg) for _, _, code, msg in errs][:5]}")
+        noise, resyncs, bad = smp["noise"] - prev["noise"], smp["resyncs"] - prev["resyncs"], smp["bad_rx"] - prev["bad_rx"]
+        row.update({"noise_bytes_delta": noise, "resyncs_delta": resyncs, "bad_rx_json_delta": bad})
+        if noise or resyncs:
+            sample = next((e["sample"] for e in reversed(self.link.noise_samples) if e["sample"]), "")
+            self._soak_finding(s, "noise", f"{noise} non-frame byte(s) from the device in {resyncs} resync(s); "
+                                           f"sample: {sample[:80]!r}")
+        if bad:
+            self._soak_finding(s, "noise", f"{bad} undecodable frame(s) from the device")
+
+    def _soak_finish(self, r, s):
+        """Summary, heap trend and verdict; also runs on Ctrl-C and link loss."""
+        o = self.o
+        if s["k"]:
+            self._soak_close_row(s)
+        elapsed = time.time() - s["t0"]
+        rows = [x for x in s["rows"] if x.get("heap_free") is not None]
+        warm = s["warmup_intervals"]
+        after = [x for x in rows if x["interval"] >= warm]
+        heap = heap_trend([(x["elapsed_s"], x["heap_free"]) for x in after], o.soak_max_leak, o.heap_tolerance)
+        largest = heap_trend([(x["elapsed_s"], x["heap_largest"]) for x in after], o.soak_max_leak, o.heap_tolerance)
+        if heap["leak"]:
+            self._soak_finding(s, "heap", f"heap.free falls {-heap['slope_bph']:.0f} B/h over {heap['window_h']} h "
+                                          f"(detection limit {heap['detection_limit_bph']} B/h, fitted decline "
+                                          f"{heap['fitted_decline_bytes']} B, {heap['first']} -> {heap['last']})")
+        elif not heap["assessed"]:
+            s["warnings"].append(f"heap trend not assessed: {heap['reason']} (warm-up {warm} interval(s); "
+                                 "run longer)")
+        if largest["leak"]:
+            s["warnings"].append(f"largest free block falls {-largest['slope_bph']:.0f} B/h (fragmentation; reported, "
+                                 "not a FAIL by itself)")
+        lat = latency_stats(s["lat"])
+        if lat["n"] and lat["p99_ms"] > o.max_p99_ms:
+            self._soak_finding(s, "latency", f"PING p99 {lat['p99_ms']} ms over the soak > {o.max_p99_ms} ms")
+        ops = {}
+        for e in s["ops"]:
+            ops.setdefault(e["op"], []).append(e)
+        op_stats = {name: {"n": len(es), "failed": sum(1 for e in es if not e["ok"]),
+                           **{k: v for k, v in latency_stats([e["ms"] for e in es]).items() if k != "n"}}
+                    for name, es in ops.items()}
+        first, last = s["first"], s["prev"]
+        totals = None
+        if first and last and last is not first:
+            fl, ll = first["reply"]["link"], last["reply"]["link"]
+            totals = {"dev_rx": ll["rx_frames"] - fl["rx_frames"], "host_sent": last["sent"] - first["sent"],
+                      "dev_tx": ll["tx_frames"] - fl["tx_frames"], "host_recv": last["recv"] - first["recv"],
+                      "noise_bytes": last["noise"] - first["noise"], "resyncs": last["resyncs"] - first["resyncs"],
+                      "uptime_s": [first["reply"]["uptime_s"], last["reply"]["uptime_s"]],
+                      "reset": last["reply"]["reset"],
+                      "heap_min_free": [first["reply"]["heap"]["min_free"], last["reply"]["heap"]["min_free"]]}
+        kinds = {}
+        for f in s["findings"]:
+            kinds[f["kind"]] = kinds.get(f["kind"], 0) + 1
+        summary = {
+            "started_utc": s["started_utc"], "elapsed_min": round(elapsed / 60, 2), "planned_min": o.soak,
+            "intervals": s["k"], "samples": len(rows), "interrupted": s["interrupted"], "stopped": s["stop"],
+            "findings_total": s["findings_total"], "findings_by_kind": kinds, "heap_free_trend": heap,
+            "heap_largest_trend": largest, "latency": lat, "ops": op_stats, "counters_total": totals,
+            "uploads": s["uploads"], "fs_read": {k: v for k, v in s["read"].items() if k != "chosen"},
+            "stream_cycles": s["stream_cycles"], "stream_events": s["stream_events"],
+        }
+        series = [{k: v for k, v in x.items() if not k.startswith("_")} for x in s["rows"]]
+        self.soak_report = {"config": s["config"], "summary": summary, "warnings": s["warnings"],
+                            "findings": s["findings"], "series": series, "ops": s["ops"]}
+        r.evidence = {"config": s["config"], "summary": summary, "findings": s["findings"][:50]}
+        r.warnings += s["warnings"]
+        head = (f"interrupted after {elapsed / 60:.1f} of {o.soak} min; " if s["interrupted"] else "") + \
+               (f"stopped: {s['stop']}; " if s["stop"] else "")
+        if s["findings_total"]:
+            r.status = "FAIL"
+            r.reason = head + f"{s['findings_total']} finding(s) {kinds}; first: {s['findings'][0]['detail']}"
+        else:
+            r.status = "PASS"
+            slope = (f"heap.free slope {heap['slope_bph']} B/h (limit {heap['detection_limit_bph']} B/h)"
+                     if heap["assessed"] else "heap trend not assessed")
+            r.reason = head + (f"{elapsed / 60:.1f} min, {s['k']} intervals: {slope}; link counters exact, no "
+                               f"rejects, no noise; PING p50 {lat.get('p50_ms')} ms p99 {lat.get('p99_ms')} ms; "
+                               f"no reboot (uptime {totals['uptime_s'] if totals else None})")
 
     def check_heap(self, r):
         if not self.diag_ok:
@@ -1196,23 +1660,39 @@ def dry_run_plan(opts):
         plan.append(("fs_list", CMD, {"cmd": "storage list /"}))
     if "fs_read" in sel:
         plan.append(("fs_read", CMD, {"cmd": f"fs_read {opts.read_path or '/{smallest-file-at-root}'}"}))
+
+    def upload(check):
+        return [(check, CMD, {"cmd": "storage list /"}),
+                (check, None, "... chunk size from CAPS rx_max (largest frame first), "
+                              f"{LEGACY_RX_MAX} bytes when CAPS has none"),
+                (check, CMD, {"cmd": f"fs_upload_begin {tok} 4608 0 {scratch}"}),
+                (check, CMD, {"cmd": f"fs_upload_chunk {tok} 0 QUJD"}),
+                (check, CMD, {"cmd": f"fs_upload_chunk {tok} 3072 QUJD"}),
+                (check, CMD, {"cmd": f"fs_upload_commit {tok}"}),
+                (check, CMD, {"cmd": f"fs_read {scratch}"}),
+                (check, CMD, {"cmd": f"storage remove {scratch}"}),
+                (check, CMD, {"cmd": "storage list /"})]
     if "fs_upload" in sel:
-        plan += [("fs_upload", CMD, {"cmd": "storage list /"}),
-                 ("fs_upload", None, "... chunk size from CAPS rx_max (largest frame first), "
-                                     f"{LEGACY_RX_MAX} bytes when CAPS has none"),
-                 ("fs_upload", CMD, {"cmd": f"fs_upload_begin {tok} 4608 0 {scratch}"}),
-                 ("fs_upload", CMD, {"cmd": f"fs_upload_chunk {tok} 0 QUJD"}),
-                 ("fs_upload", CMD, {"cmd": f"fs_upload_chunk {tok} 3072 QUJD"}),
-                 ("fs_upload", CMD, {"cmd": f"fs_upload_commit {tok}"}),
-                 ("fs_upload", CMD, {"cmd": f"fs_read {scratch}"}),
-                 ("fs_upload", CMD, {"cmd": f"storage remove {scratch}"}),
-                 ("fs_upload", CMD, {"cmd": "storage list /"})]
+        plan += upload("fs_upload")
     if "streams" in sel:
         for s in opts.streams:
             plan += [("streams", SUB, {"stream": s, "on": True}), ("streams", SUB, {"stream": s, "on": False})]
     if "busy" in sel:
         plan += [("busy", CMD, {"cmd": f"jam_detect {opts.busy_secs}"}), ("busy", PING, {}),
                  ("busy", CMD, {"cmd": "diag"}), ("busy", CMD, {"cmd": "stop"})]
+    if "soak" in sel:
+        plan += [("soak", CMD, {"cmd": "diag"}),
+                 ("soak", None, f"... every {opts.soak_interval} s for {opts.soak} min:"),
+                 ("soak", PING, {}), ("soak", None, f"... {opts.soak_pings} sequential + {opts.soak_burst} burst PINGs"),
+                 ("soak", CMD, {"cmd": "storage list /"}),
+                 ("soak", CMD, {"cmd": f"fs_read {opts.read_path or '/{smallest-file-at-root}'}"})]
+        plan += upload("soak") + [("soak", None, "... upload cycle: new token and scratch name each interval")]
+        for st in opts.streams:
+            plan += [("soak", SUB, {"stream": st, "on": True}), ("soak", SUB, {"stream": st, "on": False})]
+        plan += [("soak", None, f"... one stream per interval, in turn: {', '.join(opts.streams)}"),
+                 ("soak", PING, {}), ("soak", None, f"... keepalive PING when {opts.soak_keepalive} s passed "
+                                                     "since the last frame"),
+                 ("soak", CMD, {"cmd": "diag"})]
     if "heap" in sel:
         plan += [("heap", CMD, {"cmd": "diag"}), ("heap", None, f"... {opts.diag_repeats} diag calls in total")]
     if "diag_counters" in sel:
@@ -1237,8 +1717,13 @@ def write_reports(report, out_dir):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     stem = "hw-acceptance-" + report["started_utc"].replace(":", "").replace("-", "").replace(".", "")
-    jp, mp = out / f"{stem}.json", out / f"{stem}.md"
+    jp, mp, cp = out / f"{stem}.json", out / f"{stem}.md", out / f"{stem}-soak.csv"
     jp.write_text(json.dumps(report, indent=2, sort_keys=False) + "\n")
+    if report.get("soak"):
+        with cp.open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=SOAK_CSV_COLUMNS, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(report["soak"]["series"])
     dev = report.get("device") or {}
     b = dev.get("build") or {}
     s = report["summary"]
@@ -1278,13 +1763,63 @@ def write_reports(report, out_dir):
         if len(ev) > 4000:
             ev = ev[:4000] + "\n... (truncated; full evidence in the JSON report)"
         lines += ["", "```json", ev, "```", ""]
+    if report.get("soak"):
+        lines += soak_markdown(report["soak"], cp.name)
     if report.get("cleanup"):
         lines += ["## Cleanup", ""] + [f"- {a}: {ok}" for a, ok in report["cleanup"]] + [""]
     lines += ["## Coverage", "", report["coverage"], ""]
     lines += ["## Commands sent", "", "```"] + [f"{c['kind']} id={c['id']} {c['summary']}"
                                                for c in report["commands_sent"]][:400] + ["```", ""]
     mp.write_text("\n".join(lines))
-    return jp, mp
+    return (jp, mp, cp) if report.get("soak") else (jp, mp)
+
+
+def soak_markdown(soak, csv_name):
+    """The Markdown soak section: summary, findings, per-interval table, operation timing."""
+    sm, cfg = soak["summary"], soak["config"]
+    heap, lat, tot = sm["heap_free_trend"], sm["latency"], sm["counters_total"] or {}
+    lines = ["## Soak", "",
+             f"- {sm['elapsed_min']} of {sm['planned_min']} min, {sm['intervals']} interval(s) of "
+             f"{cfg['interval_s']} s, keepalive {cfg['keepalive_s']} s, streams "
+             f"{', '.join(cfg['streams']) or 'none'} (warm-up {cfg['warmup_intervals']} interval(s))"
+             + (" - INTERRUPTED" if sm["interrupted"] else "") + (f" - stopped: {sm['stopped']}" if sm["stopped"] else ""),
+             f"- Findings: {sm['findings_total']}" + (f" {sm['findings_by_kind']}" if sm["findings_by_kind"] else ""),
+             (f"- Heap free: {heap['first']} -> {heap['last']} B (min {heap['min']}), slope {heap['slope_bph']} B/h "
+              f"(least squares {heap['ls_slope_bph']}), detection limit {heap['detection_limit_bph']} B/h over "
+              f"{heap['window_h']} h, {heap['falling_steps']} falling / {heap['rising_steps']} rising steps"
+              if heap["assessed"] else f"- Heap free trend not assessed: {heap.get('reason')}"),
+             f"- Heap min_free {tot.get('heap_min_free')}; largest block slope "
+             f"{sm['heap_largest_trend'].get('slope_bph', 'n/a')} B/h",
+             f"- Link: device rx +{tot.get('dev_rx')} / runner sent {tot.get('host_sent')}, device tx "
+             f"+{tot.get('dev_tx')} / runner received {tot.get('host_recv')}, noise {tot.get('noise_bytes')} B, "
+             f"resyncs {tot.get('resyncs')}",
+             f"- Reset {tot.get('reset')}, uptime {tot.get('uptime_s')} s",
+             f"- PING latency: n {lat['n']}, p50 {lat.get('p50_ms')} ms, p95 {lat.get('p95_ms')} ms, p99 "
+             f"{lat.get('p99_ms')} ms, max {lat.get('max_ms')} ms",
+             f"- Uploads {sm['uploads']}; fs_read {sm['fs_read'].get('path')}; stream cycles {sm['stream_cycles']}, "
+             f"events {sm['stream_events']}",
+             f"- Time series: `{csv_name}` (one row per diag sample)", ""]
+    for w in soak["warnings"]:
+        lines.append(f"- warning: {_md_escape(w)}")
+    if soak["findings"]:
+        lines += ["", "### Soak findings", ""] + [
+            f"- interval {f['interval']} (+{f['elapsed_s']} s, {f['utc']}) {f['kind']}: {_md_escape(f['detail'])}"
+            for f in soak["findings"][:100]]
+    lines += ["", "### Soak operations (ms)", "", "| Operation | n | failed | p50 | p95 | p99 | max |",
+              "|---|---|---|---|---|---|---|"]
+    for name, st in sm["ops"].items():
+        lines.append(f"| {name} | {st['n']} | {st['failed']} | {st.get('p50_ms')} | {st.get('p95_ms')} | "
+                     f"{st.get('p99_ms')} | {st.get('max_ms')} |")
+    cols = ("interval", "elapsed_s", "uptime_s", "heap_free", "heap_min_free", "heap_largest", "dev_rx_delta",
+            "host_sent_delta", "dev_tx_delta", "host_recv_delta", "noise_bytes_delta", "pings_lost", "p50_ms",
+            "p99_ms", "stream", "stream_events", "findings")
+    rows = soak["series"]
+    step = max(1, -(-len(rows) // 120))  # at most ~120 rows here; every row is in the CSV
+    lines += ["", "### Soak time series" + (f" (every {step}th row; all in the CSV)" if step > 1 else ""), "",
+              "| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    for row in rows[::step]:
+        lines.append("| " + " | ".join("" if row.get(c) is None else _md_escape(row[c]) for c in cols) + " |")
+    return lines + [""]
 
 
 def build_report(runner, opts, started, fatal=None, cleanup=None):
@@ -1314,6 +1849,7 @@ def build_report(runner, opts, started, fatal=None, cleanup=None):
                  "noise_bytes": runner.link.noise_bytes, "resyncs": runner.link.resyncs,
                  "noise_samples": runner.link.noise_samples},
         "commands_sent": runner.link.commands,
+        "soak": runner.soak_report,
         "cleanup": cleanup or [],
         "coverage": COVERAGE_NOTE,
     }
@@ -1323,8 +1859,9 @@ def parse_args(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--port", required=True, help="serial device of the board in companion mode")
     ap.add_argument("--out", default="hw-acceptance-reports", help="report directory")
-    ap.add_argument("--only", default=",".join(DEFAULT_CHECKS),
-                    help=f"comma list of checks (default: all but busy). Known: {','.join(CHECK_IDS)}")
+    ap.add_argument("--only", default=None,
+                    help=f"comma list of checks (default: all but busy and soak; with --soak: "
+                         f"{','.join(SOAK_DEFAULT_CHECKS)}). Known: {','.join(CHECK_IDS)}")
     ap.add_argument("--dry-run", action="store_true", help="print the frames that would be sent; open nothing")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--timeout", type=float, default=3.0, help="reply timeout for ordinary commands (s)")
@@ -1344,8 +1881,38 @@ def parse_args(argv):
     ap.add_argument("--diag-repeats", type=int, default=20)
     ap.add_argument("--heap-tolerance", type=int, default=4096)
     ap.add_argument("--heap-run-tolerance", type=int, default=32768)
+    soak = ap.add_argument_group("soak (--soak MINUTES; passive, same allowlist)")
+    soak.add_argument("--soak", type=float, metavar="MINUTES",
+                      help="repeat passive intervals for this many minutes (adds the soak check)")
+    soak.add_argument("--soak-interval", type=float, default=30.0, help="seconds per interval (diag sample each)")
+    soak.add_argument("--soak-keepalive", type=float, default=5.0,
+                      help="PING when this many seconds passed since the last frame (device leaves "
+                           "companion mode after 60 s without one); 0 < s <= 30")
+    soak.add_argument("--soak-pings", type=int, default=20, help="sequential PINGs per interval")
+    soak.add_argument("--soak-burst", type=int, default=10, help="pipelined burst PINGs per interval")
+    soak.add_argument("--soak-max-leak", type=float, default=SOAK_MAX_LEAK_BPH,
+                      help="heap.free loss in bytes per hour that fails the soak (also bounded by "
+                           "--heap-tolerance over the run, see heap_trend)")
     o = ap.parse_args(argv)
+    soak_on = o.soak is not None
+    if o.only is None:
+        o.only = ",".join(SOAK_DEFAULT_CHECKS if soak_on else DEFAULT_CHECKS)
     o.only = [c.strip() for c in o.only.split(",") if c.strip()]
+    if soak_on and "soak" not in o.only:
+        o.only.append("soak")
+    if "soak" in o.only and not soak_on:
+        ap.error("the soak check needs --soak MINUTES")
+    if soak_on:
+        if not o.soak > 0:
+            ap.error("--soak MINUTES must be > 0")
+        if not (0 < o.soak_keepalive <= 30):
+            ap.error("--soak-keepalive must be in (0, 30] s: the device leaves companion mode after 60 s")
+        if not o.soak_interval > 0 or o.soak_pings < 1 or o.soak_burst < 0:
+            ap.error("--soak-interval > 0, --soak-pings >= 1, --soak-burst >= 0")
+        if o.stream_secs > 30 or o.quiet_secs > 30:
+            ap.error("--stream-secs and --quiet-secs must be <= 30 s with --soak (no host frame meanwhile)")
+        if o.soak_max_leak <= 0:
+            ap.error("--soak-max-leak must be > 0")
     unknown = [c for c in o.only if c not in CHECK_IDS]
     if unknown:
         ap.error(f"unknown checks: {unknown}")
@@ -1397,7 +1964,7 @@ def run(argv, port_factory=None, log=print):
     run.last_report, run.last_paths = report, paths
     s = report["summary"]
     log(f"result {s['result']}: {s['PASS']} pass, {s['FAIL']} fail, {s['SKIP']} skip")
-    log(f"reports: {paths[0]} {paths[1]}")
+    log("reports: " + " ".join(str(p) for p in paths))
     if runner.interrupted:
         code = 130
     elif fatal:

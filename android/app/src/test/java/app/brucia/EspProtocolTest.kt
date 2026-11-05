@@ -89,6 +89,23 @@ class EspProtocolTest {
         assertEquals(5, resp.error)
     }
 
+    @Test fun romStatusIsReadAtFourBytesFromTheEndAndShortRepliesFromTheirStart() {
+        // ESP32-family ROM: data ends with status, error, reserved, reserved (esptool 4.7
+        // ESP32ROM.STATUS_BYTES_LENGTH = 4). Success: all four zero, read as ok by both lengths.
+        val romOk = bytes(0x01, 0x02, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+        assertTrue(EspProtocol.parseResponse(romOk, statusLen = 4)!!.ok)
+        assertTrue(EspProtocol.parseResponse(romOk, statusLen = 2)!!.ok)
+        // ROM failure 1/5: the 2-byte reading sees only the reserved zeros.
+        val romFail = bytes(0x01, 0x02, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x00, 0x00)
+        assertEquals(1 to 5, EspProtocol.parseResponse(romFail, statusLen = 4)!!.let { it.status to it.error })
+        assertTrue(EspProtocol.parseResponse(romFail, statusLen = 2)!!.ok)
+        // A 2-byte (stub) reply while ROM length is expected still carries its own status.
+        val stubFail = bytes(0x01, 0x0D, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05)
+        assertEquals(1 to 5, EspProtocol.parseResponse(stubFail, statusLen = 4)!!.let { it.status to it.error })
+        val stubOk = bytes(0x01, 0x0D, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+        assertTrue(EspProtocol.parseResponse(stubOk, statusLen = 4)!!.ok)
+    }
+
     @Test fun parseResponseRejectsRequestDirection() {
         val frame = bytes(0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
         assertNull(EspProtocol.parseResponse(frame))
@@ -137,6 +154,11 @@ class EspProtocolTest {
         assertFalse(AppUpdater.isNewer("0.4.0", "v0.3.9"))
         assertFalse(AppUpdater.isNewer("0.3.0", ""))
         assertTrue(AppUpdater.isNewer("0.3", "0.3.1"))
+        // Same release spelled differently, or a local build suffix: no update offer, no prompt loop.
+        assertFalse(AppUpdater.isNewer("0.3", "0.3.0"))
+        assertFalse(AppUpdater.isNewer("0.1.4-dirty", "v0.1.4"))
+        assertFalse(AppUpdater.isNewer(" V0.1.4 ", "0.1.4"))
+        assertTrue(AppUpdater.isNewer("0.1.4-dirty", "0.1.5"))
     }
 
     @Test fun firmwareMigrationHandlesLegacyVersionLineAndMissingAssets() {

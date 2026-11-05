@@ -38,6 +38,15 @@ static uint32_t jsCallback(cmd *c) {
         return run_bjs_script_headless(txt);
     }
 
+    // Brucia: a script started here waits for the main loop to bring it to the foreground, which
+    // does not run in companion mode, so it would sit there and every later script_run would answer
+    // "interpreter busy"; from inside a companion script it would disturb the running one. The app
+    // runs scripts with script_run.
+    if (g_companionActive) {
+        serialDevice->println("js is not available in companion mode (use script_run)");
+        return false;
+    }
+
     String filepath;
     if (first == "run_from_file") {
         if (argc < 2) return false;

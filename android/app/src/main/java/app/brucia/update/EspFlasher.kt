@@ -42,6 +42,13 @@ class EspFlasher(private val io: SerialIo) {
     private val readBuf = ByteArray(4096)
 
     /**
+     * Status bytes that end every response: the ESP32-family ROM loader sends four (status, error,
+     * two reserved zeros), the esptool stub two (esptool loader.py check_command). Reading the ROM
+     * reply as if it had two made every ROM error look like success (the reserved zeros).
+     */
+    private var statusLen = ROM_STATUS_LEN
+
+    /**
      * Flash [image] at [offset] (default 0x0 for a merged image). [onProgress] is
      * called with (bytesWritten, totalBytes). [flashSize] is the chip flash size
      * reported to the ROM (informational for erase sizing).
@@ -125,7 +132,7 @@ class EspFlasher(private val io: SerialIo) {
             EspProtocol.flashMd5Payload(offset, image.size),
             timeoutMs = 30_000,
         )
-        val deviceMd5 = EspProtocol.parseMd5(resp)
+        val deviceMd5 = EspProtocol.parseMd5(resp, statusLen)
         if (deviceMd5 == null) {
             Verify.UNVERIFIED
         } else {
@@ -142,6 +149,7 @@ class EspFlasher(private val io: SerialIo) {
      * native USB-CDC / USB-serial-JTAG sequence used by the ESP32-S3 (T-Embed CC1101).
      */
     fun connect(doReset: Boolean = true): Boolean {
+        statusLen = ROM_STATUS_LEN
         // Native-USB ESP32-S3 (USB-Serial-JTAG): a reset to enter download mode resets the whole
         // chip, so the USB peripheral re-enumerates and the open handle dies. For that case the
         // caller resets + re-opens the re-enumerated ROM device itself and passes doReset=false; we
@@ -180,7 +188,7 @@ class EspFlasher(private val io: SerialIo) {
         // MEM_END runs the stub at its entrypoint; the ROM may not reply (it jumps away), so ignore.
         val end = EspProtocol.le32(if (EspStub.ENTRY == 0L) 1L else 0L) + EspProtocol.le32(EspStub.ENTRY)
         try { command(EspProtocol.CMD_MEM_END, end, timeoutMs = 500, checkStatus = false) } catch (e: Exception) { app.brucia.BruciaLog.d("Flash", "MEM_END no reply (expected): ${e.message}") }
-        waitForOhai(3000)
+        waitForOhai(3000).also { if (it) statusLen = STUB_STATUS_LEN }
     } catch (_: Exception) {
         false
     }
@@ -316,7 +324,7 @@ class EspFlasher(private val io: SerialIo) {
             val n = io.read(readBuf, (deadline - (System.nanoTime() / 1_000_000L)).toInt().coerceIn(1, timeoutMs))
             for (i in 0 until n) {
                 val frame = reader.offer(readBuf[i].toInt() and 0xFF) ?: continue
-                val resp = EspProtocol.parseResponse(frame) ?: continue
+                val resp = EspProtocol.parseResponse(frame, statusLen) ?: continue
                 if (resp.command == command) return resp
             }
         }
@@ -329,6 +337,8 @@ class EspFlasher(private val io: SerialIo) {
 
     private companion object {
         const val SYNC_ATTEMPTS = 7
+        const val ROM_STATUS_LEN = 4
+        const val STUB_STATUS_LEN = 2
     }
 
     /** Adapter backing [SerialIo] with a usb-serial-for-android port. */

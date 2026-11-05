@@ -12,6 +12,10 @@
 #include <esp_log.h>
 #include <stdio.h>
 #include <globals.h>
+#if CONFIG_IDF_TARGET_ESP32
+#include "rom/ets_sys.h"            // ets_install_putc1 / ets_install_putc2 (ROM setters)
+extern "C" void uart_install_putc(); // esp32-hal-uart.c: re-installs Arduino's UART debug putc
+#endif
 
 volatile bool g_enterCompanionRequested = false;
 
@@ -34,9 +38,19 @@ static bool g_ledOff = false;
 //  3. ESP32-S3 ROM printf (ets_printf/esp_rom_printf, and Arduino log_x/ESP_LOGx in code built
 //     with the Arduino headers, which end in ets_printf via log_printf): the ROM's
 //     uart_tx_one_char copies every character to the USB-Serial-JTAG while g_usb_print is set
-//     (checked in esp32s3_rev0_rom.elf), so the flag is cleared. On the ESP32 the ROM printf goes
-//     to UART0 through a putc hook with no getter to restore, so it is left alone; those builds
-//     use CORE_DEBUG_LEVEL=0 (log_x compiled out) and only early/ISR error logs remain.
+//     (checked in esp32s3_rev0_rom.elf), so the flag is cleared.
+//  4. ESP32 ROM printf (same callers): ets_printf/esp_rom_printf (esp32.rom.api.ld maps
+//     esp_rom_printf to the ROM ets_printf) write every character through the ROM's two putc
+//     hooks, UART0 = the companion link on these boards. The ROM has setters only
+//     (ets_install_putc1/2), but ets_write_char reads the hooks from fixed ROM .bss words,
+//     _putc1 = 0x3ffae014 and _putc2 = 0x3ffae010, identical in esp32_rev0_rom.elf and
+//     esp32_rev300_rom.elf (tool-esp-rom-elfs; IDF reserves 0x3ffae000.. for ROM data), and it
+//     skips a NULL hook. So both hooks are read there, replaced by a sink, and the read-back must
+//     show the sink before anything counts as muted; on exit the saved hooks are put back (unless
+//     something re-installed its own meanwhile). If the read-back does not match (a ROM with
+//     another layout), Arduino re-installs its UART debug hook (uart_install_putc, what
+//     Serial.setDebugOutput uses) and ROM printf stays unmuted, as before.
+//     tools/test_companion_print_hygiene.py checks the addresses against the ROM ELFs.
 static vprintf_like_t g_prevLogVprintf = nullptr;
 static int companionMutedLog(const char *fmt, va_list args) {
     if (g_companionActive) return 0;
@@ -77,6 +91,37 @@ static void swapStdioWrite(FILE *f, StdioWriteFn fn, StdioWriteFn &prev, FILE *&
 #if CONFIG_IDF_TARGET_ESP32S3
 extern "C" bool g_usb_print; // ROM flag (esp32s3.rom.ld): ROM printf also writes the USB-Serial-JTAG
 static bool g_prevRomUsbPrint = false;
+#elif CONFIG_IDF_TARGET_ESP32
+typedef void (*RomPutc)(char c);
+// ROM .bss words read by ets_write_char (see 4. above). Addresses from the ROM ELFs, not an API.
+static RomPutc *const kRomPutc1 = reinterpret_cast<RomPutc *>(0x3ffae014);
+static RomPutc *const kRomPutc2 = reinterpret_cast<RomPutc *>(0x3ffae010);
+static RomPutc g_prevRomPutc1 = nullptr;
+static RomPutc g_prevRomPutc2 = nullptr;
+static bool g_romPutcMuted = false;
+static void romPutcSink(char) {}
+
+static void muteRomPutc(bool mute) {
+    volatile RomPutc *hook1 = kRomPutc1;
+    volatile RomPutc *hook2 = kRomPutc2;
+    if (mute) {
+        if (g_romPutcMuted) return;
+        RomPutc prev1 = *hook1, prev2 = *hook2;
+        ets_install_putc1(romPutcSink);
+        ets_install_putc2(romPutcSink);
+        if (*hook1 == romPutcSink && *hook2 == romPutcSink) {
+            g_prevRomPutc1 = prev1;
+            g_prevRomPutc2 = prev2;
+            g_romPutcMuted = true;
+        } else {
+            uart_install_putc(); // unknown layout: back to Arduino's hooks, left unmuted
+        }
+    } else if (g_romPutcMuted) {
+        if (*hook1 == romPutcSink) ets_install_putc1(g_prevRomPutc1);
+        if (*hook2 == romPutcSink) ets_install_putc2(g_prevRomPutc2);
+        g_romPutcMuted = false;
+    }
+}
 #endif
 
 static void muteNonSerialOutput(bool mute) {
@@ -87,10 +132,14 @@ static void muteNonSerialOutput(bool mute) {
 #if CONFIG_IDF_TARGET_ESP32S3
         g_prevRomUsbPrint = g_usb_print;
         g_usb_print = false;
+#elif CONFIG_IDF_TARGET_ESP32
+        muteRomPutc(true);
 #endif
     } else {
 #if CONFIG_IDF_TARGET_ESP32S3
         g_usb_print = g_prevRomUsbPrint;
+#elif CONFIG_IDF_TARGET_ESP32
+        muteRomPutc(false);
 #endif
         // fflush inside drops what was buffered during companion mode (g_companionActive still set)
         swapStdioWrite(g_mutedStderr, nullptr, g_prevStderrWrite, g_mutedStderr);

@@ -9,8 +9,13 @@ Usage:
     # On the device: tap Brucia on the home screen
     python3 tools/companion_test.py /dev/tty.usbmodemXXXX
     python3 tools/companion_test.py /dev/tty.usbmodemXXXX --cmd "wifi scan"
+    # a long CMD, a second CMD (e.g. its stop) and a PING while it runs:
+    python3 tools/companion_test.py /dev/tty.usbmodemXXXX --cmd "script_run delay(60000)" \
+        --wait 25 --then script_stop --after 2 --ping-after 1
 
-It sends HELLO, prints the CAPS reply, sends PING, and optionally a CMD.
+It sends HELLO, prints the CAPS reply, sends PING, and optionally a CMD. With --wait it keeps
+reading (timestamps relative to the CMD) until the CMD's ACK/ERR arrives or the wait ends, sending
+--then after --after seconds and a PING after --ping-after seconds.
 """
 import argparse
 import json
@@ -61,6 +66,12 @@ def main():
     ap.add_argument("port", help="serial port, e.g. /dev/tty.usbmodem1101")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--cmd", help="run a CLI command via CMD and print the ACK")
+    ap.add_argument("--wait", type=float, default=0,
+                    help="with --cmd: read until its ACK/ERR for up to N seconds, printing every frame")
+    ap.add_argument("--then", help="with --wait: a second CMD to send while the first runs")
+    ap.add_argument("--after", type=float, default=1.0, help="seconds after --cmd to send --then")
+    ap.add_argument("--ping-after", type=float, default=-1,
+                    help="with --wait: send a PING N seconds after --cmd (negative: none)")
     ap.add_argument(
         "--wardrive",
         action="store_true",
@@ -93,7 +104,32 @@ def main():
         if not pong or pong.get("t") != PONG or pong.get("id") != 2:
             sys.exit("FAIL: no matching PONG")
 
-        if args.cmd:
+        if args.cmd and args.wait > 0:
+            t0 = time.time()
+            print(f"-> CMD {args.cmd!r}")
+            send(ser, CMD, 3, {"cmd": args.cmd})
+            then_sent = args.then is None
+            ping_sent = args.ping_after < 0
+            while time.time() - t0 < args.wait:
+                now = time.time() - t0
+                if not then_sent and now >= args.after:
+                    print(f"-> (+{now:.2f}s) CMD {args.then!r}")
+                    send(ser, CMD, 6, {"cmd": args.then})
+                    then_sent = True
+                if not ping_sent and now >= args.ping_after:
+                    print(f"-> (+{now:.2f}s) PING")
+                    send(ser, PING, 7, {})
+                    ping_sent = True
+                if not ser.in_waiting:
+                    time.sleep(0.02)
+                    continue
+                msg = recv(ser)
+                print(f"<- (+{time.time() - t0:.2f}s)", msg)
+                if msg and msg.get("id") == 3 and msg.get("t") in (ACK, ERR):
+                    break
+            else:
+                print(f"(no ACK/ERR for the CMD within {args.wait:.0f} s)")
+        elif args.cmd:
             print(f"-> CMD {args.cmd!r}")
             send(ser, CMD, 3, {"cmd": args.cmd})
             print("<- ", recv(ser))

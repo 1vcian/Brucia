@@ -154,6 +154,37 @@ class ProtocolTest {
         assertEquals("Buffered frames must not wait for another transport read", 1, t.readCalls)
     }
 
+    @Test fun replyWithoutBodyAndThrowingCallbackStillReleaseBothWaiters() {
+        // ERR with no "d" (or no msg) still fails the request with a readable message.
+        var plain: Pair<Boolean, String>? = null
+        var json: Pair<Boolean, JSONObject?>? = null
+        val pending = mutableMapOf<Int, (Boolean, String) -> Unit>(801 to { ok, out -> plain = ok to out })
+        val pendingJson = mutableMapOf<Int, (Boolean, JSONObject?) -> Unit>(801 to { ok, d -> json = ok to d })
+        val bare = JSONObject().put("v", 0).put("t", Kind.ERR).put("id", 801)
+        assertEquals("Device error", app.brucia.protocol.routeCommandReply(bare, pending, pendingJson))
+        assertEquals(false to "Device error", plain)
+        assertEquals(false to null, json)
+        // ACK with no body is not success.
+        var ackOk: Boolean? = null
+        app.brucia.protocol.routeCommandReply(JSONObject().put("t", Kind.ACK).put("id", 802),
+            mutableMapOf(802 to { ok, _ -> ackOk = ok }), mutableMapOf())
+        assertEquals(false, ackOk)
+        // A plain callback that throws must not leave the JSON waiter of the same id hanging.
+        var released = false
+        try {
+            app.brucia.protocol.routeCommandReply(envelope(Kind.ACK, 803, JSONObject().put("ok", true)),
+                mutableMapOf(803 to { _, _ -> throw IllegalStateException("ui") }),
+                mutableMapOf(803 to { _, _ -> released = true }))
+            org.junit.Assert.fail("callback error must propagate")
+        } catch (_: IllegalStateException) { }
+        assertTrue(released)
+        // Only ACK/ERR may complete a command.
+        try {
+            app.brucia.protocol.routeCommandReply(envelope(Kind.PONG, 804, JSONObject()), mutableMapOf(), mutableMapOf())
+            org.junit.Assert.fail("PONG routed as a command reply")
+        } catch (_: IllegalArgumentException) { }
+    }
+
     @Test fun ackSuccessRequiresLiteralBoolean() {
         for (invalid in listOf<Any>("true", 1, JSONObject.NULL)) {
             var result: Boolean? = null

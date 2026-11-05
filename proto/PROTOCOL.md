@@ -79,8 +79,12 @@ need `0x00` bytes), and older firmware already writes `v` first.
 The device→host direction is not the only defence: in companion mode the firmware guards
 module debug prints on companion paths with `if (!g_companionActive)` (enforced by
 `tools/test_companion_print_hygiene.py`) and drops ESP-IDF/arduino log output
-(`esp_log_set_vprintf`) until companion mode exits. Bare `printf`/`ets_printf` and Bruce CLI
-commands routed through `CMD` can still emit text; the resync rule covers them.
+(`esp_log_set_vprintf`) until companion mode exits. Bare `printf`/stdout is muted as well, and the
+ROM printf (`ets_printf`/`esp_rom_printf`, where Arduino `log_x` ends): on the ESP32-S3 by clearing
+the ROM's USB-Serial-JTAG copy flag, on the ESP32 by replacing the ROM's two putc hooks (read at
+their ROM addresses, verified by read-back, restored on exit; if the read-back does not match, ROM
+printf stays as before). Other targets (ESP32-C5) and text a Bruce CLI command routed through `CMD`
+writes outside its capture can still reach the wire; the resync rule covers them.
 
 ## Message kinds (`t`)
 
@@ -404,9 +408,26 @@ device in that state, and Brucia/Bruce commands and scripts do not read the app'
 
 `script_run <js source>` (not on LITE builds; ERR 501 there) runs a BruceJS script headless with
 a 15 s execution bound (20 s wall clock) and replies `ACK {ok, out}`, `out` being what the script
-printed with `print()`/`console.log()` (and any uncaught error), cut at 1800 characters; `ok:false`
-with `script timeout`, `interpreter busy`, `script too large` (over 6000 characters) or
-`failed to start interpreter`. Inside it:
+printed with `print()`/`console.log()` (and any uncaught error, e.g. `interrupted` when the bound
+stopped it), cut at 1800 characters; `ok:false` with `script timeout`, `script stopped`,
+`interpreter busy`, `script too large` (over 6000 characters) or `failed to start interpreter`.
+
+While it waits for the script the device behaves as during every blocking operation (see
+"Behavior during a blocking operation"): a `PING` is answered, any other `CMD` gets `ERR 409
+device busy`, and a `stop` / `*_stop` `CMD` (`script_stop` reads best) stops the script; it is not
+ACKed itself, the `script_run` reply is `ok:false`, `script stopped`. Older firmware did not read
+the link during `script_run` (frames waited until it ended), so an app should send the stop only
+on a direct channel and treat a missing effect as old firmware. Stopping, like the execution bound
+and the wall clock, ends the script promptly also when it sits in a native wait: `delay()`,
+timers, `wifi.connect()`, `nrf24.receive()`, `notify` blink, and the Bruce loops that end on ESC
+(`subghz.read`, `ir.read`, `rfid.read`/`readUID`/`write`, `audio.playFile()`/`tone()`, CLI
+commands run with `serial.cmd()`), which see ESC as pressed on the interpreter task only. A native
+call that checks none of these (`ble.scan()`, an HTTP request, `badusb` typing) still runs to its
+own end; the script then stops at once instead of continuing, and the interpreter is free for the
+next `script_run` as soon as that call returns (before, a run that hit the wall clock went on with
+no bound and could keep the interpreter busy until companion mode ended). The firmware also used to
+let every `script_run` sit out the 20 s wall clock before the script started (it waited for a
+state change nothing makes); it now starts at once. Inside it:
 
 | Script API | In companion mode |
 |---|---|
@@ -428,15 +449,15 @@ with `script timeout`, `interpreter busy`, `script too large` (over 6000 charact
 | `mic.recordWav(path, {maxMs: 0})` | returns `{ok:false, path:"", bytes:0, ...}` at once (with `maxMs: 0` it records until SEL, or for ever) |
 | `display.drawGif(..., -1)` | plays the GIF once instead of looping until a key is pressed |
 | `serial.cmd("loader open ...")` | `false`; `loader open` is refused in companion mode (also as a routed `CMD`), see below |
-| `serial.cmd()` of `webui`, `sniffer`, `listen`, `sleep` / `power sleep` | `false`: these run until a key is pressed at the device and are refused inside a companion script; sent by the app as a routed `CMD` they still run (the app's Sleep button) |
+| `serial.cmd()` of `webui`, `sniffer`, `listen`, `sleep` / `power sleep` | `false`: these run until a key is pressed at the device and are refused inside a companion script; sent by the app as a routed `CMD`, `webui`, `sniffer` and `sleep` still run (the app's Sleep button), `listen` is refused there too (it asks for the port on the device keyboard) |
+| `serial.cmd()` of other CLI commands that would wait for a person (`arp`, `ir rx` without an IR RX pin, `js <file>`, ...) | `false` at once, as for a routed `CMD` (table below) |
 
 Each skipped helper above appends one line to `out`, `<api>: skipped, it waits for a person at the
 device (companion mode)`, so the app shows why the script got the cancelled value. Waits that end on
 their own are unchanged: radio reads with a positive timeout (`ir.read`, `rfid.read`, `subghz.read`,
 `nrf24.receive`, `ble.scan`), `wifi.connect`, `delay()`, `audio.playFile()`, `mic.recordWav` with a
-duration. They still count against the 20 s wall clock, and the 15 s execution bound does not
-interrupt a native call that runs past it: `script_run` then answers `script timeout` and later
-`script_run`s answer `interpreter busy` until that call returns. `badusb.setup()` on USB-HID boards
+duration. They count against the 15 s execution bound, which now ends most of them early (see
+above). `badusb.setup()` on USB-HID boards
 waits for a USB host, not for a person, and is not changed (the app does not offer BadUSB over the
 USB link). Scanned by `tools/test_companion_prompts.py`: every interpreter function that calls a
 prompt helper (keyboard, menus, dialogs, file picker, viewers, Wi-Fi network menu, wait-for-key
@@ -444,9 +465,28 @@ loops) skips it in companion mode or is in its reasoned allowlist (the on-device
 
 `loader open <app>` (opens a Bruce app's on-device UI) answers `loader open is not available in
 companion mode` and `ok:false` in companion mode, as a routed `CMD` too; use Remote control, which
-leaves companion mode first. Outside companion mode it is unchanged. Still not covered for a routed
-`CMD` (not reachable from a script, where Bruce's menus already return at once while a script is in
-the foreground): `ir rx` with an IR RX pin that is not configured (pin menu) and `arp` (result menu).
+leaves companion mode first. Outside companion mode it is unchanged.
+
+Bruce CLI commands sent as a routed `CMD` (and run by a script's `serial.cmd()`) in companion mode,
+where they would wait for a person at the device (`tools/test_companion_prompts.py` follows every
+CLI command into the module code it calls):
+
+| Command | Waited for | In companion mode |
+|---|---|---|
+| `loader open <app>` | the app's on-device UI | `ok:false`, `loader open is not available in companion mode` |
+| `ir rx [raw]` with no usable IR RX pin | the pin menu | `ok:false`, `IR RX pin not configured (settings irRx <pin>)`; the companion `ir_rx` answers `ok:false`, `IR RX pin not configured`; a script's `ir.read()` returns `""` |
+| `arp` | ESC to end the scan, then the host menu | `ok:false`, `arp opens a host menu at the device; not available in companion mode` |
+| `listen` | the port on the device keyboard (and the network menu) | `ok:false`, `listen asks for the port at the device; not available in companion mode` (was refused only inside a script) |
+| `webui -noAp` with no Wi-Fi | the network menu | `ok:false`, connect first with `wifi_connect`; `webui` (AP) and `webui -noAp` with Wi-Fi still run until ESC at the device, as before |
+| `decrypt` / `crypto decrypt_from_file` / `crypto type_from_file` with an empty password | the password keyboard | `ok:false`, `a password is required in companion mode (no keyboard prompt)` |
+| `js <file>` / `js run_from_file <file>` | the main loop to bring the script to the foreground (it never does in companion mode; later `script_run`s answered `interpreter busy`) | `ok:false`, `js is not available in companion mode (use script_run)`; `js exit` unchanged |
+| `badusb run_from_file` (USB-HID boards), `ble_badble` payloads | `WAIT_FOR_BUTTON_PRESS` in the payload | the payload stops there (`WAIT_FOR_BUTTON_PRESS: payload stopped, ...`) |
+| `settings` (no arguments) | nothing; it wrote the JSON straight onto the frame stream | the JSON goes into `ACK.d.out` (cut at 3500 bytes); pin setters no longer dump the pins file onto the link either |
+
+Unchanged on purpose: `webui`, `sniffer` and `sleep` / `power sleep` run until a key at the device
+(the app's console and Sleep button) and are refused only inside a companion script; menus they
+show appear after a person pressed a key. `subghz rx` / `rf scan` end on their own timeout or step
+count, `ir tx_from_file` pauses only when SEL is pressed, `rfid emulate` on a PN532 runs up to 60 s.
 
 Outside companion mode none of this applies: Bruce's console, `serial.readln` and the CLI behave
 as upstream.

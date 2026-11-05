@@ -34,7 +34,8 @@ object HandshakeParser {
             val caplen = u32le(pcap, off + 8).toInt()
             val start = off + 16
             off = start + caplen
-            if (caplen <= 0 || start + caplen > pcap.size) break
+            // Long sum: a corrupt caplen near Int.MAX_VALUE must not wrap past the bounds check.
+            if (caplen <= 0 || start.toLong() + caplen > pcap.size) break
             var p = start
             if (linktype == 127) { // radiotap: skip it_len (LE at +2)
                 if (p + 4 > pcap.size) continue
@@ -90,7 +91,9 @@ object HandshakeParser {
                 aNonce = nonce
                 apMac = if (fromDS == 1) a2 else a3
                 clMac = if (fromDS == 1) a1 else a2
-            } else { // M2 (from STA)
+            } else if ((keyInfo and 0x0080) == 0 && nonce.any { it.toInt() != 0 }) { // M2 (from STA)
+                // M3 (ACK set, carries the ANonce) and M4 (zero nonce) also have a MIC; taking them
+                // as the client half made a complete 4-way capture uncrackable.
                 sNonce = nonce
                 m2Mic = pcap.copyOfRange(e + 81, e + 97)
                 val frame = pcap.copyOfRange(e, e + eapolLen)
@@ -130,7 +133,8 @@ object HandshakeParser {
             val caplen = u32le(pcap, off + 8).toInt()
             val start = off + 16
             off = start + caplen
-            if (caplen <= 0 || start + caplen > pcap.size) break
+            // Long sum: a corrupt caplen near Int.MAX_VALUE must not wrap past the bounds check.
+            if (caplen <= 0 || start.toLong() + caplen > pcap.size) break
             var p = start
             if (linktype == 127) {
                 if (p + 4 > pcap.size) continue

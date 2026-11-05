@@ -2,6 +2,7 @@
 #include "notification_js.h"
 
 #include "helpers_js.h"
+#include "interpreter.h" // Brucia: bjs_sleep_ms
 
 JSValue native_notifyBlink(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     uint32_t delayMs = 500;
@@ -21,7 +22,7 @@ JSValue native_notifyBlink(JSContext *ctx, JSValue *this_val, int argc, JSValue 
     }
 
     digitalWrite(19, HIGH);
-    delay(delayMs);
+    bjs_sleep_ms((int32_t)delayMs); // Brucia: = delay() outside companion runs, ends on a script_run stop
     digitalWrite(19, LOW);
 
     return JS_UNDEFINED;

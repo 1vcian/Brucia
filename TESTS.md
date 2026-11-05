@@ -51,6 +51,75 @@ records expected effects, negative cases, ownership transitions and recovery.
 No physical checkbox was changed. F01–F04 require host rejection/recovery work;
 the general 12/12 hardware link suite does not close them.
 
+## Unit-test coverage (JaCoCo) — 2026-11-05, branch agent15/COVERAGE
+
+How to measure (opt-in; the normal build is not instrumented):
+`cd android && ./gradlew -Pbrucia.coverage :app:createDebugUnitTestCoverageReport`
+(JDK 23 as for the other Gradle commands). The flag sets AGP `enableUnitTestCoverage` on the
+debug build type; the report is `app/build/reports/coverage/test/debug/` (`index.html`,
+`report.xml`). It covers `:app:testDebugUnitTest` only: Paparazzi screenshots run in that task,
+instrumentation tests (Room migrations, ConnectionService, Compose UI) do not.
+
+Line / branch coverage per package, before (base 6a0f9931, 882 tests) and after (919 tests):
+
+| Package | Before | After | Notes |
+|---|---|---|---|
+| update | 62.5% / 67.1% | 83.4% / 81.0% | `EspFlasher` 0% -> 74.7% / 58.3% (scripted ROM/stub); `FirmwareImage` branches 63% -> 87% |
+| wifi | 85.4% / 60.9% | 96.0% / 74.0% | `HandshakeParser` 50% -> 97% lines (PMKID path was 0%); `PcapReader`, `Dot11Frame` 100% lines |
+| protocol | 96.6% / 90.5% | 97.9% / 97.1% | `FrameBudget` bounds checked against the bytes `CompanionClient` writes |
+| subghz | 87.8% / 66.0% | 90.9% / 76.4% | `.sub` transmit validation, parse fallbacks, RAW line split |
+| remote | 59.0% / 48.7% | 69.1% / 60.5% | `TftProtocol` 100% lines: every op checked against `include/tftLogger.h` argument order |
+| automation | 90.0% / 69.6% | 100% / 89.1% | saved-macro store round trip and corrupt store |
+| session / files / transport | 98.1 / 93.5 / 75.9% lines | unchanged | already covered; `UsbTransport` needs a USB device |
+| data (Room) | 2.0% / 11.1% | unchanged | DAOs and migrations run in `BruciaMigrationTest` (emulator), not on the JVM |
+| service, mitm proxy/CA, app UI (`app.brucia`, `wardrive` view model) | low | unchanged | Android framework/Context bound; UI layout covered by Paparazzi, not counted as a gap |
+| Total | 34.8% / 36.9% | 36.2% / 39.1% | totals are dominated by Compose UI and `WardriveViewModel` |
+
+Gaps closed were chosen by risk (device input parsing, flash path, user data), not count. Seven
+tests failed against the base code and pass after minimal fixes (CHANGELOG, Unreleased):
+`EspFlasherTest.romErrorStatusIsNotMaskedByTheReservedBytes` (ROM status read from the reserved
+bytes), `HandshakeParserTest.completeFourWayHandshakeKeepsMessageTwo` (M3/M4 taken as M2),
+`HandshakeParserTest.hugeRecordLengthStopsParsingWithoutThrowing` and
+`PcapReaderTest.truncatedAndCorruptRecordsStopCleanly` (Int overflow; the reader hit
+OutOfMemoryError), `PcapReaderTest.nanosecondCaptureIsConvertedToMicroseconds`,
+`SubFileTest.transmitRefusesFilesThatWouldBreakTheDeviceCommand` and
+`TftProtocolTest.screenInfoCarriesSizeAndOneByteRotation`. `LoggingTest` failed when run on its
+own (layoutlib `android.util.Log` throws UnsatisfiedLinkError); `BruciaLog` now also swallows
+LinkageError from logcat.
+
+Flash status length, sources: esptool 4.7 (`/Applications/M5Burner.app/.../esptool`)
+`targets/esp32.py:31` `ESP32ROM.STATUS_BYTES_LENGTH = 4`, inherited by `ESP32S3ROM(ESP32ROM)`
+(`targets/esp32s3.py:15`) and the C3/S2/C6/H2/C2 ROM classes; every `*StubLoader` sets 2
+(`esp32s3.py:318`, `esp32.py:381`, ...); `loader.py:258` base (ESP8266) 2; `loader.py:446` reads
+`data[-STATUS_BYTES_LENGTH:]`. The pinned esptool 5.3.0
+(`~/.platformio/packages/tool-esptoolpy/esptool/loader.py:631-659`) instead reads the first two
+bytes after the response data and notes that ROM loaders except ESP8266 append two reserved
+bytes. The app flashes only the ESP32-S3 (board check `t-embed`+`cc1101`, `FirmwareImage` chip id
+9, ESP32-S3 stub), so ROM 4 / stub 2 is right for every image it accepts; there is no chip
+detection. A reply shorter than expected (a 2-byte stub reply while ROM length is assumed) is read
+from its first two bytes, as esptool does. The old code read the last two of the ROM's four
+bytes, the reserved zeros: S3 successes were accepted, ROM failures too.
+`EspFlasherTest.byteExactS3RomThenStubSessionSucceedsAsBefore` replays a byte-exact S3 ROM + stub
+session (8 SYNC replies, READ_REG, stub upload, OHAI, SPI_ATTACH/SET_PARAMS, FLASH_BEGIN/DATA/END,
+stub MD5) and passes on both the old and the new code; every reply also passes the old 2-byte
+reading.
+
+Still uncovered and why: `EspFlasher` reset sequences, SYNC failure and timeouts sleep in real
+time (seconds per case) and are not exercised; the flash flow is not hardware-verified by these
+tests (S05). The firmware side of the `.sub` problem (`rfTxByNameCallback` uses throwing
+`std::stoul/stoull`) stays under F03. Firmware companion pure cores (`*_core`, codec, framing,
+upload, spectrum, FM ring) already have host tests; remaining companion handlers mix parsing
+with drivers and were not split for this task.
+
+Verification on this branch: `:app:testDebugUnitTest` 919/919 (921/921 after the flash replay
+tests), `lintDebug` 0 errors
+(2 warnings: OldTargetApi, AndroidGradlePluginVersion), `verifyPaparazziDebug` unchanged,
+`assembleDebug` OK; `python3 tools/test_android_logic.py` 235 tests OK (now also runs
+FrameBudgetTest, HandshakeParserTest, PcapReaderTest, SubFileTest);
+`python3 -m unittest discover -s tools -p 'test_*.py'` 175 OK (2 skipped); every
+`tools/test_*.py` passes except `test_audio_noise_bounds.py`, which needs `.pio/libdeps` (no
+firmware build or dependency install in this worktree). No device was connected.
+
 ## Latest software checkpoint — 2026-11-05, candidate 0.1.4
 
 Four coordinated batches (backlog S01/S02/S06/S08/S10/S11/W01-W03/W11, firmware items 2-5).
@@ -61,6 +130,93 @@ versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 4
 25.8% of chip), Cardputer, core4mb (LITE), LAUNCHER_CYD, nesso-n1; 12 envs compiled in the
 matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
+
+### Hardware run 2026-11-05 - batch 15 merge, first soak
+
+T-Embed CC1101 flashed from the Mac with the merged batch 15 firmware (dirty build on 6a0f9931).
+Full suite hw-acceptance-20261105T214722891Z: 12/12 PASS (ping median 4.0 ms p99 4.25 ms, upload
+with a 3072-byte chunk, streams clean, heap stable). Soak hw-acceptance-20261105T214746268Z
+(--soak 20, streams wifi.probe/wifi.sta/subghz.raw): PASS, 40 intervals, heap.free slope 0.0 B/h
+(detection limit 13,285 B/h for 20 min; free about 101.3 KB throughout), link counters exact
+(rx +1882 = sent, tx +2162 = received), no rejects, no noise, PING p50 3.05 ms p99 4.64 ms, no
+reboot (uptime 189 -> 1389 s). Leaks below about 13 KB/h are not ruled out; a 4-hour soak would
+bring the limit to 2 KB/h. script_run and the CLI fail-fast items need the app.
+
+### Batch 15 (SOAK) - passive soak mode for hw_acceptance.py, software only
+
+`tools/hw_acceptance.py --soak <minutes>` (backlog S08, physical part): intervals of PINGs,
+`storage list /`, CRC-checked `fs_read`, the scratch upload/read-back/remove cycle, one
+receive-only stream ON/OFF in turn and keepalive PINGs, each ending with `diag`; heap trend,
+per-interval link counters, latency percentiles, reset/uptime and the timing of every operation
+go into the JSON/Markdown report and a CSV time series. Rules and limits:
+docs/HARDWARE_VERIFICATION.md "Soak mode". Evidence, host-side only: `test_hw_acceptance.py`
+99/99 (58 before) against `mock_device.py` (new `reboot` fault and companion `idle_exit`): heap-trend unit
+cases (noisy flat, 8 KB/h leak, 1 KB/h, 20-minute window, outlier, too few samples), soak
+arguments and dry run, a healthy soak kept alive against a 1 s idle exit, a too-slow keepalive
+(FAIL), heap leak (FAIL, slope per hour), reboot (FAIL, soak stops), device noise (FAIL, counters
+still exact), Ctrl-C during a stream and after an upload commit (OFF sent, scratch removed,
+reports written, exit 130). Mutations of the soak code (no keepalive, no reboot detection, no
+noise finding, no summary on Ctrl-C, no leak verdict) each made the test fail. `unittest discover -s tools` 175 tests OK; 32/33 `tools/test_*.py` pass, `test_audio_noise_bounds.py` needs `.pio/libdeps` installed (absent in this worktree, unrelated).
+Nothing hardware-verified.
+
+- [ ] T-Embed CC1101 in companion mode: `python3 tools/hw_acceptance.py --port <port> --soak 20
+      --streams wifi.probe,wifi.sta,subghz.raw`; attach the JSON/Markdown/CSV. Expected: soak
+      PASS, 0 findings, heap slope and detection limit reported, `diag_counters` PASS, no
+      `/brucia-acceptance-*` file left (`storage list /`).
+- [ ] Then a multi-hour soak (e.g. `--soak 240`) for a detection limit near 2 KB/h.
+
+### Batch 15 (FWMENUS) - CLI commands do not wait for a person, script_run starts and stops promptly, ESP32 ROM printf muted; software only
+
+In companion mode, Bruce CLI commands the app routes (and a script's `serial.cmd()`) that would
+wait at an on-device menu/keyboard answer `ok:false` with the reason (`ir rx` without a usable IR
+RX pin, `arp`, `listen`, `webui -noAp` without Wi-Fi, `decrypt` with an empty password, `js <file>`);
+a BadUSB `WAIT_FOR_BUTTON_PRESS` ends the payload; `settings` and the pin setters no longer write
+JSON onto the link; the ARP scan releases the lwIP lock on its early returns. `script_run` starts
+the script at once (it used to answer `script timeout` after 20 s for every script and then run it
+unbounded) and a stop / the 15 s bound ends native waits; ESP32 ROM printf is muted through the
+ROM putc hooks (see proto/PROTOCOL.md). Evidence, host-side only: new
+`test_firmware_script_abort.py` (core compiled with UBSan on a fake clock: sliced sleep, stop keys,
+script_run watch, wrap-around, an end-to-end model of `delay(60000)`; plus wiring checks),
+`test_companion_prompts.py` +3 (CMD path through module code with a detector self-test; IR, ARP
+lock, js, ducky, settings specifics), `test_companion_print_hygiene.py` +2 (JSON to Serial; ROM
+hook addresses against esp32_rev0/rev300 ROM ELFs); mutations caught (guards removed from `arp`,
+`IrRead::setup`, `decrypt`; abort check removed from the sliced sleep; bound not requesting the
+abort; the pins JSON unguarded). `unittest discover` 185 tests and all 34 `tools/test_*.py` pass
+(`test_audio_noise_bounds.py` per env); `node tools/test_site_release.cjs` passes. Firmware builds
+SUCCESS, sizes against the base commit 6a0f9931 built the same way: T-Embed CC1101 app 4,318,688 B /
+92.81% (+2,768 B), static RAM 156,040 B (+16 B); core4mb (LITE) app 2,662,544 B / 67.71% (+816 B),
+RAM 99,624 B (+8 B); AAC noise bounds pass on both. Nothing hardware-verified.
+
+`companion_test.py` below means `python3 tools/companion_test.py <port>` (pyserial) with the device
+in companion mode and the app disconnected.
+
+- [ ] T-Embed, app connected, Scripts tool: `print("hi")` replies `hi` within about a second (it
+      used to take 20 s and say `script timeout`); a second run right after works.
+- [ ] `--cmd 'script_run delay(60000); print("never")' --wait 25`: `ok:true` with an `interrupted`
+      error (no `never`) after 15-16 s; then `--cmd 'script_run print(1)'` answers `1` at once.
+- [ ] `--cmd 'script_run setInterval(function(){print(1)}, 1000)' --wait 25`: ends at about 15 s
+      with the printed lines; the next `script_run` is not `interpreter busy`.
+- [ ] `--cmd 'script_run delay(60000)' --wait 25 --then script_stop --after 2 --ping-after 1`:
+      PONG at about 1 s, `ok:false` `script stopped` at about 2 s, no reply to `script_stop` itself;
+      with `--then 'uptime'` instead: `ERR 409 device busy` for it, the script runs to the 15 s bound.
+- [ ] Same with `subghz.read(60)` (CC1101) and `ir.read(60)`: both end at the 15 s bound (ESC seen by
+      the interpreter task only: the device stays in companion mode, no other stream stops).
+- [ ] Leave companion mode after these runs: the device menu Scripts still runs a script (a stale
+      task handle used to be able to stall it).
+- [ ] Console (app or `--cmd`): `settings irRx 99` (or any pin not in the board's IR RX list), then
+      `ir rx`: `ok:false`, `IR RX pin not configured (settings irRx <pin>)` at once, no pin menu on
+      the device; IR tool Learn (`ir_rx`): `IR RX pin not configured`. Restore the pin afterwards.
+- [ ] Console: `arp`, `listen` (with Wi-Fi), `webui -noAp` (no Wi-Fi), `decrypt /x.enc ""`,
+      `js /x.js` each answer `ok:false` with their reason at once; nothing opens on the device.
+      `webui` (AP) and `sleep` still behave as before.
+- [ ] Console: `settings` returns the JSON in the output and Diagnostics shows no new noise bytes;
+      `settings rfFreq 433.92` adds no noise bytes either.
+- [ ] Outside companion mode (serial terminal): `ir rx` with an unconfigured pin still opens the pin
+      menu; `arp` with Wi-Fi still scans and shows the host menu; `settings` prints the JSON;
+      `js /x.js` runs the script.
+- [ ] core4mb (ESP32): a companion session with Wi-Fi scan, BLE scan and a failing command (e.g.
+      `subghz rx` without a CC1101) shows no noise bytes from ROM printf; after `companion_exit` a
+      serial monitor shows `log_e` / ROM output again.
 
 ### Hardware run 2026-11-05 - batch 14 merge
 

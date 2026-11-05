@@ -12,6 +12,7 @@
 #endif
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
 #include "modules/bjs_interpreter/interpreter.h"
+#include "modules/bjs_interpreter/bjs_abort_core.h"
 #endif
 
 namespace brucia {
@@ -81,8 +82,14 @@ static void runEspnowSend(const String &args, uint32_t id) {
 // Reuses the interpreter module (modules/bjs_interpreter). run_bjs_script_headless(char*)
 // spawns the interpreter task; here we drive it to the foreground and wait synchronously
 // (the way the main loop normally does), with console/print output captured into a buffer
-// (bjs_capture_*) and execution bounded by a deadline (g_bjsDeadlineMs -> interrupt). The
-// whole module is #ifndef LITE_VERSION / DISABLE_INTERPRETER, so lite falls back to a 501.
+// (bjs_capture_*) and execution bounded by a deadline (g_bjsDeadlineMs -> interrupt). While it
+// waits, the link is polled like every blocking op (companionPollStop): PING answered, `stop` /
+// `*_stop` (e.g. `script_stop`) stops the script, other CMDs get ERR 409. Once the bound passes,
+// the wall clock runs out or a stop arrives, g_bjsAbort is set and stays set until the interpreter
+// task ends (it clears it): the interrupt handler, delay(), timers and the Bruce loops a native is
+// in (ESC, see check()) end promptly, and a native that ignores all of these stops the script when
+// it returns instead of letting it run on. The whole module is #ifndef LITE_VERSION /
+// DISABLE_INTERPRETER, so lite falls back to a 501.
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
 static void runScriptRun(const String &src, uint32_t id) {
     String s = src;
@@ -106,7 +113,8 @@ static void runScriptRun(const String &src, uint32_t id) {
     }
     String captured;
     captured.reserve(256);
-    g_bjsDeadlineMs = millis() + 15000; // 15s execution bound
+    const uint32_t started = millis();
+    g_bjsDeadlineMs = started + 15000; // 15s execution bound
     bjs_capture_begin(&captured);
     if (!run_bjs_script_headless(code)) {
         bjs_capture_end();
@@ -114,29 +122,39 @@ static void runScriptRun(const String &src, uint32_t id) {
         companionAckMsg(id, false, "failed to start interpreter");
         return;
     }
-    // Drive like the main loop: move the task to the foreground, then wait for it to finish.
-    // interpreter_state: 1 = waiting for foreground, 2 = foreground, 0 = background, -1 = done.
-    const uint32_t deadline = millis() + 20000; // wall-clock cap (> execution bound)
-    while (interpreter_state == 1 && (int32_t)(millis() - deadline) < 0) vTaskDelay(pdMS_TO_TICKS(5));
+    // Drive like the main loop: move the task to the foreground (it waits for state 2), then wait
+    // for it to finish. interpreter_state: 1 = waiting for foreground, 2/3 = foreground,
+    // 0 = background, -1 = done. (This used to wait for state 1 to change first, which nothing does:
+    // every run sat out the whole wall clock before the script could start.)
     interpreter_state = 2;
-    while (interpreter_state > 0 && (int32_t)(millis() - deadline) < 0) vTaskDelay(pdMS_TO_TICKS(20));
+    BjsRunWatch watch(g_bjsDeadlineMs, started + 20000); // wall-clock cap (> execution bound)
+    for (;;) {
+        const bool running = interpreter_state > 0;
+        const bool stop = running && companionPollStop();
+        const BjsRunWatch::Step step = watch.step(millis(), running, stop);
+        if (watch.abortRequested) g_bjsAbort = true; // cleared by the task when it ends
+        if (step != BjsRunWatch::WAIT) break;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
     // A backgrounded script (state 0) would keep running; force it to exit for a bounded op.
     if (interpreter_state == 0) {
         interpreter_state = -1;
+        g_bjsAbort = true;
         uint32_t stopBy = millis() + 2000;
-        while (interpreter_state == 0 && (int32_t)(millis() - stopBy) < 0) vTaskDelay(pdMS_TO_TICKS(20));
+        while (interpreterTaskHandler != NULL && (int32_t)(millis() - stopBy) < 0) vTaskDelay(pdMS_TO_TICKS(20));
     }
     bool finished = (interpreter_state <= 0);
-    if (interpreter_state == -1) interpreterTaskHandler = NULL;
     bjs_capture_end(); // stop capturing BEFORE the buffer goes out of scope
-    g_bjsDeadlineMs = 0;
+    // g_bjsDeadlineMs / g_bjsAbort are not cleared here: a task still running keeps its bound and
+    // the abort, and clears both itself when it ends (bjs_task_finished in interpreter.cpp).
 
     if (captured.length() > 1800) {
         captured = captured.substring(0, 1800);
         captured += "...[truncated]";
     }
-    if (!finished) {
-        companionAckMsg(id, false, "script timeout");
+    const char *failure = bjsRunFailure(finished, watch.stopRequested);
+    if (failure != nullptr) {
+        companionAckMsg(id, false, failure);
         return;
     }
     companionAckMsg(id, true, captured.c_str());

@@ -43,6 +43,11 @@ static void runIrTvbgone(const String &argsIn, uint32_t id) {
 static void runIrRx(uint32_t id) {
 #ifdef COMPANION_HAS_IR
     IrRead *reader = new IrRead(true);    // headless mode; heap, like the `ir rx` CLI path
+    if (!reader->rxPinReady()) {          // no pin menu in companion mode (nobody at the device)
+        delete reader;
+        companionAckMsg(id, false, "IR RX pin not configured");
+        return;
+    }
     String r = reader->loop_headless(10); // ~10s timeout
     delete reader;
     if (r.length() == 0) {

@@ -213,7 +213,8 @@ void run_timers(JSContext *ctx) {
     JSTimerContextState *state = get_timer_state(ctx, false);
     if (!state) return;
 
-    while (interpreter_state >= 0) {
+    // Brucia: a companion script being stopped leaves its timers (bjs_abort_requested, interpreter.h).
+    while (interpreter_state >= 0 && !bjs_abort_requested()) {
         min_delay = 1000;
         cur_time = millis();
         has_timer = false;
@@ -260,7 +261,7 @@ void run_timers(JSContext *ctx) {
             }
         }
         if (!has_timer) break;
-        if (min_delay > 0) { delay(min_delay); }
+        if (min_delay > 0) { bjs_sleep_ms((int32_t)min_delay); } // = delay() outside companion runs
     }
 }
 
@@ -341,7 +342,9 @@ JSValue native_delay(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
     if (argc > 0 && JS_IsNumber(ctx, argv[0])) {
         int ms;
         JS_ToInt32(ctx, &ms, argv[0]);
-        vTaskDelay(pdMS_TO_TICKS(ms));
+        // Brucia: = vTaskDelay outside companion runs; in a script_run it ends early on a stop or
+        // the execution bound instead of holding the interpreter (and later script_runs) busy.
+        if (!bjs_sleep_ms(ms) && interpreter_state >= 0) return JS_ThrowInternalError(ctx, "interrupted");
     }
     if (interpreter_state < 0) { return JS_ThrowInternalError(ctx, "Script exited"); }
     return JS_UNDEFINED;

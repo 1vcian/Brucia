@@ -1,6 +1,7 @@
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
 #include "nrf24_js.h"
 #include "helpers_js.h"
+#include "interpreter.h" // Brucia: bjs_abort_requested
 #include "modules/NRF24/nrf_common.h"
 
 JSValue native_nrf24Begin(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
@@ -81,6 +82,7 @@ JSValue native_nrf24Receive(JSContext *ctx, JSValue *this_val, int argc, JSValue
 
     unsigned long start = millis();
     while (millis() - start < (unsigned long)timeout) {
+        if (bjs_abort_requested()) break; // Brucia: a stopped companion script_run gives up the wait
         if (NRFradio.available()) {
             uint8_t buf[32] = {0};
             NRFradio.read(buf, sizeof(buf));

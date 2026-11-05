@@ -7,6 +7,63 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- `tools/hw_acceptance.py --soak <minutes>`: an opt-in passive soak for long-session evidence.
+  Each interval repeats PINGs (sequential and a pipelined burst), `storage list /`, a CRC-checked
+  `fs_read` of a small existing file, the scratch upload/read-back/remove cycle and one
+  receive-only stream ON/OFF (`wifi.probe`, `wifi.sta`, `subghz.raw` in turn), keeps the link
+  alive with PINGs, and ends with `diag`. The report adds a soak summary, findings, operation
+  timing and a CSV time series (heap free/min_free/largest, uptime/reset, link counter deltas
+  against the frames sent/received, rejects, noise, latency percentiles). Any counter mismatch,
+  reject, ERR, noise byte or resync, failed operation, unexpected reboot or a heap.free decline
+  above max(2048 B/h, 4096 B over the run) FAILs it; Ctrl-C cleans up and still writes the
+  reports. Same allowlist, nothing new is sent. Simulated with `tools/mock_device.py` only (new
+  `reboot` fault and companion idle exit); not yet run on hardware.
+- Fixes found while closing unit-test gaps (JVM tests only; not yet checked on hardware):
+  - Phone flashing read the ESP32-S3 ROM loader's replies as if they ended in two status bytes;
+    the ROM sends four (status, error, two reserved zeros), so every ROM-side error read as
+    success. A rejected stub upload or FLASH_BEGIN now stops the flash (and still reboots the
+    device) instead of writing on; the esptool stub's two-byte status is used once it runs.
+  - WPA handshake import kept the last EAPOL message with a MIC, so a capture holding the full
+    4-way exchange used M3/M4 as the client half and could never crack. Only a real M2 (no ACK
+    bit, non-zero nonce) is now taken.
+  - A pcap with a corrupt record length near 2 GiB crashed the PCAP dissector (out of memory) and
+    made handshake/PMKID import throw; parsing now stops at the bad record. Nanosecond pcaps
+    (magic a1b23c4d) showed packet times 1000x too large in the dissector.
+  - Transmitting an imported `.sub` file sent the file's values unchecked to `subghz txp`, whose
+    firmware parser aborts on non-numeric text: a multi-word unknown protocol (for example
+    `CAME Atomo`), a non-hex or over-64-bit key, or a frequency outside 32 bits. Such files now
+    have no Transmit command.
+  - The TFT mirror's screen-info packet carries rotation as one byte; the app read it as a
+    two-byte value and always got 0 (rotation is not used for drawing yet).
+  - App logging could throw a LinkageError off-device (JVM tests run in isolation); logcat
+    failures are now always swallowed. No change on a phone.
+- Scripts run from the app (`script_run`) start at once and stop promptly. Until now the firmware
+  waited for a state change that never happens, so every `script_run` answered `script timeout`
+  after its 20 s wall clock and only then let the script run, with no bound, in the background;
+  later `script_run`s answered `interpreter busy`. Now, once the 15 s bound passes or a `stop` /
+  `script_stop` arrives during the run, `delay()`, timers, `wifi.connect()`, `nrf24.receive()`,
+  the `notify` blink and the Bruce loops that end on ESC (`subghz.read`, `ir.read`,
+  `rfid.read/write`, `audio.playFile()`/`tone()`, CLI commands run with `serial.cmd()`) end; a
+  native call that checks none of these stops the script when it returns, and the interpreter is
+  free for the next run. While a script runs, `PING`s are answered and other commands get
+  `ERR 409 device busy`, as during other blocking operations. Host test
+  `tools/test_firmware_script_abort.py`; `tools/companion_test.py` gains `--wait/--then/--after/
+  --ping-after` for the hardware check. Not yet checked on hardware.
+- Bruce CLI commands sent from the app console (or a script's `serial.cmd()`) no longer leave the
+  device waiting for a person in companion mode: `ir rx` with no usable IR RX pin (and the
+  companion `ir_rx`), `arp`, `listen`, `webui -noAp` without Wi-Fi, `decrypt` /
+  `crypto decrypt_from_file` / `crypto type_from_file` with an empty password and `js <file>` now
+  answer `ok:false` with the reason at once, and a BadUSB payload's `WAIT_FOR_BUTTON_PRESS` ends
+  the payload. `settings` with no arguments and the pin setters no longer write JSON straight onto
+  the link. The ARP scan now releases the lwIP core lock on its early error returns (it kept it
+  held, outside companion mode too). `tools/test_companion_prompts.py` follows every CLI command
+  into the module code it calls. Outside companion mode nothing else changes. Not yet checked on
+  hardware.
+- ESP32 (non-S3) boards: ROM printf (`ets_printf`, Arduino `log_x`) is muted in companion mode as
+  on the ESP32-S3: the ROM's two output hooks are read at their ROM addresses (the same in both
+  ESP32 ROM revisions), replaced, checked by read-back and restored on exit. Not yet checked on
+  hardware.
+
 - Device screen/LED state is now reported by the device: `CAPS` carries `scrOn`, `ledOn` and
   `scrBright` (backlight level now), and the app's Device screen switches and screen brightness
   slider start from them on connect. Reconnecting within the device's 15 s hold after turning the

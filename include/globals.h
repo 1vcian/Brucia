@@ -250,7 +250,17 @@ static inline int32_t drainRotarySteps() {
 #endif
 
 extern TaskHandle_t xHandle;
+#if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
+// Brucia companion: while a headless script is being stopped (g_bjsAbort, set only by script_run in
+// companion mode), ESC / any-key read as pressed on the interpreter task, so the Bruce loop a native
+// call is in ends as if ESC were pressed at the device. See modules/bjs_interpreter/interpreter.h.
+extern volatile bool g_bjsAbort;
+bool bjsStopKeyPressed(volatile bool &btn);
+#endif
 extern inline bool check(volatile bool &btn, bool resetButtonStatus = true) {
+#if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
+    if (g_bjsAbort && bjsStopKeyPressed(btn)) return true;
+#endif
 
 #ifndef USE_TFT_eSPI_TOUCH
     if (!btn) return false;

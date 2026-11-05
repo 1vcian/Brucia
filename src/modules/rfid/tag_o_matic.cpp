@@ -748,6 +748,9 @@ String TagOMatic::read_tag_headless(int timeout_seconds) {
     int readStatus = RFIDInterface::TAG_NOT_PRESENT;
 
     while ((millis() - startTime) < (timeout_seconds * 1000)) {
+        // Brucia: companion mode only, ESC ends the wait (a stopped companion script sees ESC, see
+        // check() in globals.h); outside companion mode unchanged.
+        if (g_companionActive && check(EscPress)) break;
         readStatus = _rfid->read();
 
         if (readStatus == RFIDInterface::SUCCESS) {
@@ -777,6 +780,9 @@ String TagOMatic::read_uid_headless(int timeout_seconds) {
     int readStatus = RFIDInterface::TAG_NOT_PRESENT;
 
     while ((millis() - startTime) < (timeout_seconds * 1000)) {
+        // Brucia: companion mode only, ESC ends the wait (a stopped companion script sees ESC, see
+        // check() in globals.h); outside companion mode unchanged.
+        if (g_companionActive && check(EscPress)) break;
         readStatus = _rfid->read();
 
         if (readStatus == RFIDInterface::SUCCESS) { return _rfid->printableUID.uid; }
@@ -797,6 +803,9 @@ int TagOMatic::write_tag_headless(int timeout_seconds) {
     int finalResult = RFIDInterface::TAG_NOT_PRESENT;
 
     while (millis() - startTime < (timeout_seconds * 1000)) {
+        // Brucia: companion mode only, ESC ends the wait (a stopped companion script sees ESC, see
+        // check() in globals.h); outside companion mode unchanged.
+        if (g_companionActive && check(EscPress)) break;
         int writeStatus;
         if (_rfid->printableUID.picc_type != "FeliCa") {
             writeStatus = _rfid->write();

@@ -9,8 +9,11 @@ lands between (or, from another task, inside) frames. The first hardware run los
   - `usbConsole().print...` (include/globals.h): Serial itself outside companion mode, so Bruce's
     output is byte-identical; in companion mode the text is captured into the ACK of a CLI command
     the app routed through `CMD` (when printed by it on the companion task) and dropped otherwise.
-Bare printf/stdout, esp_log and (ESP32-S3) ROM printf are muted in companion.cpp; see
-test_companion_mutes_non_serial_output.
+Bare printf/stdout, esp_log and the ROM printf (ESP32-S3 USB flag, ESP32 putc hooks, the latter
+checked against the ROM ELFs when tool-esp-rom-elfs is installed) are muted in companion.cpp; see
+test_companion_mutes_non_serial_output and test_esp32_rom_putc_hooks. ArduinoJson writes straight
+to Serial (`serializeJson*(doc, Serial)`) anywhere under src/ need the same guard
+(test_json_to_serial_is_guarded).
 The input side (nothing but the frame reader reads Serial) is tools/test_companion_serial_input.py.
 
 This scans the module files whose functions src/companion/*.cpp calls (radio/NFC/IR/BLE/FM/NRF24,
@@ -23,12 +26,15 @@ functions those commands call, and fails on any Serial.print/println/printf/writ
 Allowlist entries that no longer match anything also fail, so the list cannot rot.
 
 Not covered (documented in skills/brucia-maintenance/references/backlog.md): interactive Bruce
-apps a CLI command can open (`loader`, file manager, menus) which take over the device and block
-the companion loop, third-party libraries under .pio/libdeps, and the ESP32 (non-S3) ROM printf.
+apps a CLI command can open (`loader`, file manager, menus; their prompts are
+tools/test_companion_prompts.py), third-party libraries under .pio/libdeps, and ROM printf on
+targets other than the ESP32 and ESP32-S3 (the ESP32-C5 boards).
 
     python3 tools/test_companion_print_hygiene.py
 """
 import re
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -284,6 +290,68 @@ class PrintHygiene(unittest.TestCase):
         self.assertLess(off, src.index("g_companionActive = false", off))
         self.assertEqual(src.count("muteNonSerialOutput(true)"), 1)
         self.assertEqual(src.count("muteNonSerialOutput(false)"), 1)
+
+    def test_json_to_serial_is_guarded(self):
+        # serializeJson*(doc, Serial) is a raw print too; the pins file used to be dumped onto the
+        # frame stream by every pin setter (save -> load). Guarded like a print, or by a companion
+        # branch that returns first in the same function.
+        pat = re.compile(r"\bserializeJson\w*\s*\([^;]*,\s*Serial\s*\)")
+        found, bad = 0, []
+        for path in sorted((ROOT / "src").rglob("*")):
+            if path.suffix not in (".c", ".cpp", ".h") or not path.is_file():
+                continue
+            code = strip_comments(path.read_text(errors="replace"))
+            spans = functions(code)
+            for m in pat.finditer(code):
+                found += 1
+                if guarded_by_statement(code, m.start()) or guarded_by_block(code, m.start()):
+                    continue
+                owner = [(a, b) for _, a, b in spans if a <= m.start() <= b]
+                head = code[owner[-1][0]:m.start()] if owner else ""
+                if re.search(r"\bif\s*\(\s*g_companionActive\s*\)\s*\{[^{}]*?\breturn\b", head):
+                    continue
+                bad.append(f"{path.relative_to(ROOT)}:{code.count(chr(10), 0, m.start()) + 1}")
+        self.assertGreaterEqual(found, 3)
+        self.assertEqual(bad, [], "ArduinoJson to Serial without a companion guard:\n" + "\n".join(bad))
+
+    def test_esp32_rom_putc_hooks(self):
+        # ESP32 (non-S3): ROM printf is muted through its two putc hooks, read at fixed ROM .bss
+        # addresses; the firmware verifies them by reading back its own sink before counting as muted.
+        src = (ROOT / "src/companion/companion.cpp").read_text()
+        addrs = {name: int(v, 16) for name, v in
+                 re.findall(r"kRom(Putc[12]) = reinterpret_cast<RomPutc \*>\((0x[0-9a-fA-F]+)\)", src)}
+        self.assertEqual(set(addrs), {"Putc1", "Putc2"})
+        body = src[src.index("static void muteRomPutc(bool mute)"):]
+        body = body[:body.index("\n}\n") + 3]
+        sink = body.index("ets_install_putc1(romPutcSink);")
+        self.assertLess(body.index("RomPutc prev1 = *hook1, prev2 = *hook2;"), sink)
+        self.assertIn("if (*hook1 == romPutcSink && *hook2 == romPutcSink)", body[sink:])
+        self.assertIn("uart_install_putc();", body)                       # unknown layout: Arduino's hooks back
+        self.assertIn("if (*hook1 == romPutcSink) ets_install_putc1(g_prevRomPutc1);", body)
+        self.assertIn("if (*hook2 == romPutcSink) ets_install_putc2(g_prevRomPutc2);", body)
+        mute = src[src.index("static void muteNonSerialOutput(bool mute)"):]
+        self.assertRegex(mute, r"#elif CONFIG_IDF_TARGET_ESP32\s+muteRomPutc\(true\);")
+        self.assertRegex(mute, r"#elif CONFIG_IDF_TARGET_ESP32\s+muteRomPutc\(false\);")
+        # esp_rom_printf is the ROM ets_printf on the ESP32 (so one pair of hooks covers both).
+        libs = Path.home() / ".platformio/packages/framework-arduinoespressif32-libs/esp32/ld/esp32.rom.api.ld"
+        if libs.exists():
+            self.assertRegex(libs.read_text(), r"PROVIDE \( esp_rom_printf\s*= ets_printf \);")
+        roms = Path.home() / ".platformio/packages/tool-esp-rom-elfs"
+        elfs = [roms / "esp32_rev0_rom.elf", roms / "esp32_rev300_rom.elf"]
+        nm = shutil.which("xtensa-esp32-elf-nm") or next(
+            (str(p) for p in (Path.home() / ".platformio/packages").glob("toolchain-xtensa-esp*/bin/xtensa-esp32-elf-nm")), None)
+        if not nm or not all(e.exists() for e in elfs):
+            self.skipTest("ESP32 ROM ELFs or xtensa nm not installed; addresses not cross-checked")
+        for elf in elfs:
+            syms = {}
+            for line in subprocess.run([nm, str(elf)], capture_output=True, text=True, check=True).stdout.splitlines():
+                parts = line.split()
+                if len(parts) == 3:
+                    syms[parts[2]] = int(parts[0], 16)
+            self.assertEqual(syms.get("_putc1"), addrs["Putc1"], elf.name)
+            self.assertEqual(syms.get("_putc2"), addrs["Putc2"], elf.name)
+            self.assertEqual(syms.get("ets_install_putc1"), 0x40007d18, elf.name)  # esp32.rom.ld
+            self.assertEqual(syms.get("ets_install_putc2"), 0x40007d38, elf.name)
 
     def test_detector_catches_regressions(self):
         code = strip_comments('void f() {\n  Serial.println("x");\n  if (!g_companionActive) Serial.println("y");\n'

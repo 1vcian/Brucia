@@ -6,6 +6,10 @@ expects PASS with JSON + Markdown reports; then against mocks with injected faul
 mismatch, heap leak, stream events after OFF) and expects the matching checks to FAIL; checks
 the allowlist refuses every transmitting command before a byte is written, that Ctrl-C sends OFF
 for an active SUB, that --dry-run opens nothing and that a missing feature yields SKIP.
+Soak (--soak, seconds-long real-time runs): a healthy soak PASSes with a CSV time series while
+the mock leaves companion mode after 1 s without a frame (keepalive proven, and a too-slow
+keepalive fails); a simulated heap leak, reboot (uptime/counters reset) and device noise are
+findings that FAIL the soak; Ctrl-C during a stream or an upload cleans up and still reports.
 Link tests: the reader resyncs after device text between/inside frames (counted, reported as a
 warning, never fatal) and upload chunks follow CAPS rx_max (legacy 768 without it) so they fit a
 simulated small RX queue that drops bytes, while oversized chunks reproduce the hardware loss.
@@ -31,7 +35,10 @@ from mock_device import MockDevice  # noqa: E402
 
 FAST = ["--pings", "40", "--ping-burst", "10", "--stream-secs", "1.5", "--quiet-secs", "1.0",
         "--diag-repeats", "8", "--timeout", "2", "--fs-timeout", "5", "--busy-secs", "6"]
-ALL = ",".join(hw.CHECK_IDS)
+ALL = ",".join(c for c in hw.CHECK_IDS if c != "soak")  # every check a plain run can select
+# Short soak: intervals of 1 s, keepalive 0.3 s, short streams (later options override FAST).
+SOAK = ["--soak", "0.07", "--soak-interval", "1.0", "--soak-keepalive", "0.3", "--soak-pings", "5",
+        "--soak-burst", "3", "--stream-secs", "0.3", "--quiet-secs", "0.2"]
 
 results = []
 
@@ -81,7 +88,7 @@ def test_healthy(tmp):
         st = statuses(rep)
         check("healthy mock: exit 0 and result PASS", code == 0 and rep["summary"]["result"] == "PASS",
               f"code={code} {st}\n{log}")
-        expected = {c: "PASS" for c in hw.CHECK_IDS}
+        expected = {c: "PASS" for c in hw.CHECK_IDS if c != "soak"}
         check("healthy mock: every check PASS (busy included)", st == expected, str(st))
         check("scratch upload removed from the mock FS",
               not any(p.startswith(hw.SCRATCH_PREFIX) for p in dev.files), str(list(dev.files)))
@@ -102,7 +109,7 @@ def test_healthy(tmp):
         md = Path(mp).read_text()
         check("JSON report: provenance, timestamps, checks, commands",
               data["device"]["build"]["id"] == "mock" and data["started_utc"].endswith("Z")
-              and data["finished_utc"].endswith("Z") and len(data["checks"]) == len(hw.CHECK_IDS)
+              and data["finished_utc"].endswith("Z") and len(data["checks"]) == len(hw.CHECK_IDS) - 1
               and all(c["started_utc"] for c in data["checks"]) and data["commands_sent"])
         check("Markdown report: result, build and per-check table",
               "Result: **PASS**" in md and "Build: id `mock`" in md and "| `diag_counters`" in md)
@@ -399,7 +406,9 @@ def test_dry_run():
 
 
 def test_bad_args():
-    for argv in (["--streams", "wifi.ap"], ["--streams", "ble.scan"], ["--only", "tx"]):
+    for argv in (["--streams", "wifi.ap"], ["--streams", "ble.scan"], ["--only", "tx"], ["--only", "soak"],
+                 ["--soak", "0"], ["--soak", "5", "--soak-keepalive", "60"], ["--soak", "5", "--soak-keepalive", "0"],
+                 ["--soak", "5", "--streams", "wifi.ap"], ["--soak", "5", "--stream-secs", "45"]):
         try:
             with contextlib.redirect_stderr(io.StringIO()):
                 hw.parse_args(["--port", "x"] + argv)
@@ -407,6 +416,217 @@ def test_bad_args():
         except SystemExit:
             ok = True
         check(f"argument refused: {' '.join(argv)}", ok)
+
+
+# ---------------------------------------------------------------------------------------------
+# Soak
+# ---------------------------------------------------------------------------------------------
+
+
+def soak_of(rep):
+    return next(c for c in rep["checks"] if c["id"] == "soak")
+
+
+def test_heap_trend():
+    tol, limit = 4096, hw.SOAK_MAX_LEAK_BPH
+    noise = [0, 900, -700, 300, -1200, 500, 1100, -400, 0, -800, 600, -300]
+    flat = [(i * 300, 100000 + noise[i % len(noise)]) for i in range(24)]  # 2 h, +-1.2 KB
+    t = hw.heap_trend(flat, limit, tol)
+    check("heap trend: flat but noisy heap over 2 h is not a leak", t["assessed"] and not t["leak"], str(t))
+    leak = [(i * 300, 100000 - 8000 * i * 300 / 3600 + noise[i % len(noise)]) for i in range(24)]
+    t = hw.heap_trend(leak, limit, tol)
+    check("heap trend: 8 KB/h decline over 2 h is a leak with the slope reported",
+          t["leak"] and -9000 < t["slope_bph"] < -7000, str(t))
+    slow = [(i * 300, 100000 - 1000 * i * 300 / 3600) for i in range(24)]
+    check("heap trend: 1 KB/h over 2 h stays under the 2 KB/h threshold", not hw.heap_trend(slow, limit, tol)["leak"])
+    short = [(i * 30, 100000 - 3000 * i * 30 / 3600) for i in range(40)]  # 20 min at 3 KB/h: 1 KB total
+    t = hw.heap_trend(short, limit, tol)
+    check("heap trend: a 20-minute run cannot resolve 3 KB/h (detection limit = tolerance / window)",
+          not t["leak"] and t["detection_limit_bph"] > 12000, str(t))
+    spike = list(flat)
+    spike[10] = (spike[10][0], 70000)
+    check("heap trend: one low outlier is not a trend (Theil-Sen)", not hw.heap_trend(spike, limit, tol)["leak"])
+    check("heap trend: fewer than 3 samples are not assessed",
+          not hw.heap_trend(flat[:2], limit, tol)["assessed"] and not hw.heap_trend([], limit, tol)["leak"])
+
+
+def test_soak_args():
+    o = hw.parse_args(["--port", "x", "--soak", "20"])
+    check("--soak alone selects the identity checks, the soak and diag_counters",
+          o.only == hw.SOAK_DEFAULT_CHECKS and o.soak == 20.0, str(o.only))
+    o = hw.parse_args(["--port", "x", "--soak", "1", "--only", "caps,ping"])
+    check("--soak with --only appends the soak check", o.only == ["caps", "ping", "soak"], str(o.only))
+    check("without --soak the default checks are unchanged",
+          hw.parse_args(["--port", "x"]).only == hw.DEFAULT_CHECKS and "soak" not in hw.DEFAULT_CHECKS)
+    out = []
+    code = hw.run(["--port", "/dev/brucia-no-such-port", "--dry-run", "--soak", "20",
+                   "--streams", "wifi.probe,wifi.sta,subghz.raw"], log=out.append)
+    text = "\n".join(out)
+    check("soak dry run: opens nothing, lists the interval frames (all allowlisted by the plan)",
+          code == 0 and hw.run.last_report is None and "[soak] SUB" in text and "subghz.raw" in text
+          and "[soak] CMD {\"cmd\": \"fs_upload_commit" in text and "keepalive" in text, text[-600:])
+
+
+def soak_files(dev):
+    return [p for p in dev.files if p.startswith(hw.SCRATCH_PREFIX)]
+
+
+def test_soak_healthy(tmp):
+    # The mock leaves companion mode after 1 s without a host frame; intervals of 2 s leave
+    # about 1.4 s idle each, so only the keepalive PINGs keep the session alive.
+    extra = SOAK + ["--soak", "0.11", "--soak-interval", "2.0"]
+    with mock(idle_exit=1.0) as (dev, path):
+        code, rep, paths, log = run_runner(path, extra, tmp)
+        st = statuses(rep)
+        soak = rep["soak"]
+        sm = soak["summary"]
+        check("soak healthy: exit 0, every selected check PASS",
+              code == 0 and st == {c: "PASS" for c in hw.SOAK_DEFAULT_CHECKS}, f"code={code} {st}\n{log[-1500:]}")
+        check("soak healthy: at least 3 intervals, no findings, not stopped",
+              sm["intervals"] >= 3 and sm["findings_total"] == 0 and sm["stopped"] is None, str(sm)[:400])
+        check("soak keepalive: the mock never left companion mode (1 s idle exit) and keepalives were sent",
+              not dev.exited and all(r["keepalives"] >= 1 for r in soak["series"][1:-1]),  # last may end early
+              f"exited={dev.exited} {[r['keepalives'] for r in soak['series']]}")
+        check("soak healthy: heap trend assessed, flat, no leak",
+              sm["heap_free_trend"]["assessed"] and sm["heap_free_trend"]["slope_bph"] == 0
+              and not sm["heap_free_trend"]["leak"], str(sm["heap_free_trend"]))
+        series = soak["series"][1:]
+        check("soak healthy: per-interval counters equal the runner's frames",
+              all(r["dev_rx_delta"] == r["host_sent_delta"] > 0 and r["dev_tx_delta"] == r["host_recv_delta"] > 0
+                  and r["noise_bytes_delta"] == 0 and r["rejects_delta"] == 0 for r in series), str(series[:2]))
+        ops = sm["ops"]
+        check("soak healthy: every interval ran pings, list, read, upload, stream and diag (timed)",
+              all(ops[o]["n"] == sm["intervals"] and ops[o]["failed"] == 0
+                  for o in ("ping_round", "fs_list", "fs_read", "fs_upload", "stream"))
+              and ops["diag"]["n"] == sm["intervals"] + 1 and all("ms" in e for e in soak["ops"]), str(ops))
+        check("soak healthy: latency percentiles per interval and overall",
+              all(r["p50_ms"] is not None and r["p99_ms"] >= r["p50_ms"] for r in series)
+              and sm["latency"]["n"] >= sm["intervals"] * 5, str(sm["latency"]))
+        check("soak healthy: uptime rises, reset reason unchanged",
+              [r["uptime_s"] for r in soak["series"]] == sorted(r["uptime_s"] for r in soak["series"])
+              and {r["reset"] for r in soak["series"]} == {"poweron"})
+        check("soak healthy: scratch files removed, no SUB left, everything sent allowlisted",
+              not soak_files(dev) and not dev.subs and all_sent_allowed(dev) and sm["uploads"] == sm["intervals"],
+              f"{soak_files(dev)} {dev.subs}")
+        check("soak healthy: no transmitting or active-scan frame reached the mock",
+              {d["stream"] for d in dev.received_subs} == {"wifi.probe"}
+              and not any(c.split(" ")[0] in ("jam_detect", "stop") for c in dev.received_cmds))
+        check("soak healthy: JSON, Markdown and CSV reports", len(paths) == 3 and all(Path(p).exists() for p in paths))
+        lines = Path(paths[2]).read_text().splitlines()
+        check("soak CSV: header and one row per diag sample",
+              lines[0].split(",") == list(hw.SOAK_CSV_COLUMNS) and len(lines) == 1 + len(soak["series"]), lines[:2])
+        md = Path(paths[1]).read_text()
+        check("soak Markdown: summary, operations and time series sections",
+              "## Soak" in md and "### Soak operations" in md and "### Soak time series" in md
+              and Path(paths[2]).name in md)
+
+
+def test_soak_keepalive_too_slow(tmp):
+    extra = SOAK + ["--soak", "0.05", "--soak-interval", "2.5", "--soak-keepalive", "1.6"]
+    with mock(idle_exit=1.0) as (dev, path):
+        code, rep, _, _ = run_runner(path, extra, tmp)
+        sm = rep["soak"]["summary"]
+        check("soak negative control: a keepalive slower than the idle exit loses the session (FAIL)",
+              dev.exited and code == 1 and soak_of(rep)["status"] == "FAIL" and sm["stopped"] == "diag did not answer",
+              f"exited={dev.exited} code={code} {sm['findings_by_kind']} {sm['stopped']}")
+
+
+def test_soak_heap_leak(tmp):
+    with mock(faults=("heap_leak",)) as (dev, path):
+        code, rep, _, _ = run_runner(path, SOAK, tmp)
+        sm = rep["soak"]["summary"]
+        trend = sm["heap_free_trend"]
+        check("soak heap leak: FAIL with only a heap finding, slope reported per hour",
+              code == 1 and soak_of(rep)["status"] == "FAIL" and sm["findings_by_kind"] == {"heap": 1}
+              and trend["leak"] and trend["slope_bph"] < -hw.SOAK_MAX_LEAK_BPH, f"{sm['findings_by_kind']} {trend}")
+        check("soak heap leak: other checks still PASS", statuses(rep)["diag_counters"] == "PASS")
+
+
+def test_soak_reboot(tmp):
+    with mock(faults=("reboot",)) as (dev, path):
+        code, rep, paths, _ = run_runner(path, SOAK, tmp)
+        sm = rep["soak"]["summary"]
+        f = next((x for x in rep["soak"]["findings"] if x["kind"] == "reboot"), None)
+        check("soak reboot: uptime/counter reset is a reboot finding, soak stops, exit 1",
+              code == 1 and soak_of(rep)["status"] == "FAIL" and f is not None and "uptime went back" in f["detail"]
+              and sm["stopped"] == "unexpected reboot" and sm["intervals"] == hw_mock_reboot_interval(),
+              f"code={code} {sm['findings_by_kind']} {sm['stopped']} intervals={sm['intervals']}")
+        check("soak reboot: the CSV still has the rows up to the reboot", len(Path(paths[2]).read_text().splitlines())
+              == 1 + len(rep["soak"]["series"]) >= 4)
+
+
+def hw_mock_reboot_interval():
+    import mock_device
+    # diag calls: run baseline, soak interval 0, then one per interval; the reboot is seen at
+    # call index REBOOT_AT_DIAG.
+    return mock_device.REBOOT_AT_DIAG - 1
+
+
+def test_soak_noise(tmp):
+    with mock(noise=("between",)) as (dev, path):
+        code, rep, paths, _ = run_runner(path, SOAK + ["--only", "caps"], tmp)
+        sm = rep["soak"]["summary"]
+        kinds = sm["findings_by_kind"]
+        series = rep["soak"]["series"][1:]
+        check("soak noise: device text between frames is a noise finding (FAIL), counters still exact",
+              code == 1 and soak_of(rep)["status"] == "FAIL" and set(kinds) == {"noise"}
+              and all(r["dev_rx_delta"] == r["host_sent_delta"] and r["dev_tx_delta"] == r["host_recv_delta"]
+                      for r in series), f"{kinds} {series[:1]}")
+        check("soak noise: per-interval noise bytes and resyncs in the series",
+              sum(r["noise_bytes_delta"] for r in series) > 0 and sum(r["resyncs_delta"] for r in series) > 0)
+        md = Path(paths[1]).read_text()
+        check("soak noise: findings listed with a sample in the Markdown",
+              "### Soak findings" in md and "non-frame byte" in md and "cc1101" in md)
+
+
+def run_interrupted(tmp, runner_cls, extra):
+    original = hw.Runner
+    hw.Runner = runner_cls
+    try:
+        with mock() as (dev, path):
+            code, rep, paths, _ = run_runner(path, SOAK + extra, tmp)
+            return dev, code, rep, paths
+    finally:
+        hw.Runner = original
+
+
+def test_soak_interrupt_stream(tmp):
+    class Interrupting(hw.Runner):
+        calls = 0
+
+        def stream_listen(self, stream, collect):
+            Interrupting.calls += 1
+            if Interrupting.calls == 2:
+                raise KeyboardInterrupt
+            super().stream_listen(stream, collect)
+
+    dev, code, rep, paths = run_interrupted(tmp, Interrupting, ["--soak", "1"])
+    sm = (rep.get("soak") or {}).get("summary") or {"interrupted": False}
+    check("soak Ctrl-C in a stream: exit 130, report and soak summary marked interrupted",
+          code == 130 and rep["interrupted"] and sm["interrupted"] and "interrupted after" in soak_of(rep)["reason"],
+          f"code={code} {soak_of(rep)['reason']}")
+    check("soak Ctrl-C in a stream: OFF sent, no SUB left, no scratch file",
+          not dev.subs and dev.received_subs[-1] == {"stream": "wifi.probe", "on": False} and not soak_files(dev)
+          and any("SUB wifi.probe off" in a[0] for a in rep["cleanup"]), f"{dev.subs} {rep['cleanup']}")
+    series = (rep.get("soak") or {}).get("series") or []
+    check("soak Ctrl-C in a stream: CSV written with the completed and the partial interval",
+          len(paths) == 3 and [r["interval"] for r in series] == [0, 1, 2], str(series)[:300])
+
+
+def test_soak_interrupt_upload(tmp):
+    class Interrupting(hw.Runner):
+        def fs_read(self, path, timeout):
+            if path.startswith(hw.SCRATCH_PREFIX):
+                raise KeyboardInterrupt  # after commit, before the remove
+            return super().fs_read(path, timeout)
+
+    dev, code, rep, paths = run_interrupted(tmp, Interrupting, ["--soak", "1"])
+    removes = [a for a in rep["cleanup"] if a[0].startswith("storage remove " + hw.SCRATCH_PREFIX)]
+    check("soak Ctrl-C after an upload commit: cleanup removes the scratch file, report written",
+          code == 130 and removes and removes[0][1] is True and not soak_files(dev)
+          and any(c.startswith("storage remove " + hw.SCRATCH_PREFIX) for c in dev.received_cmds)
+          and ((rep.get("soak") or {}).get("summary") or {}).get("interrupted") and Path(paths[0]).exists(),
+          f"code={code} {rep['cleanup']} {soak_files(dev)}")
 
 
 def main():
@@ -425,6 +645,15 @@ def main():
         test_noise_between(tmp)
         test_noise_inside(tmp)
         test_rx_queue(tmp)
+        test_heap_trend()
+        test_soak_args()
+        test_soak_healthy(tmp)
+        test_soak_keepalive_too_slow(tmp)
+        test_soak_heap_leak(tmp)
+        test_soak_reboot(tmp)
+        test_soak_noise(tmp)
+        test_soak_interrupt_stream(tmp)
+        test_soak_interrupt_upload(tmp)
     ok = all(v for _, v in results)
     print(f"{sum(v for _, v in results)}/{len(results)} checks passed")
     print("HW ACCEPTANCE TEST PASS" if ok else "HW ACCEPTANCE TEST FAIL")

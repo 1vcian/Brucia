@@ -66,10 +66,19 @@ object BruciaLog {
         i("Log", "---- log start ${Date()} (app ${BuildConfig.VERSION_NAME}) ----")
     }
 
-    fun d(tag: String, msg: String) { try { Log.d(prefix(tag), msg) } catch (_: Exception) { }; append("D", tag, msg, null) }
-    fun i(tag: String, msg: String) { try { Log.i(prefix(tag), msg) } catch (_: Exception) { }; append("I", tag, msg, null) }
-    fun w(tag: String, msg: String, e: Throwable? = null) { try { Log.w(prefix(tag), msg, e) } catch (_: Exception) { }; append("W", tag, msg, e) }
-    fun e(tag: String, msg: String, e: Throwable? = null) { try { Log.e(prefix(tag), msg, e) } catch (_: Exception) { }; append("E", tag, msg, e) }
+    fun d(tag: String, msg: String) { logcat { Log.d(prefix(tag), msg) }; append("D", tag, msg, null) }
+    fun i(tag: String, msg: String) { logcat { Log.i(prefix(tag), msg) }; append("I", tag, msg, null) }
+    fun w(tag: String, msg: String, e: Throwable? = null) { logcat { Log.w(prefix(tag), msg, e) }; append("W", tag, msg, e) }
+    fun e(tag: String, msg: String, e: Throwable? = null) { logcat { Log.e(prefix(tag), msg, e) }; append("E", tag, msg, e) }
+
+    /**
+     * Logcat is best effort. Off-device (JVM tests) android.util.Log may be a stub that throws or a
+     * layoutlib class whose native init fails with a LinkageError (UnsatisfiedLinkError, then
+     * NoClassDefFoundError); neither may escape a log call.
+     */
+    private inline fun logcat(write: () -> Unit) {
+        try { write() } catch (_: Exception) { } catch (_: LinkageError) { }
+    }
 
     private fun prefix(tag: String) = if (tag.startsWith(TAG)) tag else "$TAG/$tag"
 

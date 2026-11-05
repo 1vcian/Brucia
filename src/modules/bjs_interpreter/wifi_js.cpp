@@ -4,6 +4,7 @@
 #include "core/sd_functions.h"
 #include "core/wifi/wifi_common.h"
 #include "helpers_js.h"
+#include "interpreter.h" // Brucia: bjs_sleep_ms
 #include "storage_js.h"
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
@@ -58,7 +59,8 @@ JSValue native_wifiConnect(JSContext *ctx, JSValue *this_val, int argc, JSValue 
 
     int i = 0;
     do {
-        delay(1000);
+        // Brucia: = delay(1000) outside companion runs; a stopped script_run gives up the wait.
+        if (!bjs_sleep_ms(1000)) break;
         i++;
         if (i > timeout_in_seconds) {
             usbConsole().println("timeout");

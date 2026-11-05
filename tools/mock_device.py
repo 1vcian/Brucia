@@ -13,7 +13,9 @@ gets ERR 400 and an invalid length prefix is counted and drops the buffered byte
 the device. A small in-memory file system backs `storage list|remove`, `fs_read` and the
 transactional `fs_upload_*` commands; `jam_detect <secs>` behaves as a blocking operation
 (PING answered, `stop` ends it, other CMDs get ERR 409 "device busy"). `MockDevice` can be
-served from a thread (tools/test_hw_acceptance.py) and accepts optional injected faults.
+served from a thread (tools/test_hw_acceptance.py) and accepts optional injected faults
+(see FAULTS, including a simulated reboot) and `idle_exit`: leave companion mode after that many
+seconds without a host frame, as the firmware does after 60 s (soak keepalive tests).
 
 Link simulation (host reader/sizing tests): `--noise between` writes Bruce-style debug text
 ("cc1101 Connection OK") between frames, `--noise inside` also splices it into EVENT frames
@@ -217,7 +219,10 @@ STA_SAMPLES = [
 #   heap_leak                diag heap.free drops 4096 bytes per call
 #   event_after_off          one more event of a stream arrives after its OFF ACK
 #   no_transactional_uploads CAPS does not advertise features.transactional_uploads
-FAULTS = ("rx_undercount", "heap_leak", "event_after_off", "no_transactional_uploads")
+#   reboot                   the 5th diag call finds a rebooted device: uptime and link counters
+#                            start again from zero (the reset reason stays the same)
+FAULTS = ("rx_undercount", "heap_leak", "event_after_off", "no_transactional_uploads", "reboot")
+REBOOT_AT_DIAG = 4  # diag calls answered before the simulated reboot
 UPLOAD_MAX_CHUNK = 3072
 
 
@@ -246,7 +251,7 @@ class MockDevice:
     main() runs one on a fresh PTY; tests run one in a thread with a stop event."""
 
     def __init__(self, faults=(), counters=None, poll_interval=0.02, emit_interval=1.0, profile="full",
-                 noise=(), rx_queue=None, caps_rx_max="auto", legacy_outputs=False):
+                 noise=(), rx_queue=None, caps_rx_max="auto", legacy_outputs=False, idle_exit=None):
         unknown = set(faults) - set(FAULTS)
         if unknown:
             raise ValueError(f"unknown mock faults: {sorted(unknown)}")
@@ -282,6 +287,12 @@ class MockDevice:
         self.received_subs = []   # every SUB body, in order
         self._buf = b""
         self._after_off = []      # (due time, stream) for the event_after_off fault
+        # Companion idle exit (src/companion/companion.cpp): after HELLO, the firmware leaves
+        # companion mode when no host frame arrived for 60 s; idle_exit (seconds) models that
+        # (None: never). Once exited, the mock reads and ignores every byte (no replies).
+        self.idle_exit = idle_exit
+        self.exited = False
+        self._hello_seen = False
 
     def _send(self, fd, kind, msg_id, d):
         if not self.noise:
@@ -438,6 +449,10 @@ class MockDevice:
             self._outputs("led 1")
 
     def _diag(self):
+        if "reboot" in self.faults and self.diag_calls == REBOOT_AT_DIAG:
+            self.started = time.time()        # uptime starts again
+            self.counters = LinkCounters()    # counters are since boot
+            self.counters.note("rx_frames")   # this diag request, received after the reboot
         reply = diag_reply(self.counters, time.time() - self.started)
         if "heap_leak" in self.faults:
             reply["heap"]["free"] -= 4096 * self.diag_calls
@@ -541,6 +556,7 @@ class MockDevice:
         t, mid, d = msg.get("t"), msg.get("id", 0), msg.get("d", {})
         self._last_frame = time.time()
         if t == HELLO:
+            self._hello_seen = True
             self._send(fd, CAPS, mid, self._caps())
         elif t == PING:
             self._send(fd, PONG, mid, {})
@@ -607,6 +623,15 @@ class MockDevice:
         os.set_blocking(fd, False)
         last_emit = 0.0
         while not (stop and stop.is_set()):
+            if (self.idle_exit is not None and self._hello_seen and not self.exited
+                    and time.time() - self._last_frame > self.idle_exit):
+                self.exited = True
+                self.subs.clear()
+            if self.exited:
+                self._read(fd)
+                self._buf = b""
+                time.sleep(self.poll_interval)
+                continue
             self._read(fd)
             while True:
                 raw = self._next_frame()

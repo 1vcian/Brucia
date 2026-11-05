@@ -899,6 +899,14 @@ void key_input(FS fs, const String &bad_script, HIDInterface *_hid) {
 
                     if (nextStringDelay >= 0) { nextStringDelay = -1; }
                 } else if (PriCmd->type == DuckyCommandType_WaitForButtonPress) {
+                    // Brucia: in companion mode nobody is at the device to press it; end the payload
+                    // here (typing on without the pause the author asked for could do harm).
+                    if (g_companionActive) {
+                        usbConsole().println("WAIT_FOR_BUTTON_PRESS: payload stopped, it waits for a "
+                                             "button at the device (companion mode)");
+                        printStatusBadUSBBLE("Stopped (companion mode)");
+                        goto EXIT;
+                    }
                     printStatusBadUSBBLE("Waiting for button press");
                     bool waitSelect = false;
                     while (!waitSelect) {

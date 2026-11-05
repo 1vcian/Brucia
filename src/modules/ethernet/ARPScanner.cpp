@@ -138,12 +138,14 @@ void ARPScanner::setup() {
 
     if (esp_netif_get_ip_info(esp_net_interface, &ip_info) != ESP_OK) {
         Serial.println("Can't get IP informations");
+        UNLOCK_TCPIP_CORE(); // Brucia: the lock taken above was never released on this path
         return;
     }
 
     if (ip_info.ip.addr == 0 || ip_info.netmask.addr == 0) {
         Serial.println("Ethernet has no IP/netmask, aborting ARP scan");
         displayError("Ethernet not ready", true);
+        UNLOCK_TCPIP_CORE(); // Brucia: the lock taken above was never released on this path
         return;
     }
 
@@ -159,6 +161,7 @@ void ARPScanner::setup() {
     if (net_iface == nullptr || net_iface->linkoutput == nullptr ||
         net_iface->hwaddr_len != MAC_ADDRESS_LENGTH) {
         Serial.println("Network interface not ready for ARP scan");
+        UNLOCK_TCPIP_CORE(); // Brucia: the lock taken above was never released on this path
         return;
     }
 
