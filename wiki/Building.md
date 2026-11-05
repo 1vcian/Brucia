@@ -41,10 +41,10 @@ Notes:
 - Firmware additions such as deauth, battery reporting and lite mode require flashing
   the latest build.
 
-## Android app (JDK 17-23)
+## Android app (JDK 17-25)
 
-JDK 17 to 23 is required (CI uses 21; Gradle 8.11.1 does not run on 24+), plus the
-Android SDK with `platforms;android-35` and `build-tools;34.0.0`. Set `ANDROID_HOME`
+JDK 17 to 25 is required (per Gradle 9.2.1/AGP 8.13.2; verified locally with 23, CI uses 21), plus the
+Android SDK with `platforms;android-35` and `build-tools;35.0.0`. Set `ANDROID_HOME`
 (or `sdk.dir` in `android/local.properties`), otherwise Gradle stops with
 "SDK location not found".
 

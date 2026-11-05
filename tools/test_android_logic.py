@@ -14,12 +14,13 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = [
-    ("org.jetbrains.kotlin", "kotlin-compiler-embeddable", "2.0.21"),
-    ("org.jetbrains.kotlin", "kotlin-stdlib", "2.0.21"),
-    ("org.jetbrains.kotlin", "kotlin-script-runtime", "2.0.21"),
+    # Keep in step with the Kotlin Gradle plugin in android/build.gradle.kts; the compiler's
+    # own runtime dependencies (kotlin-reflect, coroutines) follow its published POM.
+    ("org.jetbrains.kotlin", "kotlin-compiler-embeddable", "2.4.21"),
+    ("org.jetbrains.kotlin", "kotlin-stdlib", "2.4.21"),
+    ("org.jetbrains.kotlin", "kotlin-script-runtime", "2.4.21"),
     ("org.jetbrains.kotlin", "kotlin-reflect", "1.6.10"),
-    ("org.jetbrains.intellij.deps", "trove4j", "1.0.20200330"),
-    ("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.6.4"),
+    ("org.jetbrains.kotlinx", "kotlinx-coroutines-core-jvm", "1.8.0"),
     ("org.jetbrains", "annotations", "13.0"),
     ("junit", "junit", "4.13.2"),
     ("org.hamcrest", "hamcrest-core", "1.3"),

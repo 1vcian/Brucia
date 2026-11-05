@@ -244,7 +244,8 @@ object SubGhzDecoder {
         for (frame in frames) {
             val decoded = decodeCells(frame, 0, te, pwm) ?: decodeCells(frame, 1, te, pwm) ?: continue
             if (decoded.length in KEELOQ_BITS) {
-                if (best == null || decoded.length > best!!.length) best = decoded
+                val current = best
+                if (current == null || decoded.length > current.length) best = decoded
             }
         }
         val bits = best ?: return null

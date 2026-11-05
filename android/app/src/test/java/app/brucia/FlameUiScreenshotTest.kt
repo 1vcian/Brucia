@@ -40,6 +40,7 @@ import app.brucia.ui.Amber
 import app.brucia.ui.BruciaTheme
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
+import app.cash.paparazzi.detectEnvironment
 import org.junit.Rule
 import org.junit.Test
 
@@ -49,8 +50,14 @@ import org.junit.Test
  */
 class FlameUiScreenshotTest {
 
+    // Paparazzi 1.3.5 bundles layoutlib 14.0.11 (API 34) but reports SDK_INT = compileSdk (35).
+    // Compose 1.8+ then takes API 35 paths (StaticLayout.Builder.setUseBoundsForWidth) that this
+    // layoutlib lacks and every snapshot fails; report the API level the renderer implements.
     @get:Rule
-    val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_5)
+    val paparazzi = Paparazzi(
+        deviceConfig = DeviceConfig.PIXEL_5,
+        environment = detectEnvironment().copy(compileSdkVersion = 34),
+    )
 
     @Test
     fun wardriveScreen() {

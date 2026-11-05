@@ -18,6 +18,11 @@ that offloads computation to the phone. Format loosely follows
 - `ir rx` no longer leaks its reader when no signal arrives.
 - `tools/hw_acceptance.py`: passive, allowlisted acceptance checks for a connected board.
 - Contributor setup documented from a fresh clone (prerequisites and exact steps).
+- Android build toolchain updated (Gradle 9.2.1, AGP 8.13.2, Kotlin 2.4.21, Room 2.8.5,
+  location services 21.4.0); database schema unchanged.
+- Companion firmware code is built without C++ exceptions (5-12 KB smaller depending on
+  the board); a post-link check fails the build if any exception handler elsewhere in the
+  firmware were lost.
 
 ## [0.1.4] - 2026-11-05
 

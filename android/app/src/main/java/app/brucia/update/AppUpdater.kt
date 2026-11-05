@@ -2,13 +2,13 @@ package app.brucia.update
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import androidx.core.net.toUri
 
 /**
  * In-app OTA self-update: reads the latest GitHub release of the project, compares it
@@ -101,7 +101,7 @@ object AppUpdater {
     fun openInstallSettings(ctx: Context) {
         val intent = Intent(
             Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-            Uri.parse("package:${ctx.packageName}"),
+            "package:${ctx.packageName}".toUri(),
         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         ctx.startActivity(intent)
     }

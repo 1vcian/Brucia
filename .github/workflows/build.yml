@@ -43,11 +43,11 @@ jobs:
   android:
     runs-on: ubuntu-latest
     env:
-      # AGP 8.7.3 default build-tools; compileSdk/targetSdk 35 (android/app/build.gradle.kts).
-      ANDROID_BUILD_TOOLS: '34.0.0'
+      # AGP 8.13.2 default build-tools; compileSdk/targetSdk 35 (android/app/build.gradle.kts).
+      ANDROID_BUILD_TOOLS: '35.0.0'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      # JDK 21 LTS: supported by Gradle 8.11.1, AGP 8.7.3 and Kotlin 2.0.21
+      # JDK 21 LTS: supported by Gradle 9.2.1, AGP 8.13.2 and Kotlin 2.4.21
       # (app bytecode targets 17). Local builds with JDK 23 are also used.
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:

@@ -64,7 +64,7 @@ class DeviceOperation(
         timeoutMs: Long = this.timeoutMs,
         result: (Boolean, JSONObject?) -> String?,
     ) {
-        val onError = { e: Exception -> false to JSONObject().put("msg", e.message ?: "") }
+        val onError: (Exception) -> Pair<Boolean, JSONObject?> = { e -> false to JSONObject().put("msg", e.message ?: "") }
         launchOwned(running, precheck, { json.runJson(cmd, timeoutMs) }, onError) { (ok, data) ->
             result(ok, data)
         }

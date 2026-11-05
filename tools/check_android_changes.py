@@ -42,9 +42,11 @@ def main():
     plugins = []
     if args.all_main:
         sources = sorted(str(p) for p in (ROOT / 'android/app/src/main').rglob('*.kt'))
-        plugin = next((modules / 'org.jetbrains.kotlin/kotlin-compose-compiler-plugin-embeddable/2.0.21').glob('*/*.jar'), None)
+        # The Compose compiler plugin must match the Kotlin compiler pinned in test_android_logic.
+        kotlin = next(v for g, a, v in ARTIFACTS if a == 'kotlin-compiler-embeddable')
+        plugin = next((modules / f'org.jetbrains.kotlin/kotlin-compose-compiler-plugin-embeddable/{kotlin}').glob('*/*.jar'), None)
         if plugin is None:
-            raise SystemExit('Cached Kotlin Compose compiler 2.0.21 is required')
+            raise SystemExit(f'Cached Kotlin Compose compiler {kotlin} is required')
         plugins = [f'-Xplugin={plugin}']
     production_count = len(sources)
     test_files = []

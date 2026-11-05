@@ -7,7 +7,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.net.Uri
 import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
@@ -184,6 +183,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.io.File
+import androidx.core.net.toUri
 
 private enum class View { LIST, MAP, STATS }
 private enum class ApSort(val label: String) { STABLE("Found"), NAME("Name"), SIGNAL("Signal"), RISK("Risk") }
@@ -2098,7 +2098,7 @@ private fun CryptoRow(name: String, address: String) {
 private fun openUrl(context: Context, url: String) {
     try {
         context.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+            android.content.Intent(android.content.Intent.ACTION_VIEW, url.toUri())
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     } catch (_: Exception) {
@@ -2309,7 +2309,7 @@ private fun HelpDialog(onDismiss: () -> Unit) {
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
-                        try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://1vcian.me/BruciaDev/wiki/")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { app.brucia.BruciaLog.w("Help", "open wiki url", e) }
+                        try { context.startActivity(Intent(Intent.ACTION_VIEW, "https://1vcian.me/BruciaDev/wiki/".toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { app.brucia.BruciaLog.w("Help", "open wiki url", e) }
                     },
                 ) { Text("Open the wiki") }
                 Spacer(Modifier.height(16.dp))
@@ -8396,7 +8396,7 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { vm.resetFlash(); onFlash() },
                     colors = ButtonDefaults.buttonColors(containerColor = cs.error),
-                ) { Text(if (flashing) "Flashing..." else if (selectedBoard != null) "Flash ${selectedBoard!!.label}" else "Flash latest firmware") }
+                ) { Text(if (flashing) "Flashing..." else if (selectedBoard != null) "Flash ${selectedBoard.label}" else "Flash latest firmware") }
 
                 if (flashing) {
                     Spacer(Modifier.height(6.dp))

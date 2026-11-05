@@ -11,6 +11,7 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.core.graphics.createBitmap
 
 /**
  * Offline export of a recorded device-mic session: the raw PCM is written as a standard WAV, and one
@@ -178,7 +179,7 @@ object AudioExport {
     private const val TEXT = 0xFFCCCCCC.toInt()
 
     private fun blank(w: Int, h: Int): Bitmap =
-        Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { eraseColor(BG) }
+        createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { eraseColor(BG) }
 
     private fun grid(c: Canvas, w: Int, h: Int) {
         val p = Paint().apply { color = GRID; strokeWidth = 1f }

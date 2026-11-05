@@ -1,6 +1,7 @@
 package app.brucia.wordlist
 
 import android.content.Context
+import android.annotation.SuppressLint
 import android.net.Uri
 import java.io.File
 import java.net.HttpURLConnection
@@ -17,9 +18,10 @@ object WordlistStore {
 
     fun importFrom(ctx: Context, uri: Uri, suggestedName: String): WordlistInfo {
         val dest = File(dir(ctx), sanitize(suggestedName))
-        ctx.contentResolver.openInputStream(uri)!!.use { input ->
-            dest.outputStream().use { input.copyTo(it) }
-        }
+        // Closed by use{} below; AGP 8.13 lint misses it here even on a non-null receiver.
+        @SuppressLint("Recycle")
+        val input = ctx.contentResolver.openInputStream(uri)!!
+        input.use { dest.outputStream().use { out -> it.copyTo(out) } }
         return info(dest)
     }
 

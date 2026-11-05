@@ -166,7 +166,7 @@ class MifareKeyCheckService(
                             val stopUid = sequenceUid
                             update(owner) {
                                 it.copy(running = false, completed = false, partial = true,
-                                    completenessKnown = true, exhaustive = false, uid = stopUid ?: "",
+                                    completenessKnown = true, exhaustive = false, uid = stopUid,
                                     message = "Card changed between batches (UID $stopUid -> ${meta.uid}); stopped. ${found.size} key(s) found so far.")
                             }
                             return@launch

@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
+import androidx.core.graphics.createBitmap
 
 /**
  * Applies [DrawOp]s from the device's TFT mirror onto a Bitmap, reproducing the Bruce
@@ -12,7 +13,7 @@ import android.graphics.Rect
  * Rendering mirrors Adafruit-GFX semantics (string origin = top-left).
  */
 class TftRenderer(width: Int = 320, height: Int = 170) {
-    @Volatile var bitmap: Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    @Volatile var bitmap: Bitmap = createBitmap(width, height, Bitmap.Config.ARGB_8888)
         private set
     private var canvas = Canvas(bitmap)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -25,7 +26,7 @@ class TftRenderer(width: Int = 320, height: Int = 170) {
         when (op) {
             is DrawOp.ScreenInfo -> if (op.width in 1..2048 && op.height in 1..2048 &&
                 (op.width != bitmap.width || op.height != bitmap.height)) {
-                bitmap = Bitmap.createBitmap(op.width, op.height, Bitmap.Config.ARGB_8888)
+                bitmap = createBitmap(op.width, op.height, Bitmap.Config.ARGB_8888)
                 canvas = Canvas(bitmap)
                 bitmap.eraseColor(0xFF000000.toInt())
             }

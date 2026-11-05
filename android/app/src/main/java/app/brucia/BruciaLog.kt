@@ -1,6 +1,7 @@
 package app.brucia
 
 import android.content.ContentValues
+import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.os.Environment
@@ -143,7 +144,10 @@ object BruciaLog {
                     put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Brucia")
                 }
                 val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv) ?: return null
-                ctx.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                // Closed by use{} below; AGP 8.13 lint misses it here even on a non-null receiver.
+                @SuppressLint("Recycle")
+                val out = ctx.contentResolver.openOutputStream(uri)
+                out?.use { it.write(text.toByteArray()) }
                 "Download/Brucia/$name"
             } else {
                 @Suppress("DEPRECATION")

@@ -1,7 +1,6 @@
 package app.brucia
 
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -23,6 +22,7 @@ import app.brucia.netscan.ScanHost
 import app.brucia.netscan.VulnHit
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import androidx.core.net.toUri
 
 /**
  * Phone-side network scanner ("nmap-lite"): discovers hosts on the local subnet, finds open ports +
@@ -104,7 +104,7 @@ internal fun NetworkScanScreen() {
         }
 
         hosts.forEach { host -> HostCard(host) { url ->
-            try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { app.brucia.BruciaLog.w("NetScan", "open host url", e) }
+            try { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { app.brucia.BruciaLog.w("NetScan", "open host url", e) }
         } }
         if (hosts.isNotEmpty()) Spacer(Modifier.height(8.dp))
     }

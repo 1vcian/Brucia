@@ -73,6 +73,8 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 
 // Shared sample rate for all Audio tools (matches the ESP mic/speaker contract).
 private const val AUDIO_FS = 16000
@@ -284,7 +286,7 @@ private fun WaterfallPanel(pcm: ShortArray) {
     val cols = 240
     val bins = 256
     val fb = remember { IntArray(cols * bins) }
-    val bmp = remember { Bitmap.createBitmap(cols, bins, Bitmap.Config.ARGB_8888) }
+    val bmp = remember { createBitmap(cols, bins, Bitmap.Config.ARGB_8888) }
     var ver by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(pcm) {
@@ -637,7 +639,7 @@ private fun SstvCell(cs: androidx.compose.material3.ColorScheme, label: String, 
 // --- SSTV tool (receive cascade + transmit) -------------------------------------
 
 private fun bitmapToSstv(bmp: Bitmap, mode: Sstv.Mode): Sstv.Image {
-    val scaled = Bitmap.createScaledBitmap(bmp, mode.mWidth, mode.mHeight, true)
+    val scaled = bmp.scale(mode.mWidth, mode.mHeight, filter = true)
     val px = IntArray(mode.mWidth * mode.mHeight)
     scaled.getPixels(px, 0, mode.mWidth, 0, 0, mode.mWidth, mode.mHeight)
     val img = Sstv.Image(mode.mWidth, mode.mHeight)

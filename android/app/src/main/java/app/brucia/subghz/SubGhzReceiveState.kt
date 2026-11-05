@@ -25,7 +25,7 @@ class SubGhzReceiveState {
     private val lastRequestOn = mutableMapOf<String, Boolean>()
 
     /** Record the user's request before it reaches the SUB owner; a new start clears the old error. */
-    fun request(stream: String, on: Boolean) = synchronized(lastRequestOn) {
+    fun request(stream: String, on: Boolean): Unit = synchronized(lastRequestOn) {
         if (stream !in STREAMS) return
         lastRequestOn[stream] = on
         if (on) errorFlow(stream).value = ""
@@ -42,7 +42,7 @@ class SubGhzReceiveState {
     }
 
     /** SUB owner error callback (device ERR text, timeout or local rejection). */
-    fun onError(stream: String, message: String) = synchronized(lastRequestOn) {
+    fun onError(stream: String, message: String): Unit = synchronized(lastRequestOn) {
         if (stream !in STREAMS || lastRequestOn[stream] != true) return
         errorFlow(stream).value = message.ifBlank { "Device error" }
     }

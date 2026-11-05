@@ -110,7 +110,8 @@ class SessionFileLink(
     }
 
     private fun unsigned(data: JSONObject, field: String): Long? {
-        val value = data.opt(field)
+        // Explicit Any?: Kotlin 2.4 reports a false non-exhaustive 'when' on the platform type.
+        val value: Any? = data.opt(field)
         return when (value) {
             is Int -> value.toLong().takeIf { it >= 0 }
             is Long -> value.takeIf { it in 0..0xFFFFFFFFL }

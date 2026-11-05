@@ -30,8 +30,8 @@ written for bash/zsh on macOS and Linux.
 | Tool | Version | Needed for |
 |------|---------|------------|
 | Git | any | clone; PlatformIO fetches Git-pinned libraries |
-| JDK | 17 to 23 (CI: Temurin 21). AGP 8.7.3 needs 17+; Gradle 8.11.1 does not run on 24+ | Android |
-| Android SDK | `platform-tools`, `platforms;android-35`, `build-tools;34.0.0` | Android |
+| JDK | 17 to 25 per Gradle 9.2.1/AGP 8.13.2 requirements; verified locally with 23, CI uses Temurin 21 | Android |
+| Android SDK | `platform-tools`, `platforms;android-35`, `build-tools;35.0.0` | Android |
 | Python | 3.10 to 3.14 (CI: 3.11). The pinned pioarduino platform rejects 3.15+ | firmware, host tests |
 | PlatformIO Core | 6.2.0 (CI pin), installed with pip | firmware |
 | pyserial | any (`pip install pyserial`) | `test_protocol_e2e.py`, `companion_test.py` |
@@ -70,7 +70,7 @@ Without `ANDROID_HOME`, Gradle fails with "SDK location not found"; writing
 `sdk.dir=/path/to/sdk` to `android/local.properties` (git-ignored) also works.
 Without Android Studio, install the SDK packages with the command-line tools:
 `sdkmanager --licenses` then
-`sdkmanager "platform-tools" "platforms;android-35" "build-tools;34.0.0"`.
+`sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"`.
 
 ```sh
 cd android
@@ -81,7 +81,7 @@ cd android
 cd ..
 ```
 
-The first run downloads Gradle 8.11.1 and all dependencies (about 2.5 GB in
+The first run downloads Gradle 9.2.1 and all dependencies (about 2.5 GB in
 `~/.gradle`, a few minutes). Check a built APK's applicationId,
 `VERSION`-derived versionName/versionCode, min/target SDK and debuggable flag
 (uses `aapt2` from `ANDROID_HOME`; CI runs the same check):
