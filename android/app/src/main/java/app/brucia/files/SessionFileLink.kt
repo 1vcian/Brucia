@@ -1,5 +1,6 @@
 package app.brucia.files
 
+import app.brucia.protocol.FrameBudget
 import app.brucia.session.CommandSession
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -29,6 +30,8 @@ class SessionFileLink(
     private val writeTimeoutMs: Long = 8_000,
     private val transactionalUploads: Boolean = false,
     private val commitTimeoutMs: Long = 130_000,
+    /** Payload budget per frame: CAPS rx_max, or FrameBudget.LEGACY_RX_MAX for older firmware. */
+    private val frameBudget: Int = FrameBudget.LEGACY_RX_MAX,
 ) : FileTransferLink {
     override fun isCurrent() = stillCurrent() && !session.isClosed
 
@@ -72,10 +75,13 @@ class SessionFileLink(
                 // Begin may recover a previous transaction, including a full CRC readback.
                 uploadReply("fs_upload_begin $token ${bytes.size} $crc $destination", token, 0, commitTimeoutMs)
                 var offset = 0
+                val encoder = Base64.getEncoder()
                 while (offset < bytes.size) {
                     checkCurrent()
-                    val end = minOf(bytes.size, offset + DeviceFilePush.MAX_RAW_CHUNK)
-                    val chunk = Base64.getEncoder().encodeToString(bytes.copyOfRange(offset, end))
+                    // Largest chunk whose frame fits the device's RX buffer (lost on the wire otherwise).
+                    val end = FrameBudget.uploadChunkEnd(bytes, offset, frameBudget, token) { encoder.encodeToString(it) }
+                    if (end <= offset) throw IOException("Device receive buffer too small for an upload chunk ($frameBudget bytes)")
+                    val chunk = encoder.encodeToString(bytes.copyOfRange(offset, end))
                     uploadReply("fs_upload_chunk $token $offset $chunk", token, end.toLong())
                     offset = end
                 }

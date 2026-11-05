@@ -91,10 +91,10 @@ std::vector<uint8_t> EMVReader::emv_ask_for_aid() {
                 BerTlv Tlv;
                 Tlv.SetTlv(response_vector);
                 if (Tlv.GetValue("4F", &aid) != OK) { // Application ID
-                    Serial.println("Can't get aidFeliCa");
+                    if (!g_companionActive) Serial.println("Can't get aidFeliCa");
                     aid.clear();
                 }
-                Serial.println("Success AID");
+                if (!g_companionActive) Serial.println("Success AID");
             }
             break;
         }
@@ -141,7 +141,7 @@ std::vector<uint8_t> EMVReader::emv_ask_for_pdol(std::vector<uint8_t> *aid) {
         BerTlv Tlv;
         Tlv.SetTlv(response_vector);
         if (Tlv.GetValue("9F38", &pdol) != OK) { // PDOL(Some card doesn't have it)
-            Serial.println("Can't get PDOL");
+            if (!g_companionActive) Serial.println("Can't get PDOL");
             pdol.clear();
         }
     }
@@ -210,9 +210,9 @@ void EMVReader::emv_read_visa(std::vector<uint8_t> *pdol_data, EMVCard *card) {
         Tlv.SetTlv(response_vector);
         std::vector<uint8_t> container;
         if (Tlv.GetValue("57", &container) != OK) {
-            Serial.println("Can't get Track 2 Equivalent Data(PAN for VISA)");
+            if (!g_companionActive) Serial.println("Can't get Track 2 Equivalent Data(PAN for VISA)");
         } else {
-            Serial.println("PAN found in Track 2 Equivalent Data");
+            if (!g_companionActive) Serial.println("PAN found in Track 2 Equivalent Data");
             card->pan = (uint8_t *)malloc(8);
             memcpy(card->pan, container.data(), 8 * sizeof(uint8_t)); // Copy data from TLV to struct
             card->pan_len = 8;
@@ -240,7 +240,7 @@ std::vector<uint8_t> EMVReader::emv_get_processing_options_no_pdol() {
         BerTlv Tlv;
         Tlv.SetTlv(response_vector);
         if (Tlv.GetValue("94", &afl) != OK) { // AFL
-            Serial.println("Can't get AFL");
+            if (!g_companionActive) Serial.println("Can't get AFL");
             afl.clear();
         }
     }
@@ -277,7 +277,7 @@ void EMVReader::read_afl(EMVCard *card, std::vector<uint8_t> *afl) {
                 parse_pan(&afl_content, card);
                 parse_validfrom(&afl_content, card);
                 parse_validto(&afl_content, card);
-                Serial.println("PAN parsed with workaround");
+                if (!g_companionActive) Serial.println("PAN parsed with workaround");
                 return;
             } else {
                 memcpy(card->pan, container.data(), container.size()); // Copy data from TLV to struct
@@ -293,7 +293,7 @@ void EMVReader::read_afl(EMVCard *card, std::vector<uint8_t> *afl) {
                         memcpy(card->validto, container.data(), container.size());
                     }
                 }
-                Serial.println("PAN parsed without workaround");
+                if (!g_companionActive) Serial.println("PAN parsed without workaround");
                 return;
             }
 
@@ -301,11 +301,11 @@ void EMVReader::read_afl(EMVCard *card, std::vector<uint8_t> *afl) {
                 card->pan = (uint8_t *)malloc(container.size());
                 memcpy(card->pan, container.data(), container.size()); // Copy data from TLV to struct
                 card->pan_len = container.size();
-                Serial.println("PAN parsed without workaround");
+                if (!g_companionActive) Serial.println("PAN parsed without workaround");
                 return;
             }
         } else {
-            Serial.println("Can't parse AFL data for P2");
+            if (!g_companionActive) Serial.println("Can't parse AFL data for P2");
         }
     }
 }
@@ -330,7 +330,7 @@ EMVCard EMVReader::read_emv_card() {
 
     if (aid.empty()) { // If we can't get AID, we can't read the card
         res.parsed = false;
-        Serial.println("Can't read card");
+        if (!g_companionActive) Serial.println("Can't read card");
     } else {
         // Copy AID to result card
         res.aid = (uint8_t *)malloc(aid.size());
@@ -346,15 +346,15 @@ EMVCard EMVReader::read_emv_card() {
                 // Read Application data
                 read_afl(&res, &afl); // Read AFL
             } else {
-                Serial.println("Can't get AFL ID");
+                if (!g_companionActive) Serial.println("Can't get AFL ID");
             }
         } else {
             if (is_visa(&res)) {
-                Serial.println("VISA card detected");
+                if (!g_companionActive) Serial.println("VISA card detected");
                 emv_read_visa(&pdol, &res);
 
             } else {
-                Serial.println("Non-VISA card with PDOL detected, not supported yet");
+                if (!g_companionActive) Serial.println("Non-VISA card with PDOL detected, not supported yet");
                 // std::vector<uint8_t> afl = emv_get_processing_options(&pdol);
 
                 // std::vector<uint8_t> afl = emv_get_processing_options_no_pdol();
@@ -368,7 +368,7 @@ EMVCard EMVReader::read_emv_card() {
         }
     }
 
-    Serial.println("EMV Read complete");
+    if (!g_companionActive) Serial.println("EMV Read complete");
     return res;
 }
 

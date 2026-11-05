@@ -23,6 +23,8 @@ import app.brucia.netscan.VulnHit
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.core.net.toUri
+import app.brucia.ui.BruciaButtonDefaults
+import app.brucia.ui.Button
 
 /**
  * Phone-side network scanner ("nmap-lite"): discovers hosts on the local subnet, finds open ports +
@@ -69,7 +71,7 @@ internal fun NetworkScanScreen() {
                 Spacer(Modifier.height(10.dp))
                 Button(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (scanning) Color(0xFFD32F2F) else cs.primary),
+                    colors = BruciaButtonDefaults.buttonColors(containerColor = if (scanning) Color(0xFFD32F2F) else cs.primary),
                     onClick = {
                         if (scanning) { job?.cancel(); scanning = false }
                         else {

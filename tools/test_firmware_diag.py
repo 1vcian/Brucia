@@ -162,7 +162,7 @@ def contract_checks(output):
         failures.append(f"core err keys {err} != {ERR_KEYS}")
     from mock_device import LinkCounters, diag_reply
     mock = diag_reply(LinkCounters(), 0)
-    if list(mock["link"]) != LINK_KEYS + ["err"] or list(mock["link"]["err"]) != ERR_KEYS:
+    if list(mock["link"]) != ["err"] + LINK_KEYS or list(mock["link"]["err"]) != ERR_KEYS:
         failures.append("mock_device diag link keys differ from the firmware core")
     doc = (ROOT / "proto/PROTOCOL.md").read_text()
     section = doc[doc.index("### Recovery diagnostics"):]

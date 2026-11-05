@@ -29,7 +29,7 @@ private class FakeTransport : Transport {
 }
 
 private fun frame(obj: JSONObject): ByteArray {
-    val payload = obj.toString().toByteArray(Charsets.UTF_8)
+    val payload = deviceJson(obj).toByteArray(Charsets.UTF_8)
     val len = payload.size
     val head = byteArrayOf(
         (len and 0xFF).toByte(), ((len ushr 8) and 0xFF).toByte(),
@@ -146,8 +146,9 @@ class ProtocolTest {
 
     @Test fun malformedJsonDoesNotHideFollowingBufferedFrame() {
         val t = FakeTransport()
-        // Both frames arrive in one read, with no later transport data available.
-        val malformed = byteArrayOf(1, 0, 0, 0, '{'.code.toByte())
+        // Both frames arrive in one read, with no later transport data available. A valid header and
+        // envelope prefix with an undecodable body: the boundary is known, the frame is skipped.
+        val malformed = byteArrayOf(6, 0, 0, 0) + "{\"v\":}".toByteArray()
         t.inbound.add(malformed + malformed + frame(envelope(Kind.PONG, 701, JSONObject())))
         assertEquals(701, CompanionClient(t).readMessage(20)?.getInt("id"))
         assertEquals("Buffered frames must not wait for another transport read", 1, t.readCalls)
@@ -219,16 +220,15 @@ class ProtocolTest {
     @Test fun receiveLimitMatchesFirmwareMtu() {
         val t = FakeTransport()
         val client = CompanionClient(t)
-        val prefix = "{\"padding\":\""
+        val prefix = "{\"v\":0,\"padding\":\""
         val suffix = "\"}"
         val json = prefix + "x".repeat(8192 - prefix.length - suffix.length) + suffix
         val valid = json.toByteArray(Charsets.UTF_8)
         t.inbound.add(byteArrayOf(0, 32, 0, 0) + valid) // Exactly 8192 bytes.
         assertEquals(8192 - prefix.length - suffix.length, client.readMessage(100)?.getString("padding")?.length)
-        // An oversized prefix must be rejected without retaining its expected payload.
+        // An oversized prefix is skipped as noise without retaining its expected payload.
         t.inbound.add(byteArrayOf(1, 32, 0, 0))
-        try { client.readMessage(1); org.junit.Assert.fail("Accepted oversized prefix") }
-        catch (_: java.io.IOException) { }
+        assertNull(client.readMessage(1))
         t.inbound.add(frame(envelope(Kind.PONG, 702, JSONObject())))
         assertEquals(702, client.readMessage(100)?.getInt("id"))
     }

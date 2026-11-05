@@ -582,9 +582,9 @@ void startup_sound() {
  **  Where the devices are started and variables set
  *********************************************************************/
 void setup() {
-    Serial.setRxBufferSize(
-        SAFE_STACK_BUFFER_SIZE / 4
-    ); // Must be invoked before Serial.begin(). Default is 256 chars
+    // Brucia: RX buffer sized for one whole inbound companion frame, Bruce's
+    // SAFE_STACK_BUFFER_SIZE / 4 as the fallback (src/companion/serial_rx.h).
+    companionSerialRxSetup(SAFE_STACK_BUFFER_SIZE / 4); // Must be invoked before Serial.begin()
     Serial.begin(115200);
 
     log_d("Total heap: %d", ESP.getHeapSize());

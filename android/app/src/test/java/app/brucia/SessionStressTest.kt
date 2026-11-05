@@ -22,7 +22,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.util.PriorityQueue
@@ -130,7 +129,7 @@ private fun rawFrame(payload: ByteArray): ByteArray {
 }
 
 private fun frame(kind: Int, id: Int, d: JSONObject) =
-    rawFrame(JSONObject().put("v", 0).put("t", kind).put("id", id).put("d", d).toString().toByteArray(Charsets.UTF_8))
+    rawFrame(deviceJson(JSONObject().put("v", 0).put("t", kind).put("id", id).put("d", d)).toByteArray(Charsets.UTF_8))
 
 private fun ackFrame(id: Int, ok: Boolean, out: String) = frame(Kind.ACK, id, JSONObject().put("ok", ok).put("out", out))
 private fun errFrame(id: Int, msg: String) = frame(Kind.ERR, id, JSONObject().put("msg", msg))
@@ -270,10 +269,10 @@ class SessionStressTest {
         val id = wire.sent.single().getInt("id")
 
         val random = Random(42)
-        val prefix = "{\"t\":6,\"id\":$id,\"d\":{\"ev\":\"flood\",\"pad\":\""
+        val prefix = "{\"v\":0,\"t\":6,\"id\":$id,\"d\":{\"ev\":\"flood\",\"pad\":\""
         val maxFrame = rawFrame((prefix + "x".repeat(8192 - prefix.length - 3) + "\"}}").toByteArray(Charsets.UTF_8))
         assertEquals(4 + 8192, maxFrame.size)
-        val malformed = rawFrame("{\"t\":6,".toByteArray(Charsets.UTF_8))
+        val malformed = rawFrame("{\"v\":0,\"t\":6,".toByteArray(Charsets.UTF_8))
         var valid = 0
         var dropped = 0
         repeat(10) { batch ->
@@ -305,10 +304,10 @@ class SessionStressTest {
         assertEquals(true to "done", call.completedValue())
         assertFalse(session.hasPending)
 
-        // A corrupt length prefix mid-flood discards the buffered tail and surfaces as a read error.
+        // A corrupt length prefix mid-flood is skipped as noise; the decoder resyncs on the next frame.
         wire.deliver(listOf(eventFrame(id, 2), byteArrayOf(0, 0, 0, 0x7F), eventFrame(id, 3)), null)
         assertEquals(2, client.readMessage(1)?.getJSONObject("d")?.getInt("n"))
-        try { client.readMessage(1); fail("Accepted a corrupt length prefix") } catch (_: java.io.IOException) { }
+        assertEquals(3, client.readMessage(1)?.getJSONObject("d")?.getInt("n"))
         assertEquals(0, bufferedBytes(client))
         assertEquals(0, clock.timerCount)
         assertEquals(0, scope.childCount())

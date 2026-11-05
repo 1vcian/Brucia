@@ -15,8 +15,17 @@ transactional `fs_upload_*` commands; `jam_detect <secs>` behaves as a blocking 
 (PING answered, `stop` ends it, other CMDs get ERR 409 "device busy"). `MockDevice` can be
 served from a thread (tools/test_hw_acceptance.py) and accepts optional injected faults.
 
+Link simulation (host reader/sizing tests): `--noise between` writes Bruce-style debug text
+("cc1101 Connection OK") between frames, `--noise inside` also splices it into EVENT frames
+(those frames are destroyed, as on hardware); `--rx-queue N` models the firmware's serial RX
+queue: bytes beyond N that arrive while the mock is not reading are dropped, and a partial
+frame is abandoned after 2 s (rx_stale), as the device reader does. CAPS reports
+`rx_max`/`rx_buf` for that queue unless `--legacy-caps` (firmware before rx_max).
+
     python3 tools/mock_device.py            # prints the PTY path and serves
     python3 tools/mock_device.py --path-file /tmp/brucia_pty
+    python3 tools/mock_device.py --profile lite   # CAPS/ERR 501 of a LITE (launcher) build
+    python3 tools/mock_device.py --rx-queue 1024 --legacy-caps --noise between
 """
 import argparse
 import base64
@@ -66,6 +75,30 @@ def _capture_descriptor(cmd, pmkid):
         desc["prior_size"] = len(prior)
     return desc
 
+# LITE profile (--profile lite): the companion endpoint groups a LITE firmware build compiles out
+# (src/companion/config.h) and the exact ERR 501 text each dispatcher answers with. CAPS then
+# reports each group as a literal false and drops features.diag / the mifare_keycheck flags /
+# capture_descriptor; caps.nrf24 resolves to evidence level "none". tools/test_lite_companion.py
+# keeps this table in step with the firmware sources.
+LITE_OMITTED_FEATURES = {"mifare_keycheck": False, "ir_cmds": False, "ble_gatt": False, "diag": False}
+LITE_501 = (
+    (lambda c: c.startswith("mifare_keycheck "), "mifare_keycheck not available in this (lite) build"),
+    (lambda c: c == "ir_rx" or c == "ir_tvbgone" or c.startswith("ir_tvbgone ") or c.startswith("ir_tx_raw ")
+     or c.startswith("ir_jammer"), "ir companion commands not available in this (lite) build"),
+    (lambda c: c.startswith("ble_gatt_connect ") or c.startswith("ble_gatt_read "),
+     "ble_gatt not available in this (lite) build"),
+    (lambda c: c == "diag", "diag not available in this (lite) build"),
+    (lambda c: any(c == v or c.startswith(v + " ") for v in ("nrf24_scan", "nrf24_sniff", "nrf24_jammer",
+                                                             "nrf24_mousejack")),
+     "nrf24 not available in this (lite) build"),
+)
+PROFILES = ("full", "lite")
+
+
+def lite_501(cmd):
+    """The firmware's ERR 501 message for a command a LITE build compiled out, else None."""
+    return next((msg for match, msg in LITE_501 if match(cmd)), None)
+
 # CAPS d.evidence sample (proto/PROTOCOL.md). A mock has no hardware: nothing is reported as
 # probed present; the entries exercise the app's evidence list and conflict rendering.
 MOCK_EVIDENCE = {
@@ -93,6 +126,16 @@ SUBGHZ_TIMINGS = ([350, 1050, 1050, 350] * 12 + [350, 10850]) * 2
 
 MAX_FRAME = 8192
 U32_MAX = 0xFFFFFFFF
+DEFAULT_RX_BUF = 8192 + 256  # firmware COMPANION_SERIAL_RX_BUFFER on PSRAM boards
+NOISE_TEXT = b"cc1101 Connection OK\r\ncc1101 setMHZ(frequency);\r\n"
+NOISE_MODES = ("between", "inside")
+STALE_MS = 2000  # firmware readFrame(): an abandoned partial frame is dropped after 2 s
+
+
+def rx_max_for_buffer(rx_buf):
+    """Mirror of src/companion/serial_rx.h rxMaxForBuffer()."""
+    headroom = min(256, rx_buf // 4)
+    return min(rx_buf - headroom, MAX_FRAME)
 
 
 class LinkCounters:
@@ -132,8 +175,9 @@ class LinkCounters:
             self._inc(self.err, self.bucket(code if isinstance(code, int) else 0))
 
     def link(self):
-        out = dict(self.values)
-        out["err"] = dict(self.err)
+        # Same key order as the firmware (diag.cpp creates link.err before the counters).
+        out = {"err": dict(self.err)}
+        out.update(self.values)
         return out
 
 
@@ -196,11 +240,26 @@ class MockDevice:
 
     main() runs one on a fresh PTY; tests run one in a thread with a stop event."""
 
-    def __init__(self, faults=(), counters=None, poll_interval=0.02, emit_interval=1.0):
+    def __init__(self, faults=(), counters=None, poll_interval=0.02, emit_interval=1.0, profile="full",
+                 noise=(), rx_queue=None, caps_rx_max="auto"):
         unknown = set(faults) - set(FAULTS)
         if unknown:
             raise ValueError(f"unknown mock faults: {sorted(unknown)}")
+        if profile not in PROFILES:
+            raise ValueError(f"unknown mock profile: {profile}")
+        if set(noise) - set(NOISE_MODES):
+            raise ValueError(f"unknown noise modes: {sorted(set(noise) - set(NOISE_MODES))}")
+        self.noise = set(noise)
+        self.rx_queue = rx_queue      # None: unlimited (no drops)
+        # "auto": rx_max/rx_buf for the simulated queue; None: omitted (legacy firmware); int: forced
+        self.caps_rx_max = caps_rx_max
+        self.rx_dropped = 0           # bytes the simulated RX queue lost
+        self.noise_written = 0        # bytes of debug text injected into the device->host stream
+        self._sent_frames = 0
+        self._rx_last = 0.0
+        self._wire_hdr, self._wire_left, self._wire_pos = b"", 0, 0  # host framing, for rx_queue
         self.faults = set(faults)
+        self.lite = profile == "lite"
         self.counters = counters or LinkCounters()
         self.poll_interval = poll_interval
         self.emit_interval = emit_interval
@@ -215,10 +274,26 @@ class MockDevice:
         self._after_off = []      # (due time, stream) for the event_after_off fault
 
     def _send(self, fd, kind, msg_id, d):
-        send(fd, kind, msg_id, d, self.counters)
+        if not self.noise:
+            return send(fd, kind, msg_id, d, self.counters)
+        self._sent_frames += 1
+        payload = json.dumps({"v": 0, "t": kind, "id": msg_id, "d": d}).encode()
+        frame = struct.pack("<I", len(payload)) + payload
+        if "inside" in self.noise and kind == EVENT and self._sent_frames % 2 == 0:
+            cut = 4 + len(payload) // 2  # unframed text from another task mid-frame
+            frame = frame[:cut] + NOISE_TEXT + frame[cut:]
+            self.noise_written += len(NOISE_TEXT)
+        if "between" in self.noise and self._sent_frames % 3 == 0:
+            frame = NOISE_TEXT + frame  # an unguarded Serial.println before the reply
+            self.noise_written += len(NOISE_TEXT)
+        _write_all(fd, frame)
+        self.counters.note_sent(kind, d)
 
     def _next_frame(self):
         """Pop one complete frame from the buffer: payload bytes, or None if incomplete."""
+        if self._buf and self.rx_queue is not None and (time.time() - self._rx_last) * 1000 > STALE_MS:
+            self.counters.note("rx_stale")  # firmware readFrame(): abandoned partial frame
+            self._buf = b""
         while len(self._buf) >= 4:
             n = struct.unpack("<I", self._buf[:4])[0]
             if n == 0 or n > MAX_FRAME:
@@ -233,12 +308,51 @@ class MockDevice:
         return None
 
     def _read(self, fd):
+        if self.rx_queue is not None:
+            return self._read_queue(fd)
         try:
             chunk = os.read(fd, 4096)
             if chunk:
                 self._buf += chunk
         except (BlockingIOError, OSError):
             pass
+
+    def _read_queue(self, fd):
+        """Worst case of the firmware's serial RX queue: the reader is busy (display redraw,
+        storage, a handler) for the whole time one inbound frame arrives, so only the first
+        rx_queue bytes of each frame (length prefix included) fit; the rest is dropped, as the
+        HWCDC ISR does when xQueueSendFromISR fails. Frame boundaries are taken from the host's
+        own length prefixes, so the model does not depend on how the PTY splits the bytes."""
+        got = b""
+        while True:
+            try:
+                chunk = os.read(fd, 65536)
+            except (BlockingIOError, OSError):
+                break
+            if not chunk:
+                break
+            got += chunk
+        if not got:
+            return
+        self._rx_last = time.time()
+        i = 0
+        while i < len(got):
+            if len(self._wire_hdr) < 4:  # a host frame starts: learn its length
+                take = min(4 - len(self._wire_hdr), len(got) - i)
+                self._wire_hdr += got[i:i + take]
+                if len(self._wire_hdr) == 4:
+                    self._wire_left = struct.unpack("<I", self._wire_hdr)[0]
+            else:
+                take = min(self._wire_left, len(got) - i)
+                self._wire_left -= take
+            part = got[i:i + take]
+            room = max(0, self.rx_queue - self._wire_pos)
+            self._buf += part[:room]
+            self.rx_dropped += max(0, len(part) - room)
+            self._wire_pos += take
+            i += take
+            if len(self._wire_hdr) == 4 and self._wire_left == 0:
+                self._wire_hdr, self._wire_pos = b"", 0
 
     @staticmethod
     def _parse(raw):
@@ -258,7 +372,21 @@ class MockDevice:
                     "capture_descriptor": True, "diag": True}
         if "no_transactional_uploads" in self.faults:
             del features["transactional_uploads"]
+        evidence = MOCK_EVIDENCE
+        if self.lite:
+            for key in ("mifare_keycheck_report", "mifare_keycheck_stop", "capture_descriptor", "diag"):
+                features.pop(key, None)
+            features.update(LITE_OMITTED_FEATURES)
+            evidence = dict(MOCK_EVIDENCE, nrf24={
+                "level": "none", "detail": "NRF24 companion commands not built into this LITE firmware"})
+        rx = {}
+        if self.caps_rx_max == "auto":
+            rx_buf = self.rx_queue if self.rx_queue is not None else DEFAULT_RX_BUF
+            rx = {"rx_max": rx_max_for_buffer(rx_buf), "rx_buf": rx_buf}
+        elif self.caps_rx_max is not None:
+            rx = {"rx_max": int(self.caps_rx_max), "rx_buf": self.rx_queue or DEFAULT_RX_BUF}
         return {
+            **rx,
             "board": "Lilygo T-Embed CC1101 (mock)", "chip": "esp32-s3",
             "fw": "mock", "proto": 0,
             "modules": ["wifi", "ble", "rf", "ir"], "transports": ["usb"], "mtu": 8192,
@@ -266,7 +394,7 @@ class MockDevice:
             # Release provenance as a build without Git metadata reports it (no dirty flag).
             "build": {"commit": "unknown", "id": "mock", "time": "unknown",
                       "time_src": "unknown", "env": "mock"},
-            "evidence": MOCK_EVIDENCE,
+            "evidence": evidence,
         }
 
     def _diag(self):
@@ -378,7 +506,10 @@ class MockDevice:
         elif t == CMD:
             cmd = d.get("cmd", "")
             self.received_cmds.append(cmd)
-            if cmd == "diag":
+            unsupported = lite_501(cmd) if self.lite else None
+            if unsupported:
+                self._send(fd, ERR, mid, {"code": 501, "msg": unsupported})
+            elif cmd == "diag":
                 self._send(fd, ACK, mid, self._diag())
             elif cmd.startswith("fs_read"):
                 path = cmd[len("fs_read"):].strip()
@@ -466,6 +597,12 @@ def main():
     ap.add_argument("--path-file", help="write the PTY device path here")
     ap.add_argument("--fault", action="append", default=[], choices=FAULTS,
                     help="inject a fault (host-tool testing); repeatable")
+    ap.add_argument("--profile", default="full", choices=PROFILES,
+                    help="lite: CAPS and ERR 501 replies of a LITE firmware build")
+    ap.add_argument("--noise", action="append", default=[], choices=NOISE_MODES,
+                    help="inject debug text between frames / inside EVENT frames; repeatable")
+    ap.add_argument("--rx-queue", type=int, help="simulate a device RX queue of N bytes (drops beyond it)")
+    ap.add_argument("--legacy-caps", action="store_true", help="omit CAPS rx_max/rx_buf (older firmware)")
     args = ap.parse_args()
 
     master, slave = pty.openpty()
@@ -474,7 +611,8 @@ def main():
         with open(args.path_file, "w") as f:
             f.write(dev)
     print(f"mock device at: {dev}", flush=True)
-    MockDevice(faults=args.fault, counters=COUNTERS).serve(master)
+    MockDevice(faults=args.fault, counters=COUNTERS, profile=args.profile, noise=args.noise,
+               rx_queue=args.rx_queue, caps_rx_max=None if args.legacy_caps else "auto").serve(master)
 
 
 if __name__ == "__main__":

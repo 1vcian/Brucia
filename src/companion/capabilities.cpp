@@ -2,6 +2,7 @@
 #include "core/bus_HAL.h"
 #include "core/i2c_finder.h"
 #include "internal.h"
+#include "serial_rx.h"
 #include "modules/rfid/RFIDInterface.h"
 #include <globals.h>
 #if !defined(LITE_VERSION)
@@ -275,6 +276,8 @@ static void probeNrf24(ProbeRecord &r) {
     NRFradio.powerDown(); // leave the radio in its power-on (powered down) state, CS deselected
     r.probe = present ? ProbeOutcome::Present : ProbeOutcome::Absent;
     setDetail(r, present ? "SPI SETUP_AW readback valid; left powered down" : "SPI SETUP_AW readback invalid");
+#elif defined(USE_NRF24_VIA_SPI) && defined(LITE_VERSION)
+    setDetail(r, "NRF24 companion commands not built into this LITE firmware");
 #else
     (void)r;
 #endif
@@ -729,13 +732,34 @@ void sendCaps(uint32_t id) {
     caps["ble"] = true;
     d["features"]["verified_files"] = true; // correlated chunks, size/CRC32 completion, empty/spaced writes
     d["features"]["transactional_uploads"] = true; // staged + size/CRC commit; FAT recovery journal
+#if defined(COMPANION_HAS_MIFARE_KEYCHECK)
     d["features"]["mifare_keycheck_report"] = true; // mifare_keycheck ACK carries v1 complete/partial + UID
+#endif
 #if defined(HAS_NS4168_SPKR)
     // speaker_play ACKs at start (d.play) and ends with one EVENT ev="speaker.play"; speaker_stop stops it.
     d["features"]["speaker_play_async"] = true;
 #endif
+#if defined(COMPANION_HAS_MIFARE_KEYCHECK)
     d["features"]["mifare_keycheck_stop"] = true;   // in-flight mifare_keycheck batch stops on a polled stop frame
+#endif
+#if defined(COMPANION_HAS_DIAG)
     d["features"]["diag"] = true; // `diag` CMD: reset reason, heap and bounded link/drop counters on request
+#endif
+    // Companion endpoint groups a LITE build compiles out for app-slot headroom (config.h). A literal
+    // false means "not in this firmware" (the commands answer ERR 501); full builds and older
+    // firmware omit these keys. NRF24 is reported through caps.nrf24 / evidence instead.
+#if !defined(COMPANION_HAS_MIFARE_KEYCHECK)
+    d["features"]["mifare_keycheck"] = false; // mifare_keycheck
+#endif
+#if !defined(COMPANION_HAS_IR_CMDS)
+    d["features"]["ir_cmds"] = false; // ir_tvbgone / ir_rx / ir_tx_raw / ir_jammer (caps.ir covers the `ir` CLI)
+#endif
+#if !defined(COMPANION_HAS_GATT)
+    d["features"]["ble_gatt"] = false; // ble_gatt_connect / ble_gatt_read
+#endif
+#if !defined(COMPANION_HAS_DIAG)
+    d["features"]["diag"] = false; // diag
+#endif
 #if !defined(LITE_VERSION)
     // wifi_handshake/wifi_pmkid terminal ACK carries d.desc{v,path,size,crc32,frames,complete,stop,...}
     // for the file written this run; the phone imports exactly that path and verifies it after transfer.
@@ -768,6 +792,10 @@ void sendCaps(uint32_t id) {
     JsonArray transports = d["transports"].to<JsonArray>();
     transports.add("usb");
     d["mtu"] = COMPANION_MAX_FRAME;
+    // Largest inbound frame payload the RX buffer holds whole (serial_rx.h); hosts size their
+    // large frames (upload chunks, speaker PCM) to it. rx_buf is the buffer that was allocated.
+    d["rx_max"] = rxMaxForBuffer(serialRxBuffer(), COMPANION_MAX_FRAME);
+    d["rx_buf"] = serialRxBuffer();
     d["battery"] = getBattery();
     // Brucia: report the device UI theme so the app can match it (the device always wins). priColor
     // is RGB565; ledColor is 0xRRGGBB. The app re-themes its accent + flame to priColor on connect.

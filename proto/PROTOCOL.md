@@ -33,8 +33,10 @@ feature logic            (wardriving, ir, rf, ... — never touches the wire)
 - **Framing**: each frame = `uint32 length` (little-endian, payload bytes) +
   `payload`. Transport-agnostic; the length prefix is not a self-synchronizing marker. Max frame
   size is `COMPANION_MAX_FRAME` (8192 bytes) on the device side; larger
-  payloads are rejected. (COBS may be added later for self-synchronizing
-  streams.)
+  payloads are rejected. The largest frame a host may *send* is CAPS `rx_max`
+  (see [Inbound frame capacity](#inbound-frame-capacity-rx_max)); hosts resync on
+  device frames as described in [Resynchronisation](#resynchronisation-device--host).
+  (COBS may be added later for self-synchronizing streams.)
 - **Payload**: a JSON object (v0 baseline; parsed with ArduinoJson on the
   device). A compact binary encoding (MessagePack on the ESP via ArduinoJson,
   CBOR on Android) may replace JSON later behind the same envelope — bump the
@@ -51,6 +53,34 @@ framing entirely and reuses the plain-text Bruce CLI transport.
 | `t`  | uint   | message kind (see below) |
 | `id` | uint   | correlation id (request ↔ ACK/ERR); 0 for unsolicited events |
 | `d`  | any    | kind-specific body |
+
+The device always serializes `v` first (`beginEnvelope()` in `src/companion/protocol.cpp`;
+ArduinoJson keeps insertion order), so every device frame payload starts with the bytes
+`{"v":`. Hosts rely on this for resynchronisation; `tools/test_firmware_serial_rx.py` checks it
+for every frame the firmware builds. The app also writes `v` first; the firmware does not
+depend on key order.
+
+### Resynchronisation (device → host)
+
+In companion mode the USB serial carries frames only, but text can still reach it: an unguarded
+module `Serial.print`, an ESP-IDF log line from another task, boot output. The first hardware
+run lost the link when `cc1101 Connection OK` arrived between frames (`cc11` read as a length).
+Host readers therefore do not drop the link on a bad header. At a frame boundary they accept a
+frame start only when the 4-byte LE length is in `5..8192` **and** the payload begins with
+`{"v":`. Otherwise they skip forward to the next position where both hold, count the skipped
+bytes as noise and continue (the app shows them in Diagnostics as "noise bytes"; the acceptance
+runner records them as a warning with a sample). Bytes at the end of the buffer that could
+still start a frame (at most 8) are kept until more data arrives. A frame with a valid header
+and prefix whose JSON does not parse is skipped by its length and counted as malformed, as
+before. Text inserted inside a frame destroys that one frame; the reader recovers on the next.
+No framing or version change is involved: ASCII text cannot form a plausible length (it would
+need `0x00` bytes), and older firmware already writes `v` first.
+
+The device→host direction is not the only defence: in companion mode the firmware guards
+module debug prints on companion paths with `if (!g_companionActive)` (enforced by
+`tools/test_companion_print_hygiene.py`) and drops ESP-IDF/arduino log output
+(`esp_log_set_vprintf`) until companion mode exits. Bare `printf`/`ets_printf` and Bruce CLI
+commands routed through `CMD` can still emit text; the resync rule covers them.
 
 ## Message kinds (`t`)
 
@@ -96,6 +126,8 @@ Sent in reply to `HELLO`:
   "modules":    ["wifi", "ble", "rf", "ir"],
   "transports": ["usb"],
   "mtu":        8192,
+  "rx_max":     8192,
+  "rx_buf":     8448,
   "battery":    87,
   "features":   {"verified_files": true, "transactional_uploads": true},
   "build": {
@@ -140,6 +172,23 @@ descriptor" below). These are additive protocol v0 extensions; they do not
 assert hardware health or that all firmware commands are implemented.
 
 Literal `features.diag: true` advertises the `diag` command (recovery diagnostics, below).
+
+LITE firmware builds (`LITE_VERSION`: the `LAUNCHER_*` envs and `m5stack-core4mb`) compile
+some companion endpoint groups out for app-slot headroom; Bruce's own on-device features and
+CLI are not affected. They are the only flags where a literal `false` carries meaning: it
+reports the group as absent from this firmware, while an absent key (full builds, older
+firmware) means the group is present. Each command of a dropped group answers
+`ERR 501 "<name> not available in this (lite) build"`:
+
+| `features` key | LITE value | commands |
+|---|---|---|
+| `mifare_keycheck` | `false` | `mifare_keycheck` (`mifare_keycheck_report` / `mifare_keycheck_stop` are not sent) |
+| `ir_cmds` | `false` | `ir_tvbgone`, `ir_rx`, `ir_tx_raw`, `ir_jammer`; `caps.ir` stays, Bruce's `ir rx` / `ir tx` / `ir tx_raw` CLI still works |
+| `ble_gatt` | `false` | `ble_gatt_connect`, `ble_gatt_read` |
+| `diag` | `false` | `diag` (the link counters are not kept either) |
+
+The NRF24 companion commands (`nrf24_*`) are dropped too; LITE reports them through
+`caps.nrf24: false` and `evidence.nrf24` level `none` instead of a features key.
 
 `build` is optional release provenance (additive, protocol v0). It does not repeat
 `fw`, `proto` or `features`. Values are generated at build time by
@@ -218,7 +267,9 @@ reported `caps` gating unchanged. Unknown levels/modules or malformed entries ar
 
 `modules` is a coarse compatibility list; it must not replace `caps` when gating
 tools. `transports` currently contains only `usb`. `mtu` is
-`COMPANION_MAX_FRAME`. `battery` is the device's current
+`COMPANION_MAX_FRAME`. `rx_max` (additive) is the largest frame payload the host may send and
+`rx_buf` the serial RX buffer the device allocated; see
+[Inbound frame capacity](#inbound-frame-capacity-rx_max). `battery` is the device's current
 battery percentage (`getBattery()`), included so the app can show it right
 after connecting without waiting for the first `PING`/`PONG`.
 
@@ -227,6 +278,48 @@ and its known radio CLI aliases, including commands submitted through macros/con
 FM with the device microphone requires both `fm` and `mic`. Cleanup commands remain
 permitted without capability flags. This is not a sandbox for unknown CLI commands
 or script contents; firmware remains responsible for validating those operations.
+
+### Inbound frame capacity (`rx_max`)
+
+`rx_max` (CAPS, additive, integer `1..8192`) is the largest frame **payload** (bytes after the
+4-byte length) the device's serial RX buffer holds whole. A host must not send larger frames:
+it sizes chunked transfers (`fs_upload_chunk`, `spkr_pcm_data`, `fm_audio_data`) to fit and
+refuses larger single commands locally instead of losing them on the wire.
+
+Why: every `Serial` class in the pinned arduino-esp32 core (3.3.9) drops inbound bytes when its
+RX buffer is full and nothing reads it, and the companion loop is single-threaded (display
+redraws, storage and handlers keep it out of `readFrame()` for tens of milliseconds):
+
+| Board class | `Serial` | Overflow behaviour (pinned core) |
+|---|---|---|
+| ESP32-S3/C5 USB-Serial-JTAG (`ARDUINO_USB_MODE=1`: T-Embed, Cardputer, ...) | `HWCDC` | `HWCDC.cpp` RX ISR (`hw_cdc_isr_handler`, `USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT`) reads the 64-byte packet from the FIFO and `xQueueSendFromISR`s byte by byte; on a full queue it stops and the rest of the packet is lost. The FIFO is always drained, so USB never back-pressures the host. |
+| TinyUSB CDC (`ARDUINO_USB_MODE=0`; no board in this repo) | `USBCDC` | `USBCDC.cpp` `_onRX()` waits 10 ticks per byte on a full queue, then drops the rest and posts `ARDUINO_USB_CDC_RX_OVERFLOW_EVENT`. |
+| Classic ESP32 behind a USB-UART bridge (Core, CYD, ...) | `HardwareSerial` | `esp32-hal-uart.c` `uartBegin()` installs the IDF UART driver with a ring buffer of `setRxBufferSize()` bytes in front of the 128-byte hardware FIFO; when both are full the IDF driver reports `UART_BUFFER_FULL`/`UART_FIFO_OVF` (`HardwareSerial.cpp` `_uartEventTask`) and the overflowing bytes are lost (IDF `uart.c` is not vendored in the package). No flow control on these boards. At 115200 baud bytes arrive at ~11.5 per ms, so a stall loses less, but a long one still overflows. |
+
+Runtime resizing is not safe: `HWCDC::setRxBufferSize()` deletes the queue the ISR may be
+writing, `USBCDC` has the same race with the TinyUSB task, and `HardwareSerial` refuses after
+`begin()`. The firmware therefore sizes the buffer once in `setup()`, before `Serial.begin()`
+(`companionSerialRxSetup()`, `src/companion/serial_rx.h`). This applies to Bruce's serial CLI
+too; a larger buffer only means fewer dropped bytes.
+
+| Class | RX buffer | Extra internal heap vs before | `rx_max` |
+|---|---|---|---|
+| `BOARD_HAS_PSRAM` | 8448 B (was `SAFE_STACK_BUFFER_SIZE / 4` = 1024) | +7424 B | 8192 |
+| no PSRAM | 2048 B (was 256) | +1792 B | 1792 |
+| allocation failed, Bruce fallback | 1024 / 256 B | 0 | 768 / 192 |
+
+`rx_max = rx_buf - min(256, rx_buf / 4)`, capped at 8192: the headroom holds the 4-byte prefix
+and a small frame (PING, `stop`, `SUB` off) that may arrive while a large one is queued. The
+HWCDC/USBCDC queue is a FreeRTOS queue of 1-byte items: one internal-RAM block of `rx_buf` bytes
+plus the queue header (`pvPortMalloc` = `heap_caps_malloc(MALLOC_CAP_INTERNAL |
+MALLOC_CAP_8BIT)` in the pinned IDF `libfreertos.a`), so the extra cost is exactly the size
+difference. A board env may override the size with `-DCOMPANION_SERIAL_RX_BUFFER=<bytes>`.
+
+Firmware without `rx_max` is assumed to hold `LEGACY_RX_MAX` = 768 bytes (the 1024-byte queue
+of PSRAM boards, the class measured on hardware, minus the same headroom). On older non-PSRAM
+firmware (256-byte queue) even that is not guaranteed; update the firmware. The app keeps its
+previous PCM frame sizes for firmware without `rx_max` (speaker PCM was verified on hardware
+with them) and only sizes uploads by the legacy value.
 
 ### `CMD` mapping to existing Bruce CLI
 
@@ -461,6 +554,7 @@ the device only tests. Replies:
 - No RFID module: `ACK {ok:false, out:"no RFID module (PN532) found"}`.
 - No tag / non-Classic: `ACK {ok:false, out:"no MIFARE Classic tag present ..."}`.
 - Tag present: `ACK {ok:true, found:[{sector, type:"A"|"B", key:"<12 hex>"}, ...], ...}`.
+- LITE build (`features.mifare_keycheck: false`): `ERR 501`; the app does not send it.
 
 The `found` array is the recovered-key list and is unchanged. A **v1** firmware
 (advertised by `features.mifare_keycheck_report: true` in CAPS) adds these additive
@@ -510,6 +604,7 @@ above is what makes cancellation prompt. Card removal/swap fixtures remain a har
 ### Recovery diagnostics (`diag`, additive)
 
 Firmware with literal `features.diag: true` in CAPS answers `CMD {cmd:"diag"}` with one ACK.
+LITE builds report `features.diag: false` and answer `diag` with ERR 501 (see `features`).
 There is no automatic telemetry: the counters live in RAM only, nothing is sent unless the
 app sends `diag`, and nothing is written to storage. Older firmware routes `diag` to the
 generic CLI; the app does not send it without the flag and shows "not supported by this
@@ -542,6 +637,8 @@ firmware".
 - `rx_frames`: complete frames read by the frame decoder (valid length, before JSON parsing). The `diag` request itself is included.
 - `tx_frames`: frames written, every kind. The `diag` reply itself is not included.
 - `rx_zero_len`, `rx_oversize`: length prefix 0 or above `COMPANION_MAX_FRAME`; the decoder resets.
+  (Bytes lost in the serial RX buffer itself are invisible to these counters; they surface as
+  `rx_stale` or a malformed frame. Hosts keep frames within `rx_max` to avoid them.)
 - `rx_alloc_fail`: valid length but the payload buffer could not be reserved.
 - `rx_stale`: partial frame discarded after 2 s without bytes.
   The length prefix is not self-synchronizing: after a rejected length the following payload

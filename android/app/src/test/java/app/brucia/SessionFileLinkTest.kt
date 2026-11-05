@@ -2,6 +2,7 @@ package app.brucia
 
 import app.brucia.files.*
 import app.brucia.protocol.CompanionClient
+import app.brucia.protocol.FrameBudget
 import app.brucia.protocol.Kind
 import app.brucia.session.CommandSession
 import app.brucia.transport.Transport
@@ -16,22 +17,25 @@ import java.util.zip.CRC32
 class SessionFileLinkTest {
     private class Wire : Transport {
         val frames = mutableListOf<JSONObject>()
+        val payloadSizes = mutableListOf<Int>()
         var onWrite: (JSONObject) -> Unit = {}
         override var isOpen = true
         override fun write(bytes: ByteArray) {
             val frame = JSONObject(String(bytes, 4, bytes.size - 4, Charsets.UTF_8))
+            payloadSizes += bytes.size - 4
             frames += frame; onWrite(frame)
         }
         override fun read(buf: ByteArray, timeoutMs: Int) = 0
         override fun close() { isOpen = false }
     }
-    private class Fixture(transactional: Boolean = true) {
+    private class Fixture(transactional: Boolean = true, budget: Int = FrameBudget.MAX_FRAME) {
         val wire = Wire()
         val session = CommandSession(CompanionClient(wire), wire)
         val reader = DeviceFileReader(timeoutMs = 100)
         val mutex = Mutex()
         var current = true
-        val link = SessionFileLink(session, reader, mutex, { current }, writeTimeoutMs = 40, transactionalUploads = transactional, commitTimeoutMs = 40)
+        val link = SessionFileLink(session, reader, mutex, { current }, writeTimeoutMs = 40, transactionalUploads = transactional,
+            commitTimeoutMs = 40, frameBudget = budget)
         fun ack(frame: JSONObject, size: Int, checksum: Long? = null, ok: Boolean = true) {
             val data = JSONObject().put("ok", ok).put("size", size)
             checksum?.let { data.put("crc32", it) }
@@ -89,6 +93,57 @@ class SessionFileLinkTest {
             assertEquals(if (size == 0) 2 else 5, f.wire.frames.size)
             assertFalse(f.session.hasPending)
         }
+    }
+
+    /** Upload with a given frame budget; returns (chunk count, largest chunk payload). */
+    private suspend fun uploadWithBudget(budget: Int, bytes: ByteArray): Pair<Int, Int> {
+        val f = Fixture(budget = budget); val received = mutableListOf<Byte>()
+        var chunks = 0; var largest = 0
+        f.wire.onWrite = { frame ->
+            val words = frame.getJSONObject("d").getString("cmd").split(' ', limit = 5)
+            when (words[0]) {
+                "fs_upload_begin" -> uploadAck(f, frame, words[1], 0)
+                "fs_upload_chunk" -> {
+                    received += Base64.getDecoder().decode(words[3]).toList()
+                    chunks++; largest = maxOf(largest, f.wire.payloadSizes.last())
+                    uploadAck(f, frame, words[1], received.size)
+                }
+                "fs_upload_commit" -> uploadAck(f, frame, words[1], received.size,
+                    CRC32().apply { update(received.toByteArray()) }.value, true)
+                else -> fail("Unexpected command ${words[0]}")
+            }
+        }
+        f.link.write("/sized.bin", bytes)
+        assertArrayEquals(bytes, received.toByteArray())
+        assertTrue("every frame within $budget: ${f.wire.payloadSizes}", f.wire.payloadSizes.all { it <= budget })
+        return chunks to largest
+    }
+
+    @Test(timeout = 10000) fun uploadChunksFollowTheDeviceRxMax() = runBlocking {
+        // Bytes 0..255 cycle: their base64 contains '/' and '+', the characters org.json may escape.
+        val bytes = ByteArray(7000) { it.toByte() }
+        val (legacyChunks, legacyLargest) = uploadWithBudget(FrameBudget.LEGACY_RX_MAX, bytes)
+        assertTrue("legacy frames near the 768 budget: $legacyLargest", legacyLargest in 700..FrameBudget.LEGACY_RX_MAX)
+        assertEquals(14, legacyChunks) // ~501 raw bytes per chunk (768 minus envelope and command)
+        val (smallChunks, smallLargest) = uploadWithBudget(1792, bytes)
+        assertTrue(smallLargest in 1700..1792)
+        assertEquals(6, smallChunks) // ~1269 raw bytes per chunk
+        val (fullChunks, fullLargest) = uploadWithBudget(FrameBudget.MAX_FRAME, bytes)
+        assertEquals(3, fullChunks) // firmware MAX_CHUNK 3072 raw bytes
+        assertTrue(fullLargest in 4096..FrameBudget.MAX_FRAME)
+    }
+
+    @Test(timeout = 5000) fun budgetTooSmallForAnyChunkFailsBeforeSendingChunks() = runBlocking {
+        val f = Fixture(budget = 90) // below the ~96-byte chunk command envelope
+        f.wire.onWrite = { frame ->
+            val words = frame.getJSONObject("d").getString("cmd").split(' ')
+            uploadAck(f, frame, words[1], 0)
+        }
+        val error = runCatching { f.link.write("/fixture", ByteArray(10)) }.exceptionOrNull()
+        assertTrue(error?.message.orEmpty(), error?.message.orEmpty().contains("receive buffer"))
+        assertEquals(listOf("fs_upload_begin", "fs_upload_abort"), f.wire.frames.map {
+            it.getJSONObject("d").getString("cmd").substringBefore(' ')
+        })
     }
 
     private fun uploadAck(f: Fixture, frame: JSONObject, token: String, size: Int,

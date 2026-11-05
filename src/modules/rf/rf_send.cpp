@@ -399,8 +399,8 @@ void sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
             }
         }
         if (!found) {
-            Serial.print("unsupported preset: ");
-            Serial.println(preset);
+            if (!g_companionActive) Serial.print("unsupported preset: ");
+            if (!g_companionActive) Serial.println(preset);
             return;
         }
     }
@@ -428,8 +428,8 @@ void sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
     } else {
         // other single-pinned modules in use
         if (modulation != 2) {
-            Serial.print("unsupported modulation: ");
-            Serial.println(modulation);
+            if (!g_companionActive) Serial.print("unsupported modulation: ");
+            if (!g_companionActive) Serial.println(modulation);
             return;
         }
         initRfModule("tx", frequency / 1000000.0);
@@ -496,9 +496,9 @@ void sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
         if (def != nullptr) {
             rf_tx_protocol(rfcode.key, rfcode.Bit, rfcode.te, def, num_signal_repeat);
         } else {
-            Serial.print("unsupported protocol: ");
-            Serial.println(protocol);
-            Serial.println("Falling back to generic RcSwitch_11");
+            if (!g_companionActive) Serial.print("unsupported protocol: ");
+            if (!g_companionActive) Serial.println(protocol);
+            if (!g_companionActive) Serial.println("Falling back to generic RcSwitch_11");
             rfTransmitCode(rfcode.key, rfcode.Bit, 270, 11, 10);
         }
     }

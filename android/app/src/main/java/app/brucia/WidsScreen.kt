@@ -19,6 +19,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import app.brucia.ui.BruciaButtonDefaults
+import app.brucia.ui.Button
+import app.brucia.ui.TextButton
 
 /**
  * WIDS - portable wireless intrusion detection. Loops the device's jam_detect windows (802.11
@@ -90,7 +93,7 @@ internal fun WidsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
         Button(
             enabled = connected, modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = if (active) Color(0xFFD32F2F) else cs.primary),
+            colors = BruciaButtonDefaults.buttonColors(containerColor = if (active) Color(0xFFD32F2F) else cs.primary),
             onClick = { if (active) vm.stopWids() else vm.startWids(window.roundToInt(), threshold.roundToInt()) },
         ) { Text(if (active) "Stop monitoring" else "Start monitoring") }
 

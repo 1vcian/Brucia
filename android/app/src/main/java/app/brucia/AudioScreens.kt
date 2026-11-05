@@ -29,13 +29,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -75,6 +72,9 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
+import app.brucia.ui.BruciaButtonDefaults
+import app.brucia.ui.Button
+import app.brucia.ui.OutlinedButton
 
 // Shared sample rate for all Audio tools (matches the ESP mic/speaker contract).
 private const val AUDIO_FS = 16000
@@ -193,7 +193,7 @@ private fun RecordBar(vm: WardriveViewModel, connected: Boolean) {
                         } else { msg = ""; vm.startRecording() }
                     },
                     enabled = (connected || ready) && !exporting,
-                    colors = ButtonDefaults.buttonColors(
+                    colors = BruciaButtonDefaults.buttonColors(
                         containerColor = if (recording) Color(0xFFD32F2F) else cs.primary
                     ),
                 ) { Text(if (recording) "Stop & save" else if (ready) "Save recording" else "Record") }
@@ -381,7 +381,7 @@ internal fun ScopePanel(vm: WardriveViewModel, pcm: ShortArray) {
                     val sel = scopeMode == i
                     OutlinedButton(
                         onClick = { scopeMode = i }, modifier = Modifier.weight(1f),
-                        colors = if (sel) ButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.2f)) else ButtonDefaults.outlinedButtonColors(),
+                        colors = if (sel) BruciaButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.2f)) else BruciaButtonDefaults.outlinedButtonColors(),
                     ) { Text(label, style = MaterialTheme.typography.labelMedium) }
                 }
             }
@@ -409,7 +409,7 @@ internal fun ScopePanel(vm: WardriveViewModel, pcm: ShortArray) {
                             val sel = triggerMode == i
                             OutlinedButton(
                                 onClick = { triggerMode = i }, modifier = Modifier.weight(1f),
-                                colors = if (sel) ButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.2f)) else ButtonDefaults.outlinedButtonColors(),
+                                colors = if (sel) BruciaButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.2f)) else BruciaButtonDefaults.outlinedButtonColors(),
                             ) { Text(label, style = MaterialTheme.typography.labelSmall) }
                         }
                     }
@@ -799,7 +799,7 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     }
                 } else {
                     Button(onClick = { vm.stopDtmfDecode() }, modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
+                        colors = BruciaButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
                 }
                 // Live diagnostics while listening: mic level + the strongest DTMF low/high group
                 // frequency and its power. This tells you at a glance whether the mic is picking up
@@ -910,7 +910,7 @@ internal fun ToneScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         val sel = dur == d
                         OutlinedButton(
                             onClick = { dur = d }, modifier = Modifier.weight(1f),
-                            colors = if (sel) ButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.18f)) else ButtonDefaults.outlinedButtonColors(),
+                            colors = if (sel) BruciaButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.18f)) else BruciaButtonDefaults.outlinedButtonColors(),
                         ) { Text("1/$d", maxLines = 1, style = MaterialTheme.typography.labelSmall) }
                     }
                 }

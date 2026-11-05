@@ -14,12 +14,15 @@ import kotlinx.coroutines.flow.asStateFlow
  * request that still owns its flow may set [rxResult] or call [onKeyCaptured].
  * A third independent line, [learn], runs the legacy CLI `ir rx` (same ~10 s loop_headless
  * window, .ir file output) and hands every parsed button to [onLearned].
+ * When [useCli] is true (a LITE firmware compiled the companion `ir_rx` out), the receive and
+ * capture flows send that same CLI `ir rx` instead; their parsers already accept its .ir output.
  */
 class IrReceiveService(
     scope: CoroutineScope,
     runner: CommandRunner,
     isConnected: () -> Boolean,
     private val onLearned: (List<IrButton>) -> Unit = {},
+    private val useCli: () -> Boolean = { false },
     private val onKeyCaptured: (IrButton) -> Unit,
 ) {
     private val lock = Any()
@@ -42,7 +45,8 @@ class IrReceiveService(
     fun receiveOnce() = synchronized(lock) {
         val token = ++rxToken
         _rxResult.value = null
-        rx.start(CMD, RX_RUNNING) { ok, out ->
+        rx.start(rxCommand(), RX_RUNNING) { ok, reply ->
+            val out = withoutCliPrompt(reply)
             if (!ok) return@start out.ifBlank { "Receive failed." }
             val parsed = (IrParser.parse(out).firstOrNull() ?: IrParser.parseRxSummary(out))
             synchronized(lock) { if (token == rxToken) _rxResult.value = parsed }
@@ -73,7 +77,8 @@ class IrReceiveService(
     /** Capture one signal and hand it, named [label] (or its parsed name), to [onKeyCaptured]. */
     fun captureKey(label: String) = synchronized(lock) {
         val token = ++captureToken
-        capture.start(CMD, CAPTURE_RUNNING) { ok, out ->
+        capture.start(rxCommand(), CAPTURE_RUNNING) { ok, reply ->
+            val out = withoutCliPrompt(reply)
             if (!ok) return@start out.ifBlank { "Capture failed." }
             val parsed = (IrParser.parse(out).firstOrNull() ?: IrParser.parseRxSummary(out)) ?: return@start "No signal decoded - try again."
             val named = parsed.copy(name = label.trim().ifBlank { parsed.name })
@@ -95,6 +100,19 @@ class IrReceiveService(
         null
     }
 
+    private fun rxCommand() = if (useCli()) LEARN_CMD else CMD
+
+    /**
+     * The CLI `ir rx` reply (relayed by the companion's captured-CLI fallback) wraps the .ir block in
+     * status lines: irRxCallback prints "Waiting for signal..." first, and the `ir` composite's own
+     * callback (irCallback, run by SimpleCLI after the sub-command) prints "Turning off IR LED"
+     * last. Drop both so a timeout reads as a failure and a capture parses cleanly. The companion
+     * `ir_rx` reply never contains them, so it is unchanged.
+     */
+    private fun withoutCliPrompt(out: String) =
+        if (CLI_LINES.none { out.contains(it) }) out
+        else out.lineSequence().filterNot { it.trim() in CLI_LINES }.joinToString("\n").trim()
+
     /** Cancel a pending learn; its late reply never reaches [onLearned]. */
     fun stopLearn() = learning.stop()
 
@@ -108,6 +126,7 @@ class IrReceiveService(
         const val CMD = "ir_rx"
         /** Legacy CLI receive; IrRead::loop_headless(10), the same window as [CMD]. */
         const val LEARN_CMD = "ir rx"
+        private val CLI_LINES = setOf("Waiting for signal...", "Turning off IR LED")
         /** Firmware listens ~10 s (loop_headless(10)); margin for the ACK. */
         const val TIMEOUT_MS = 20_000L
         const val RX_RUNNING = "Receiving - point a remote at the device and press a button (10s)..."

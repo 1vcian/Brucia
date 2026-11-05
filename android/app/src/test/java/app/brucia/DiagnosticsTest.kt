@@ -16,7 +16,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Test
 
 /** Inbound byte chunks for the decoder; outbound writes are dropped. */
@@ -37,7 +36,7 @@ private fun rawFrame(payload: ByteArray): ByteArray {
     return byteArrayOf(n.toByte(), (n ushr 8).toByte(), (n ushr 16).toByte(), (n ushr 24).toByte()) + payload
 }
 
-private fun jsonFrame(obj: JSONObject) = rawFrame(obj.toString().toByteArray(Charsets.UTF_8))
+private fun jsonFrame(obj: JSONObject) = rawFrame(deviceJson(obj).toByteArray(Charsets.UTF_8))
 
 /** A diag ACK body as current firmware sends it (proto/PROTOCOL.md "Recovery diagnostics"). */
 private fun diagBody(): JSONObject {
@@ -153,24 +152,31 @@ class DiagnosticsTest {
         val counters = LinkCounters()
         val c = CompanionClient(t, counters)
         val pong = JSONObject().put("v", 0).put("t", Kind.PONG).put("id", 1).put("d", JSONObject())
-        // One chunk: malformed, array (valid JSON but not an object), valid frame.
-        t.inbound += rawFrame("{not json".toByteArray()) + rawFrame("[1,2]".toByteArray()) + jsonFrame(pong)
+        // One chunk: two envelope-prefixed bodies that are not valid JSON objects (counted as
+        // malformed, boundary known), a non-envelope frame (skipped as noise), a valid frame.
+        t.inbound += rawFrame("{\"v\":0,not json".toByteArray()) + rawFrame("{\"v\":[1,2".toByteArray()) +
+            rawFrame("[1,2]".toByteArray()) + jsonFrame(pong)
         assertEquals(Kind.PONG, c.readMessage(50)?.getInt("t"))
         var s = counters.snapshot()
         assertEquals(2L, s.malformedFrames)
         assertEquals(1L, s.framesReceived)
+        assertEquals(9L, s.noiseBytes) // the 4-byte header and "[1,2]"
         c.hello()
         c.cmd("info")
         assertEquals(2L, counters.snapshot().framesSent)
-        // Invalid length: buffer dropped, counted, the link is reset by the caller.
+        // Invalid length: counted once per noise run and skipped; the decoder resyncs on the next
+        // frame instead of resetting the link.
         t.inbound += byteArrayOf(0, 0, 0, 0)
-        try { c.readMessage(50); fail("expected IOException") } catch (_: java.io.IOException) {}
-        t.inbound += byteArrayOf(1, 0x20, 0, 0) // 8193
-        try { c.readMessage(50); fail("expected IOException") } catch (_: java.io.IOException) {}
+        assertNull(c.readMessage(50))
+        t.inbound += jsonFrame(pong)
+        assertEquals(Kind.PONG, c.readMessage(50)?.getInt("t"))
+        t.inbound += byteArrayOf(1, 0x20, 0, 0) + jsonFrame(pong) // 8193, then a frame
+        assertEquals(Kind.PONG, c.readMessage(50)?.getInt("t"))
         s = counters.snapshot()
         assertEquals(2L, s.invalidLengthFrames)
         assertEquals(2L, s.malformedFrames)
-        assertTrue(s.lines()[1], s.lines()[1] == "App skipped frames: 2 malformed, 2 invalid length (link reset)")
+        assertEquals(17L, s.noiseBytes)
+        assertTrue(s.lines()[1], s.lines()[1] == "App skipped frames: 2 malformed, 2 invalid length (resynced), 17 noise bytes")
     }
 
     @Test fun sessionCountsTimeoutsAndUnmatchedReplies() = runBlocking {

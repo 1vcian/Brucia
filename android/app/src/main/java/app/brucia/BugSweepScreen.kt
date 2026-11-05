@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.brucia.wardrive.WardriveViewModel
 import kotlinx.coroutines.delay
+import app.brucia.ui.BruciaButtonDefaults
+import app.brucia.ui.Button
 
 /**
  * Hidden-transmitter / bug & spy-cam RF sweep. A defensive tool: it listens across the bands only the
@@ -123,7 +125,7 @@ internal fun BugSweepScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         Button(
             enabled = connected && (useWifi || useBle || useSub),
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = if (sweeping) Color(0xFFD32F2F) else cs.primary),
+            colors = BruciaButtonDefaults.buttonColors(containerColor = if (sweeping) Color(0xFFD32F2F) else cs.primary),
             onClick = { if (sweeping) stopSweep() else startSweep() },
         ) { Text(if (sweeping) "Stop sweep" else "Start sweep") }
 

@@ -220,7 +220,7 @@ void fm_spectrum() {
 bool fm_begin() {
     if (!radio.begin()) { // begin with address 0x63 (CS high default)
         tft.fillScreen(bruceConfig.bgColor);
-        Serial.println("Cannot find radio");
+        if (!g_companionActive) Serial.println("Cannot find radio");
         displayTextLine("Cannot find radio", true);
         return false;
     }

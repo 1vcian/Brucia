@@ -5,9 +5,7 @@
 #if defined(COMPANION_HAS_NRF24)
 #include "modules/NRF24/nrf_common.h"
 #include "modules/NRF24/nrf_jammer.h"
-#if !defined(LITE_VERSION)
 #include "modules/NRF24/nrf_mousejack.h"
-#endif
 #endif
 
 namespace brucia {
@@ -205,7 +203,6 @@ static void runNrf24Jammer(int secs, uint32_t id) {
     companionAckMsg(id, true, buf);
 }
 
-#if !defined(LITE_VERSION)
 // Per-target callback for runNrf24Mousejack: stream one EVENT ev="nrf24.mj" per discovered
 // mousejackable device. Signature matches nrf_mousejack_headless()'s onTarget hook.
 static void companionMjOnTarget(const uint8_t addr[5], uint8_t ch, const char *type, void *user) {
@@ -249,11 +246,17 @@ static void runNrf24Mousejack(int secs, const String &injectText, uint32_t id) {
     else snprintf(buf, sizeof(buf), "nrf24 mousejack: %d device(s) found", n);
     companionAckMsg(id, true, buf);
 }
-#endif // !LITE_VERSION
 
 #else  // !COMPANION_HAS_NRF24
-// Reply used when an NRF24 command arrives on a board without the nRF24 wiring.
-static void sendNoNrf24(uint32_t id) { companionAckMsg(id, false, "no NRF24 module on this board"); }
+// Reply used when an NRF24 command arrives on a board without the nRF24 wiring, or on a LITE
+// build, which compiles the NRF24 companion endpoints out (config.h) and reports caps.nrf24:false.
+static void sendNoNrf24(uint32_t id) {
+#if defined(USE_NRF24_VIA_SPI) && defined(LITE_VERSION)
+    sendErr(id, 501, "nrf24 not available in this (lite) build");
+#else
+    companionAckMsg(id, false, "no NRF24 module on this board");
+#endif
+}
 #endif // COMPANION_HAS_NRF24
 
 bool dispatchNrf24Command(const CommandRequest &request) {
@@ -295,10 +298,10 @@ bool dispatchNrf24Command(const CommandRequest &request) {
 
         // nrf24_mousejack <secs> [inject text]: headless scan (stream EVENT
         // ev="nrf24.mj") + optional keystroke injection, reusing Bruce's MouseJack
-        // (modules/NRF24/nrf_mousejack.cpp). That module is dropped on lite builds,
-        // so lite replies ok:false. AUTHORIZED / LAB USE ONLY.
+        // (modules/NRF24/nrf_mousejack.cpp). COMPANION_HAS_NRF24 is never set on lite
+        // builds, which reply through sendNoNrf24. AUTHORIZED / LAB USE ONLY.
         if (cmdStr.startsWith("nrf24_mousejack ") || cmdStr == "nrf24_mousejack") {
-#if defined(COMPANION_HAS_NRF24) && !defined(LITE_VERSION)
+#if defined(COMPANION_HAS_NRF24)
             {
                 String rest = cmdStr.length() > 16 ? cmdStr.substring(16) : String("");
                 rest.trim();
@@ -307,8 +310,6 @@ bool dispatchNrf24Command(const CommandRequest &request) {
                 String txt = sp < 0 ? String("") : rest.substring(sp + 1);
                 runNrf24Mousejack(secs, txt, id);
             }
-#elif defined(COMPANION_HAS_NRF24)
-            companionAckMsg(id, false, "nrf24_mousejack not available on lite build");
 #else
             sendNoNrf24(id);
 #endif

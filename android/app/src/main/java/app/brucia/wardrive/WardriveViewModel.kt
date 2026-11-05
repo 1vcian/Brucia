@@ -582,7 +582,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         linkCounters.noteLink()
         client = c
         session = app.brucia.session.CommandSession(c, t, preflight = { command ->
-            CommandCapabilities.check(command, _device.value?.caps)
+            CommandCapabilities.check(command, _device.value?.caps, _device.value?.features)
         }, onCallbackError = { e -> app.brucia.BruciaLog.w("VM", "disconnect callback", e) })
         lastPongAt = companionNowMs()
         // Stay "Connecting..." until the first CAPS/DeviceInfo handshake arrives.
@@ -951,6 +951,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 val d = msg.optJSONObject("d") ?: return
                 val info = DeviceInfo.fromCaps(d)
                 _device.value = info
+                // Frames above the device's RX buffer would be lost on the wire: refuse them locally.
+                client?.sendLimit = app.brucia.protocol.FrameBudget.sendLimit(info.rxMax)
                 // Record the exact firmware artifact so an exported log can be tied to it.
                 val provenance = info.provenanceLines().joinToString("; ")
                 app.brucia.BruciaLog.deviceProvenance = provenance
@@ -1370,10 +1372,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Transmit a raw IR frame via the fixed contract (ir_tx_raw <khz> <csv durations>). */
+    /**
+     * Transmit a raw IR frame via the fixed contract (ir_tx_raw <khz> <csv durations>). A LITE
+     * firmware without the companion IR commands gets Bruce's own CLI `ir tx_raw` instead.
+     */
     fun irTxRaw(khz: Int, durations: String) {
-        dispatchCmd("ir_tx_raw $khz $durations")
+        dispatchCmd(if (irCmdsOmitted()) IrButton.cliTxRaw(khz, durations) else "ir_tx_raw $khz $durations")
     }
+
+    /** The firmware reported the companion IR commands as compiled out (LITE build). */
+    private fun irCmdsOmitted() = _device.value?.features?.omits(DeviceFeatures.IR_CMDS) == true
 
     // --- Custom IR remote: a user-built grid of captured buttons, persisted on the phone ---
     private val _remoteKeys = MutableStateFlow<List<IrButton>>(emptyList())
@@ -1742,7 +1750,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Replay a geo-signal's command now (the device transmits). Authorized use only. */
     fun replayGeoSignal(g: GeoSignal) {
         if (client == null) { _geoStatus.value = "Connect the device over USB first."; return }
-        if (g.payload.startsWith("rf tx")) sendCommand(g.payload) else sendConsole(g.payload)
+        replayPayload(g.payload)
         _geoStatus.value = "Replayed \"${g.name}\"."
     }
 
@@ -1808,8 +1816,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // --- Sub-GHz capture / replay via the CLI (device decodes; phone stores) ---
     fun rfCapture(freqHz: Long = 433_920_000L) { echoConsole("rf rx $freqHz"); rfReceive.capture(freqHz) }
 
-    fun replaySaved(item: SavedItem) {
-        if (item.payload.startsWith("rf tx")) sendCommand(item.payload) else sendConsole(item.payload)
+    fun replaySaved(item: SavedItem) = replayPayload(item.payload)
+
+    /**
+     * The one replay path for stored payloads (saved items and geo-signals pinned from them).
+     * Legacy unquoted raw IR payloads are rewritten to the quoted CLI form (IrButton.replayable).
+     */
+    private fun replayPayload(payload: String) {
+        if (payload.startsWith("rf tx")) sendCommand(payload) else sendConsole(IrButton.replayable(payload))
     }
 
     fun deleteSaved(id: Long) {
@@ -2222,6 +2236,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startIrJammer() {
         if (client == null) { _irJammerStatus.value = "Connect the device over USB first."; return }
+        if (irCmdsOmitted()) { _irJammerStatus.value = DeviceFeatures.OMITTED_REASON; return }
         if (_micPcmActive.value) stopMicPcm()
         irJammerLoop.start("Jamming IR... (Stop to end)", { "ir_jammer $SPAM_BURST_SECS" }, burstTimeoutMs, "Jammer stopped.")
     }
@@ -2379,7 +2394,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val fmElapsedMs: StateFlow<Long> by lazy { fmStream.status.map { it.elapsedMs }.stateIn(viewModelScope, SharingStarted.Eagerly, 0L) }
 
     private fun startFm(freqKHz: Int, prepare: suspend (() -> Unit) -> PcmStreamSource) =
-        fmStream.start(PcmStreamSpec(fmKHz = freqKHz), "Preparing FM at $freqKHz kHz...",
+        fmStream.start(PcmStreamSpec(fmKHz = freqKHz, rxMax = _device.value?.rxMax), "Preparing FM at $freqKHz kHz...",
             "Transmitting at $freqKHz kHz...", prepare)
 
     fun fmStartTone(freqKHz: Int, toneHz: Double = 440.0) = startFm(freqKHz) {
@@ -2399,7 +2414,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun fmStartDeviceMic(freqKHz: Int) = fmStream.start(
-        PcmStreamSpec(fmKHz = freqKHz, deviceMic = true), "Starting FM at $freqKHz kHz...",
+        PcmStreamSpec(fmKHz = freqKHz, deviceMic = true, rxMax = _device.value?.rxMax), "Starting FM at $freqKHz kHz...",
         "Transmitting from the device mic at $freqKHz kHz.",
     )
     fun fmStop() = fmStream.stop()
@@ -2929,7 +2944,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         if (_device.value?.features?.verifiedFiles != true)
             throw IOException("Update device firmware to enable verified file transfers")
         return SessionFileLink(captured, fileReader, fileTransferMutex, { session === captured },
-            transactionalUploads = _device.value?.features?.transactionalUploads == true)
+            transactionalUploads = _device.value?.features?.transactionalUploads == true,
+            frameBudget = app.brucia.protocol.FrameBudget.chunkBudget(_device.value?.rxMax))
     }
 
     /** CaptureWorkflow owns its job; it uses the same verified wire adapter and mutex. */
@@ -3274,7 +3290,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val nfcAdvStatus: StateFlow<String> = nfcTools.advStatus
 
     // IR receive/capture and TV-B-Gone (declared after commandRunner: property init order).
-    private val irRx = IrReceiveService(viewModelScope, commandRunner, isConnected = { session != null }, onLearned = ::onIrLearned) { key ->
+    private val irRx = IrReceiveService(viewModelScope, commandRunner, isConnected = { session != null }, onLearned = ::onIrLearned,
+        useCli = { irCmdsOmitted() }) { key ->
         _remoteKeys.value = _remoteKeys.value + key
         saveRemoteKeys()
     }
@@ -3608,7 +3625,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun sstvTransmit(img: Sstv.Image, mode: Sstv.Mode) {
         val snapshot = Sstv.Image(img.width, img.height, img.pixels.copyOf())
-        sstvStream.start(PcmStreamSpec(), "Encoding ${mode.name}...", "Transmitting ${mode.name}...") { check ->
+        sstvStream.start(PcmStreamSpec(rxMax = _device.value?.rxMax), "Encoding ${mode.name}...", "Transmitting ${mode.name}...") { check ->
             val pcm = Sstv.encode(snapshot, mode, check)
             PcmStreamSource(PcmSource.arrayReader(pcm), pcm.size.toLong())
         }

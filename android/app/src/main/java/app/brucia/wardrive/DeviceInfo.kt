@@ -92,7 +92,9 @@ data class DeviceCaps(
  * start and reports its end with one EVENT ev="speaker.play" (literal `features.speaker_play_async`).
  * [mifareKeycheckStop]: firmware stops an in-flight mifare_keycheck batch on a polled stop frame
  * (literal `features.mifare_keycheck_stop`). [diag]: firmware answers the `diag` recovery
- * diagnostics command (literal `features.diag`).
+ * diagnostics command (literal `features.diag`). [omitted]: companion endpoint groups a LITE
+ * build compiled out, reported as a literal `false` (see [OMITTABLE]); an absent key means the
+ * group is present (full builds and firmware older than the flag), so gating never regresses them.
  */
 data class DeviceFeatures(
     val verifiedFiles: Boolean = false,
@@ -104,12 +106,24 @@ data class DeviceFeatures(
     // (literal `features.capture_descriptor`); the capture workflow imports exactly that path and
     // verifies size/CRC after transfer instead of diffing directory listings.
     val captureDescriptor: Boolean = false,
+    val omitted: Set<String> = emptySet(),
 ) {
+    /** True only when the firmware reported [group] as compiled out (literal `false`). */
+    fun omits(group: String): Boolean = group in omitted
+
     companion object {
+        const val MIFARE_KEYCHECK = "mifare_keycheck"
+        const val IR_CMDS = "ir_cmds"
+        const val BLE_GATT = "ble_gatt"
+        /** Endpoint groups a LITE firmware build may compile out (CAPS `features.<group>: false`). */
+        val OMITTABLE = listOf(MIFARE_KEYCHECK, IR_CMDS, BLE_GATT)
+        const val OMITTED_REASON = "Not available on this firmware (compiled out of LITE builds)."
+
         fun fromJson(obj: JSONObject?) = DeviceFeatures(obj?.opt("verified_files") == true,
             obj?.opt("transactional_uploads") == true, obj?.opt("speaker_play_async") == true,
             obj?.opt("mifare_keycheck_stop") == true, obj?.opt("diag") == true,
-            obj?.opt("capture_descriptor") == true)
+            obj?.opt("capture_descriptor") == true,
+            OMITTABLE.filter { obj?.opt(it) == false }.toSet())
     }
 }
 
@@ -166,6 +180,9 @@ data class DeviceInfo(
     val proto: Int? = null,          // CAPS d.proto; null when absent/malformed
     val build: DeviceBuild? = null,  // CAPS d.build; null on firmware without provenance
     val evidence: CapabilityEvidence? = null, // CAPS d.evidence; null on older firmware
+    /** CAPS d.rx_max: largest frame payload the device's RX buffer holds; null on older firmware. */
+    val rxMax: Int? = null,
+    val rxBuf: Int? = null,  // CAPS d.rx_buf: RX buffer bytes the device allocated
 ) {
     /** Provenance lines for the log export and session reports. */
     fun provenanceLines(): List<String> = listOf(
@@ -208,6 +225,8 @@ data class DeviceInfo(
                 proto = (d.opt("proto") as? Int)?.takeIf { it >= 0 },
                 build = DeviceBuild.fromJson(d.optJSONObject("build")),
                 evidence = evidence,
+                rxMax = app.brucia.protocol.FrameBudget.reported(d.opt("rx_max")),
+                rxBuf = (d.opt("rx_buf") as? Int)?.takeIf { it > 0 },
             )
         }
     }

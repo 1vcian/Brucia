@@ -30,6 +30,24 @@ class CapsTest {
         assertTrue(parse(JSONObject().put("speaker_play_async", true)).speakerPlayAsync)
     }
 
+    @Test fun liteOmittedGroupsNeedALiteralFalseAndAbsenceKeepsThemAvailable() {
+        val parse = app.brucia.wardrive.DeviceFeatures.Companion::fromJson
+        // Full builds and older firmware omit the keys: nothing is treated as compiled out.
+        assertTrue(parse(null).omitted.isEmpty())
+        assertTrue(parse(JSONObject().put("diag", true).put("mifare_keycheck_report", true)).omitted.isEmpty())
+        // Only a literal JSON false marks a group; true, strings and numbers do not.
+        val odd = parse(JSONObject().put("mifare_keycheck", true).put("ir_cmds", "false").put("ble_gatt", 0))
+        assertTrue(odd.omitted.isEmpty())
+        // The LITE CAPS shape (capabilities.cpp): every group false, diag false, no keycheck flags.
+        val lite = parse(JSONObject().put("verified_files", true).put("transactional_uploads", true)
+            .put("mifare_keycheck", false).put("ir_cmds", false).put("ble_gatt", false).put("diag", false)
+            .put("future_group", false))
+        assertTrue(lite.omits("mifare_keycheck") && lite.omits("ir_cmds") && lite.omits("ble_gatt"))
+        assertFalse(lite.omits("future_group")) // unknown keys are ignored, not invented
+        assertFalse(lite.diag || lite.mifareKeycheckStop)
+        assertTrue(lite.verifiedFiles && lite.transactionalUploads)
+    }
+
     @Test fun inFlightMifareStopRequiresItsOwnLiteralFlag() {
         val parse = app.brucia.wardrive.DeviceFeatures.Companion::fromJson
         assertFalse(parse(null).mifareKeycheckStop)

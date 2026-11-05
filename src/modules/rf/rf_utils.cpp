@@ -253,10 +253,10 @@ bool initRfModule(String mode, float frequency) {
         }
         ELECHOUSE_cc1101.Init();
         if (ELECHOUSE_cc1101.getCC1101()) { // Check the CC1101 Spi connection.
-            Serial.println("cc1101 Connection OK");
+            if (!g_companionActive) Serial.println("cc1101 Connection OK");
         } else {
             displayError("CC1101 not found");
-            Serial.println("cc1101 Connection Error");
+            if (!g_companionActive) Serial.println("cc1101 Connection Error");
             return false;
         }
 
@@ -269,7 +269,7 @@ bool initRfModule(String mode, float frequency) {
 
         if (!((frequency >= 280 && frequency <= 350) || (frequency >= 387 && frequency <= 468) ||
               (frequency >= 779 && frequency <= 928))) {
-            Serial.println("Invalid Frequency, setting default");
+            if (!g_companionActive) Serial.println("Invalid Frequency, setting default");
             frequency = 433.92;
             displayWarning("Wrong freq, set to 433.92", true);
         }
@@ -295,7 +295,7 @@ bool initRfModule(String mode, float frequency) {
         ELECHOUSE_cc1101.setPktFormat(3);
         setMHZ(frequency);
         cc1101_mode_hint = 0;
-        Serial.println("cc1101 setMHZ(frequency);");
+        if (!g_companionActive) Serial.println("cc1101 setMHZ(frequency);");
         if (fixedFreq) {
             cc1101_mode_hint = (mode == "tx") ? 1 : ((mode == "rx") ? 2 : 0);
             cc1101ApplyFixedFreqOokPreset(cc1101_mode_hint == 1);
@@ -307,22 +307,22 @@ bool initRfModule(String mode, float frequency) {
             ioExpander.turnPinOnOff(IO_EXP_CC_TX, HIGH);
             pinMode(bruceConfigPins.CC1101_bus.io0, OUTPUT);
             ELECHOUSE_cc1101.setPA(12); // set TxPower. The following settings are possible depending
-            Serial.println("cc1101 setPA();");
+            if (!g_companionActive) Serial.println("cc1101 setPA();");
             ELECHOUSE_cc1101.SetTx();
-            Serial.println("cc1101 SetTx();");
+            if (!g_companionActive) Serial.println("cc1101 SetTx();");
         } else if (mode == "rx") {
             ioExpander.turnPinOnOff(IO_EXP_CC_RX, HIGH);
             ioExpander.turnPinOnOff(IO_EXP_CC_TX, LOW);
             pinMode(bruceConfigPins.CC1101_bus.io0, INPUT);
             ELECHOUSE_cc1101.SetRx();
-            Serial.println("cc1101 SetRx();");
+            if (!g_companionActive) Serial.println("cc1101 SetRx();");
         }
         // else if mode is unspecified wont start TX/RX mode here -> done by the caller
         cc1101_spi_ready = true;
     } else {
         // single-pinned module
         if (abs(frequency - bruceConfigPins.rfFreq) > 1) {
-            Serial.print("warn: unsupported frequency, trying anyway...");
+            if (!g_companionActive) Serial.print("warn: unsupported frequency, trying anyway...");
             // return false;
         }
 
@@ -380,7 +380,7 @@ void initCC1101once(SPIClass *SSPI) {
 void setMHZ(float frequency) {
     if (frequency > 928 || frequency < 280) {
         frequency = 433.92;
-        Serial.println("Frequency out of band");
+        if (!g_companionActive) Serial.println("Frequency out of band");
     }
     if (bruceConfigPins.rfModule == CC1101_SPI_MODULE) {
 #if defined(T_EMBED)
@@ -533,7 +533,7 @@ rmt_channel_handle_t setup_rf_rx() {
     // every caller already treats NULL as "receiver unavailable".
     esp_err_t err = rmt_new_rx_channel(&rx_channel_cfg, &rx_channel);
     if (err != ESP_OK) {
-        Serial.printf("RF RX: RMT channel unavailable (%s)\n", esp_err_to_name(err));
+        if (!g_companionActive) Serial.printf("RF RX: RMT channel unavailable (%s)\n", esp_err_to_name(err));
         return NULL;
     }
     return rx_channel;

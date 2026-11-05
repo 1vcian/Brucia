@@ -96,6 +96,15 @@ equal what the runner sent and received, no rejects, no reboot). File checks are
 without `features.verified_files` / `features.transactional_uploads`, diag checks without
 `features.diag`.
 
+Link handling: the reader resyncs after device text in the framed stream instead of failing
+(proto/PROTOCOL.md "Resynchronisation"): skipped bytes are recorded per check as a warning with a
+sample, and in the report's `link` section and Markdown header; they are not a FAIL by
+themselves (a frame destroyed by text inside it still shows up in `diag_counters`). Frames the
+runner sends never exceed CAPS `rx_max` (768 bytes for firmware without it); the `fs_upload`
+check uses the largest chunk that fits (3072 raw bytes at `rx_max` 8192) for its first chunk and
+half of it for the second, so it exercises the frame size that was lost on the first hardware
+run, and records each chunk frame size in its evidence.
+
 Safety: every frame passes an explicit allowlist (`check_allowed`); any other command or
 stream raises before anything is written. Nothing that transmits is allowed: no deauth,
 jamming, beacons, BLE advertising, IR/RF/Sub-GHz TX, replay or speaker. `wifi.ap` and

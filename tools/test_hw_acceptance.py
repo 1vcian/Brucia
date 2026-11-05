@@ -6,6 +6,9 @@ expects PASS with JSON + Markdown reports; then against mocks with injected faul
 mismatch, heap leak, stream events after OFF) and expects the matching checks to FAIL; checks
 the allowlist refuses every transmitting command before a byte is written, that Ctrl-C sends OFF
 for an active SUB, that --dry-run opens nothing and that a missing feature yields SKIP.
+Link tests: the reader resyncs after device text between/inside frames (counted, reported as a
+warning, never fatal) and upload chunks follow CAPS rx_max (legacy 768 without it) so they fit a
+simulated small RX queue that drops bytes, while oversized chunks reproduce the hardware loss.
 This proves the runner, not the device.
 
     python3 tools/test_hw_acceptance.py
@@ -15,9 +18,11 @@ import io
 import json
 import os
 import pty
+import struct
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -37,9 +42,9 @@ def check(name, ok, detail=""):
 
 
 @contextlib.contextmanager
-def mock(faults=()):
+def mock(faults=(), **kw):
     master, slave = pty.openpty()
-    dev = MockDevice(faults=faults, poll_interval=0.002, emit_interval=0.3)
+    dev = MockDevice(faults=faults, poll_interval=0.002, emit_interval=0.3, **kw)
     stop = threading.Event()
     th = threading.Thread(target=dev.serve, args=(master, stop), daemon=True)
     th.start()
@@ -182,6 +187,171 @@ def test_allowlist():
     check("allowlisted frames are written", link.sent == len(allowed) and len(rec.written) > 0)
 
 
+class BytePort:
+    """pyserial-like port that serves pre-cut chunks (one per read) for reader unit tests."""
+
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+
+    @property
+    def in_waiting(self):
+        return len(self.chunks[0]) if self.chunks else 0
+
+    def read(self, n):
+        return self.chunks.pop(0) if self.chunks else b""
+
+    def write(self, data):
+        pass
+
+
+def frame(obj):
+    payload = json.dumps(obj).encode()
+    return struct.pack("<I", len(payload)) + payload
+
+
+def read_all(link, limit=20):
+    out = []
+    for _ in range(limit):
+        f = link.recv(time.time() + 0.05)
+        if f is None:
+            break
+        out.append(f)
+    return out
+
+
+def test_resync_reader():
+    a, b, c = (frame({"v": 0, "t": hw.PONG, "id": i, "d": {}}) for i in (1, 2, 3))
+    text = b"cc1101 Connection OK\r\n"
+    # Text between frames, as the first hardware run saw ("cc11" read as a length).
+    link = hw.Link(BytePort([a + text + b + text, c]))
+    ids = [f.get("id") for f in read_all(link)]
+    check("resync: text between frames skipped, all frames kept", ids == [1, 2, 3], str(ids))
+    check("resync: noise bytes and runs counted", link.noise_bytes == 2 * len(text) and link.resyncs == 2,
+          f"{link.noise_bytes} {link.resyncs}")
+    check("resync: noise sample recorded", link.noise_samples and link.noise_samples[0]["sample"].startswith("cc1101"),
+          str(link.noise_samples))
+    # Text before the first frame, split across reads one byte at a time.
+    link = hw.Link(BytePort([bytes([x]) for x in text + a + b]))
+    ids = [f.get("id") for f in read_all(link, 200)]
+    check("resync: byte-by-byte arrival", ids == [1, 2] and link.noise_bytes == len(text), f"{ids} {link.noise_bytes}")
+    # Text between a length prefix and its payload: that frame is lost, the next one is found.
+    link = hw.Link(BytePort([b[:4] + text + b[4:] + c]))
+    ids = [f.get("id") for f in read_all(link)]
+    check("resync: text after a length prefix loses only that frame", ids == [3] and link.noise_bytes == len(b) + len(text),
+          f"{ids} {link.noise_bytes}")
+    # Text inside a payload: the frame is undecodable (counted), the tail is skipped, framing survives.
+    link = hw.Link(BytePort([b[:20] + text + b[20:] + c]))
+    got = read_all(link)
+    check("resync: text inside a payload -> one bad frame, next frame intact",
+          len(got) == 2 and "_bad" in got[0] and got[1].get("id") == 3 and link.bad_rx_json == 1, str(got))
+    # A plausible length whose payload is not an envelope (binary noise) is skipped too.
+    link = hw.Link(BytePort([struct.pack("<I", 40) + b"x" * 40 + c]))
+    ids = [f.get("id") for f in read_all(link)]
+    check("resync: plausible length without the envelope prefix is noise", ids == [3] and link.noise_bytes == 44,
+          f"{ids} {link.noise_bytes}")
+    # Zero and oversized lengths no longer drop the link.
+    link = hw.Link(BytePort([b"\0\0\0\0" + struct.pack("<I", 9000) + a]))
+    ids = [f.get("id") for f in read_all(link)]
+    check("resync: zero/oversized length skipped", ids == [1] and link.noise_bytes == 8, f"{ids} {link.noise_bytes}")
+    # Noise with no frame after it: everything but a possible frame-start tail is counted now.
+    link = hw.Link(BytePort([text * 3]))
+    check("resync: trailing noise counted, link waits", read_all(link) == [] and link.noise_bytes == len(text) * 3 - 8,
+          str(link.noise_bytes))
+    # Bruce's CLI echo is still a clear link error (not companion mode).
+    link = hw.Link(BytePort([b"COMMAND: " + a]))
+    try:
+        read_all(link)
+        ok = False
+    except hw.LinkError as e:
+        ok = "serial CLI" in str(e)
+    check("resync: Bruce CLI echo still reported as a link error", ok)
+
+
+def test_upload_sizing():
+    tok = "0" * 32
+    for rx_max in (768, 1792, 4096, 8192):
+        n = hw.upload_chunk_size(rx_max, tok, 6144)
+        body = json.dumps({"v": 0, "t": hw.CMD, "id": hw.U32, "d": {
+            "cmd": f"fs_upload_chunk {tok} 6143 " + "A" * (4 * ((n + 2) // 3))}}, separators=(",", ":"))
+        check(f"upload chunk for rx_max {rx_max}: {n} raw bytes, frame fits",
+              0 < n <= hw.UPLOAD_MAX_CHUNK and len(body) <= rx_max, f"{n} {len(body)}")
+    check("rx_max from CAPS, legacy default without it",
+          hw.device_rx_max({"rx_max": 1792}) == (1792, "caps") and hw.device_rx_max({})[0] == hw.LEGACY_RX_MAX
+          and hw.device_rx_max({"rx_max": 0})[0] == hw.LEGACY_RX_MAX
+          and hw.device_rx_max({"rx_max": 9000})[0] == hw.LEGACY_RX_MAX)
+    check("CAPS validator: bad rx_max flagged", any("rx_max" in p for p in hw.caps_problems(
+        {"board": "b", "chip": "c", "fw": "f", "proto": 0, "modules": [], "features": {}, "rx_max": 0})))
+    link = hw.Link(BytePort([]))
+    link.rx_max = 64
+    try:
+        link.send(hw.CMD, {"cmd": "storage list /" + "a" * 80})
+        ok = False
+    except hw.AllowlistViolation:
+        ok = True
+    check("a frame above the device rx_max is refused before writing", ok and link.sent == 0)
+
+
+def test_noise_between(tmp):
+    with mock(noise=("between",)) as (dev, path):
+        code, rep, paths, log = run_runner(path, [], tmp)
+        st = statuses(rep)
+        check("noise between frames: every default check PASS", code == 0 and all(v == "PASS" for v in st.values()),
+              f"code={code} {st}\n{log[-2000:]}")
+        check("noise between frames: skipped bytes equal the injected text",
+              rep["link"]["noise_bytes"] == dev.noise_written > 0, f"{rep['link']['noise_bytes']} {dev.noise_written}")
+        warned = [w for c in rep["checks"] for w in c["warnings"] if "non-frame byte" in w]
+        check("noise between frames: reported as check warnings with a sample",
+              warned and "cc1101" in warned[0], str(warned[:2]))
+        md = Path(paths[1]).read_text()
+        check("noise between frames: Markdown names the noise", "device noise" in md and "resync" in md)
+
+
+def test_noise_inside(tmp):
+    with mock(noise=("between", "inside")) as (dev, path):
+        code, rep, _, log = run_runner(path, ["--only", "caps,streams"], tmp)
+        st = statuses(rep)
+        check("noise inside EVENT frames: no fatal link error, checks PASS",
+              code == 0 and rep["fatal"] is None and st == {"caps": "PASS", "streams": "PASS"}, f"code={code} {st}")
+        check("noise inside EVENT frames: noise counted", rep["link"]["noise_bytes"] > 0 and rep["link"]["resyncs"] > 0,
+              str(rep["link"]))
+
+
+def upload_check(rep):
+    return next(c for c in rep["checks"] if c["id"] == "fs_upload")
+
+
+def test_rx_queue(tmp):
+    only = ["--only", "caps,fs_upload"]
+    with mock(rx_queue=1024, caps_rx_max=None) as (dev, path):
+        code, rep, _, _ = run_runner(path, only, tmp)
+        up = upload_check(rep)
+        check("legacy CAPS + 1024-byte RX queue: upload PASS with 768-byte frames, nothing dropped",
+              up["status"] == "PASS" and up["evidence"]["rx_max"] == hw.LEGACY_RX_MAX
+              and max(up["evidence"]["frame_payloads"]) <= hw.LEGACY_RX_MAX and dev.rx_dropped == 0,
+              f"{up['status']} {up['reason']} {up['evidence'].get('frame_payloads')} dropped={dev.rx_dropped}")
+        check("legacy CAPS: caps check warns about the missing rx_max",
+              any("rx_max" in w for c in rep["checks"] if c["id"] == "caps" for w in c["warnings"]))
+    with mock(rx_queue=1024, caps_rx_max=8192) as (dev, path):
+        code, rep, _, _ = run_runner(path, only, tmp)
+        up = upload_check(rep)
+        check("oversized chunks vs a 1024-byte RX queue reproduce the hardware loss (upload FAIL)",
+              up["status"] == "FAIL" and dev.rx_dropped > 0, f"{up['status']} dropped={dev.rx_dropped}")
+    with mock(rx_queue=2048) as (dev, path):
+        code, rep, _, _ = run_runner(path, only, tmp)
+        up = upload_check(rep)
+        check("non-PSRAM class (2048-byte queue, rx_max 1792): upload PASS, frames fit",
+              up["status"] == "PASS" and up["evidence"]["rx_max"] == 1792
+              and 1500 < max(up["evidence"]["frame_payloads"]) <= 1792 and dev.rx_dropped == 0,
+              f"{up['status']} {up['evidence'].get('frame_payloads')} dropped={dev.rx_dropped}")
+    with mock(rx_queue=8448) as (dev, path):
+        code, rep, _, _ = run_runner(path, only, tmp)
+        up = upload_check(rep)
+        check("PSRAM class (8448-byte queue, rx_max 8192): 3072-byte chunks PASS",
+              up["status"] == "PASS" and up["evidence"]["chunk_raw"] == hw.UPLOAD_MAX_CHUNK
+              and max(up["evidence"]["frame_payloads"]) > 4000 and dev.rx_dropped == 0,
+              f"{up['status']} {up['evidence'].get('frame_payloads')}")
+
+
 def test_interrupt(tmp):
     class Interrupting(hw.Runner):
         def stream_listen(self, stream, collect):
@@ -234,6 +404,8 @@ def test_bad_args():
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         test_allowlist()
+        test_resync_reader()
+        test_upload_sizing()
         test_bad_args()
         test_dry_run()
         test_healthy(tmp)
@@ -242,6 +414,9 @@ def main():
         test_fault(tmp, "event_after_off", "streams", "event after OFF")
         test_interrupt(tmp)
         test_skip_without_feature(tmp)
+        test_noise_between(tmp)
+        test_noise_inside(tmp)
+        test_rx_queue(tmp)
     ok = all(v for _, v in results)
     print(f"{sum(v for _, v in results)}/{len(results)} checks passed")
     print("HW ACCEPTANCE TEST PASS" if ok else "HW ACCEPTANCE TEST FAIL")

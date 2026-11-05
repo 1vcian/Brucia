@@ -79,6 +79,16 @@ inline DiagLinkCounters &diagLink() {
     return counters;
 }
 
+#if defined(LITE_VERSION)
+// LITE builds compile `diag` out for app-slot headroom (src/companion/config.h COMPANION_HAS_DIAG):
+// the hooks below are no-ops, nothing reads the counters and CAPS does not advertise features.diag.
+inline void diagNoteSession() {}
+inline void diagNoteRxFrame() {}
+inline void diagNoteTxFrame() {}
+inline void diagNoteBusy() {}
+inline void diagNoteRxReject(DiagRxReject) {}
+inline void diagNoteErr(uint32_t) {}
+#else
 inline void diagNoteSession() { diagInc(diagLink().sessions); }
 inline void diagNoteRxFrame() { diagInc(diagLink().rxFrames); }
 inline void diagNoteTxFrame() { diagInc(diagLink().txFrames); }
@@ -87,6 +97,7 @@ inline void diagNoteRxReject(DiagRxReject kind) {
     if (kind < DIAG_RX_REJECT_KINDS) diagInc(diagLink().rxRejected[kind]);
 }
 inline void diagNoteErr(uint32_t code) { diagInc(diagLink().err[diagErrBucket(code)]); }
+#endif
 
 // esp_reset_reason_t (ESP-IDF 5.x numbering) as a stable lowercase name. The firmware adapter
 // static_asserts that the enum still matches this table; unknown future values map to "other".

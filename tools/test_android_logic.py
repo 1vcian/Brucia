@@ -31,8 +31,11 @@ TESTS = [
     "TftProtocolTest", "SubGhzDecoderTest", "SubGhzEncoderTest", "NdefBuilderTest", "DeviceFileReaderTest", "DownloadIOTest", "ReleaseCatalogTest", "AwaitReplyTest", "FirmwareImageTest", "UpdateHttpTest", "HttpWireTest", "RecordingBufferTest",
     "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
 ]
+# Test-only files without a test class (compiled, not run).
+TEST_HELPERS = ["DeviceJson"]
 SOURCES = [
     "protocol/Protocol.kt", "protocol/CompanionClient.kt", "protocol/CommandReply.kt", "protocol/LinkCounters.kt",
+    "protocol/FrameBudget.kt",
     "session/CommandSession.kt", "wardrive/DeviceDiagnostics.kt",
     "transport/Transport.kt", "wardrive/DeviceInfo.kt", "wardrive/CapabilityEvidence.kt",
     "files/DeviceFilePush.kt", "files/FileKinds.kt", "files/FileTemplates.kt",
@@ -70,6 +73,7 @@ def main():
         tests = ROOT / "android/app/src/test/java/app/brucia"
         sources = [str(production / name) for name in SOURCES]
         sources += [str(tests / f"{name}.kt") for name in TESTS]
+        sources += [str(tests / f"{name}.kt") for name in TEST_HELPERS]
         if args.firmware:
             main_file = tmp / 'FirmwareCheck.kt'
             main_file.write_text('''import app.brucia.update.FirmwareImage

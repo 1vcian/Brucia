@@ -16,11 +16,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +41,8 @@ import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.detectEnvironment
 import org.junit.Rule
 import org.junit.Test
+import app.brucia.ui.Button
+import app.brucia.ui.OutlinedButton
 
 /**
  * Renders the real flame theme + the real `ic_flame` drawable to a PNG on the JVM
@@ -266,7 +266,6 @@ private fun DlCard(title: String, meta: String, desc: String, action: String, do
                     progress = { 0.37f },
                     modifier = Modifier.fillMaxWidth(),
                     color = cs.primary,
-                    trackColor = cs.surfaceVariant,
                 )
                 Text("51MB / 139MB", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
@@ -307,7 +306,6 @@ private fun CrackPreview() {
                 progress = { 0.60f },
                 modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
                 color = cs.primary,
-                trackColor = cs.surfaceVariant,
             )
             Spacer(Modifier.height(6.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

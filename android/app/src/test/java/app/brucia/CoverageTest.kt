@@ -75,7 +75,8 @@ class CoverageTest {
 
     @Test fun irButtonRawCli() {
         val raw = IrButton("r", "", "", "", raw = true, frequency = 38000, data = "100 200")
-        assertEquals("ir tx_raw 38000 100 200", raw.toCli())
+        // One quoted samples word: SimpleCLI rejects a third unquoted word for `tx_raw`.
+        assertEquals("ir tx_raw 38000 \"100 200\"", raw.toCli())
     }
 
     // --- CLI parse ---

@@ -20,6 +20,8 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import app.brucia.ui.Button
+import app.brucia.ui.OutlinedButton
 
 /** Great-circle distance in metres between two lat/lon points. */
 private fun haversineM(aLat: Double, aLon: Double, bLat: Double, bLon: Double): Double {

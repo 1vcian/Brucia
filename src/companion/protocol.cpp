@@ -87,7 +87,9 @@ void sendEnvelope(JsonDocument &out) {
         out["d"]["msg"] = "response exceeds frame limit";
     }
     // Recovery diagnostics: every ERR, whichever handler built it, lands in one status bucket.
+#if defined(COMPANION_HAS_DIAG)
     if ((out["t"] | 0) == MSG_ERR) diagNoteErr(out["d"]["code"] | 0u);
+#endif
     String s;
     serializeJson(out, s);
     writeFrame(s);

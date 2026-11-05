@@ -17,12 +17,51 @@ that offloads computation to the phone. Format loosely follows
   nearly full.
 - `ir rx` no longer leaks its reader when no signal arrives.
 - `tools/hw_acceptance.py`: passive, allowlisted acceptance checks for a connected board.
+  First run on a T-Embed CC1101 (2026-11-05): link diag keys are compared as a set (the
+  firmware emits `err` first; JSON key order is not part of the contract), and a board left
+  in Bruce's serial CLI is reported as such instead of "framing lost".
+- Companion link fixes from the first hardware acceptance run (T-Embed CC1101, 2026-11-05;
+  not yet re-verified on hardware):
+  - Large frames from the app could be lost: the firmware's serial RX buffer (1024 bytes on
+    PSRAM boards, 256 without) dropped whatever arrived while the companion loop was busy, so a
+    1.4 KB upload chunk never got a reply. The buffer is now sized at boot to hold a whole frame:
+    8448 bytes on PSRAM boards (+7.4 KB internal RAM), 2048 bytes on boards without PSRAM
+    (+1.8 KB). This also applies to Bruce's serial CLI (fewer dropped bytes, nothing else
+    changes). CAPS reports the safe frame size as `rx_max`; the app and the acceptance runner
+    size upload chunks and speaker/FM audio frames to it, assume 768 bytes for uploads with
+    older firmware, and refuse single commands above it instead of losing them.
+  - Device text in the framed stream (for example `cc1101 Connection OK` when Sub-GHz receive
+    starts) no longer drops the link: the app and the runner skip it and resync on the next
+    frame, counting the skipped bytes ("noise bytes" in Diagnostics, a warning in runner
+    reports). The Sub-GHz, NFC (EMV), IR receive/raw send, BLE spam/BadBLE, FM and NRF24
+    debug prints on companion paths are silent in companion mode, and ESP-IDF log output is
+    muted until companion mode exits. Bruce's own output outside companion mode is unchanged.
+- CI runs on a pinned `ubuntu-24.04` image instead of `ubuntu-latest`.
 - Contributor setup documented from a fresh clone (prerequisites and exact steps).
 - Android build toolchain updated (Gradle 9.2.1, AGP 8.13.2, Kotlin 2.4.21, Room 2.8.5,
   location services 21.4.0); database schema unchanged.
+- Jetpack Compose updated (BOM 2026.06.01: Compose UI 1.11.4, Material3 1.4.0) with
+  AndroidX lifecycle 2.10.0. Progress bars and sliders use the new Material3 design
+  (rounded track with a gap and an end dot) drawn in the Brucia colors: the accent on a
+  dark accent-tinted track. Buttons, cards, switches, dialogs and menus keep their
+  previous colors; outlined buttons keep accent-colored labels. Copy actions use the
+  current Compose clipboard API.
 - Companion firmware code is built without C++ exceptions (5-12 KB smaller depending on
   the board); a post-link check fails the build if any exception handler elsewhere in the
   firmware were lost.
+- LITE firmware builds (the `LAUNCHER_*` boards and `m5stack-core4mb`) leave out five
+  companion extras to free app-slot space: the MIFARE key check, the NRF24 commands, the
+  companion IR commands (TV-B-Gone, IR receive/raw send, IR jammer), the BLE GATT explorer
+  and `diag`. Bruce's own menus and CLI are unchanged, and so are full builds. CAPS reports
+  the absence (`features.<group>: false`, `caps.nrf24: false`) and those commands answer
+  ERR 501. The app disables these actions with a reason; on LITE firmware it sends IR
+  receive and raw IR replay through Bruce's `ir rx` / `ir tx_raw` CLI instead.
+  LAUNCHER_CYD-2432S028: 2,509,008 -> 2,488,848 B (98.17% -> 97.38% of its app slot);
+  m5stack-core4mb 14,352 B smaller. Not tested on hardware.
+- Replaying a saved raw IR button through Bruce's `ir tx_raw` CLI now quotes the samples
+  (`ir tx_raw 38000 "9000 4500 ..."`); unquoted, Bruce's CLI parser rejected every raw
+  signal with more than one duration. Raw items and geo-signals saved earlier are rewritten
+  to the quoted form when replayed (stored data unchanged).
 
 ## [0.1.4] - 2026-11-05
 

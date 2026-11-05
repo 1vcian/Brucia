@@ -21,6 +21,32 @@ class IrReceiveServiceTest {
         runner.reply(i, ok, out)
     }
 
+    @Test fun liteFirmwareReceivesThroughBruceCliAndStripsItsPrompt() = runBlocking {
+        var cli = true
+        val s = IrReceiveService(this, runner, { connected }, onLearned = { learned += it }, useCli = { cli }) { captured += it }
+        s.receiveOnce()
+        answer(0, true, "Waiting for signal...\n" + NEC_BLOCK + "\nTurning off IR LED\n")
+        until { !s.rxBusy.value }
+        assertEquals("Received: Power (NEC)", s.rxStatus.value)
+        assertEquals(IrButton("Power", "NEC", "04000000", "08000000"), s.rxResult.value)
+        s.captureKey("Vol +")
+        answer(1, true, "Waiting for signal...\n" + RAW_BLOCK + "\nTurning off IR LED\n")
+        until { !s.captureBusy.value }
+        assertEquals("Saved: Vol +", s.captureStatus.value)
+        assertEquals("Vol +", captured.single().name)
+        // CLI timeout (irRxCallback returns false -> SimpleCLI parse false -> ok:false): only the
+        // two status lines arrive -> the generic failure text, not "Turning off IR LED".
+        s.receiveOnce()
+        answer(2, false, "Waiting for signal...\nTurning off IR LED\n")
+        until { !s.rxBusy.value }
+        assertEquals("Receive failed.", s.rxStatus.value)
+        cli = false // full firmware again (e.g. after a reflash): back to the companion command
+        s.receiveOnce()
+        answer(3, true, NEC_BLOCK)
+        until { !s.rxBusy.value }
+        assertEquals(listOf("ir rx", "ir rx", "ir rx", "ir_rx"), runner.calls.map { it.first })
+    }
+
     @Test fun receiveParsesAndHoldsResult() = runBlocking {
         val s = svc()
         s.receiveOnce()

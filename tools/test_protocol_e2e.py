@@ -104,7 +104,7 @@ def diag_valid(d):
     if "psram" in d and not all(_u32(d["psram"].get(k)) for k in ("size", "free", "min_free", "largest")):
         return False
     link = d.get("link")
-    if not isinstance(link, dict) or list(link) != DIAG_LINK_KEYS or list(link["err"]) != DIAG_ERR_KEYS:
+    if not isinstance(link, dict) or set(link) != set(DIAG_LINK_KEYS) or set(link["err"]) != set(DIAG_ERR_KEYS):
         return False
     if not all(_u32(link[k]) for k in DIAG_LINK_KEYS[:-1]) or not all(_u32(v) for v in link["err"].values()):
         return False

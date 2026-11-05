@@ -11,7 +11,9 @@
 #if defined(COMPANION_HAS_FM) && defined(HAS_NS4168_SPKR)
 #define COMPANION_HAS_FM_AUDIO 1
 #endif
-#if defined(USE_NRF24_VIA_SPI)
+// LITE builds (LAUNCHER_* and other app-slot-limited envs) compile the NRF24 companion
+// endpoints out for flash headroom; Bruce's own NRF24 menus are unaffected.
+#if defined(USE_NRF24_VIA_SPI) && !defined(LITE_VERSION)
 #define COMPANION_HAS_NRF24 1
 #endif
 #if defined(USE_CC1101_VIA_SPI)
@@ -25,4 +27,14 @@
 #endif
 #if defined(USE_W5500_VIA_SPI) && !defined(LITE_VERSION)
 #define COMPANION_HAS_ETH 1
+#endif
+
+// Companion-only endpoint groups that LITE builds compile out for app-slot headroom. Only the
+// phone-facing companion layer is dropped; Bruce's own on-device features and CLI stay as they
+// are. CAPS reports each absence (capabilities.cpp) and the commands answer ERR 501.
+#if !defined(LITE_VERSION)
+#define COMPANION_HAS_MIFARE_KEYCHECK 1 // mifare_keycheck (phone-hosted dictionary batches)
+#define COMPANION_HAS_IR_CMDS 1         // ir_tvbgone / ir_rx / ir_tx_raw / ir_jammer (Bruce's `ir` CLI stays)
+#define COMPANION_HAS_GATT 1            // ble_gatt_connect / ble_gatt_read
+#define COMPANION_HAS_DIAG 1            // diag + the link counters behind it
 #endif

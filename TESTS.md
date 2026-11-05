@@ -15,6 +15,38 @@ versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 4
 matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
 
+### Batch 8 (HWLINK) - companion link fixes from the first hardware run, software only
+
+Fixes for the two link defects of the first `hw_acceptance.py` run on the T-Embed (inbound
+frame loss in the serial RX queue; framing lost on `cc1101 Connection OK`). Evidence, all
+simulated or host-side: Android `:app:testDebugUnitTest` 780/780 (109 suites), `lintDebug`
+0 errors (12 pre-existing warnings), `verifyPaparazziDebug` and `assembleDebug` pass;
+`unittest discover` 130 tests, every `tools/test_*.py` passes (incl. new
+`test_firmware_serial_rx.py`, `test_companion_print_hygiene.py`; `test_hw_acceptance.py`
+56/56 with a mock RX queue that drops bytes and injected device noise); website 15/15.
+Firmware builds (vs snapshot 2e2f68ed, same toolchain): T-Embed CC1101 SUCCESS, static RAM
+155,984 B (+8), app 4,310,976 B / 92.65% of slot (+1,520); Cardputer 158,184 B (+8), 84.49%
+(+1,552); core4mb (LITE) 99,576 B (-8), 67.64% (+320); LAUNCHER_CYD 94,472 B (+16), 97.40%
+(+704). AAC noise bounds pass on the first three. The RX buffer is heap, not static RAM. The
+host-runner acceptance below was then run on a T-Embed; the app items remain open.
+
+- [x] Rerun `tools/hw_acceptance.py` on the T-Embed with this firmware: `caps` shows `rx_max`
+      8192 / `rx_buf` 8448; `fs_upload` passes with its 3072-byte first chunk (~4.2 KB frame);
+      `--streams subghz.raw` passes with no noise warning (CC1101 prints guarded); `diag` heap
+      free about 7.4 KB lower than the previous firmware at the same point.
+      2026-11-05, T-Embed CC1101 flashed from the Mac (esptool, factory image, dirty build of
+      snapshot 2e2f68ed + batch 8 working tree), report hw-acceptance-20261105T103009045Z:
+      12/12 PASS. caps rx_max 8192 / rx_buf 8448; fs_upload 2 chunks (largest 3072 raw bytes),
+      commit, read-back and remove verified; streams wifi.probe/wifi.sta/subghz.raw ON/OFF ACKed
+      and silent after OFF, 0 noise bytes, 0 resyncs; ping 200/200 median 3.02 ms p99 4.18 ms,
+      burst 20/20 in order; heap free 115,599 B at run start vs 123,175 B on the previous
+      firmware (-7,576 B), stable 102,695 B over 20 diag calls; diag counters rx +260 = sent,
+      tx +267 = received, no rejects. Limits: the three streams saw 0 events in 5 s each, so
+      receive itself is not demonstrated (no probe traffic or Sub-GHz source was arranged); the
+      app was not involved (host runner only).
+- [ ] App: upload a file larger than 3 KB to the device; Diagnostics shows "0 noise bytes" after
+      Sub-GHz Listen on/off; speaker PCM/SSTV transmit still plays.
+
 ### Batches 1-4 - verify on hardware
 - [ ] Run `python3 tools/hw_acceptance.py --port <port>` first (passive, allowlisted; see
       docs/HARDWARE_VERIFICATION.md) and attach its report; it covers the protocol side of

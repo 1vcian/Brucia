@@ -6,6 +6,7 @@ import app.brucia.protocol.Kind
 import app.brucia.session.CommandSession
 import app.brucia.transport.Transport
 import app.brucia.wardrive.DeviceCaps
+import app.brucia.wardrive.DeviceFeatures
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -52,6 +53,37 @@ class CommandCapabilitiesTest {
             "clock_get", "storage list /", "fs_read /a", "theme_set ffff", "companion_exit", "script_run print('x')")) {
             CommandCapabilities.check(cmd, null)
         }
+    }
+
+    @Test fun liteFirmwareRejectsOnlyItsCompiledOutCommandsWithTheReason() {
+        val caps = DeviceCaps(nfc = true, ir = true, ble = true, wifi = true)
+        val lite = DeviceFeatures.fromJson(JSONObject().put("mifare_keycheck", false)
+            .put("ir_cmds", false).put("ble_gatt", false).put("diag", false))
+        val omitted = mapOf(
+            "mifare_keycheck A0A1A2A3A4A5,FFFFFFFFFFFF" to DeviceFeatures.MIFARE_KEYCHECK,
+            "ir_rx" to DeviceFeatures.IR_CMDS, "ir_tvbgone eu" to DeviceFeatures.IR_CMDS,
+            "ir_tx_raw 38 9000,4500" to DeviceFeatures.IR_CMDS, "ir_jammer 2" to DeviceFeatures.IR_CMDS,
+            "ble_gatt_connect AA:BB:CC:DD:EE:FF" to DeviceFeatures.BLE_GATT,
+            "ble_gatt_read AA:BB:CC:DD:EE:FF 2a00" to DeviceFeatures.BLE_GATT,
+        )
+        for ((cmd, group) in omitted) {
+            assertEquals(cmd, group, CommandCapabilities.firmwareGroup(cmd))
+            val e = runCatching { CommandCapabilities.check(cmd, caps, lite) }.exceptionOrNull()
+            assertEquals(cmd, DeviceFeatures.OMITTED_REASON, e?.message)
+            // Full builds / older firmware (no flags) and a missing features object still send it.
+            CommandCapabilities.check(cmd, caps, DeviceFeatures())
+            CommandCapabilities.check(cmd, caps, null)
+        }
+        // Bruce's own CLI and the rest of each tool stay usable on LITE (the app's fallbacks).
+        for (cmd in listOf("ir rx", "ir tx NEC 04000000 08000000", "ir tx_raw 38000 \"9000 4500\"",
+            "rfid read", "nfc_ndef_push text hi", "srix_read 5", "ble_spam 3", "ble_ibeacon 3",
+            "mifare_keycheck_stop", "mifare_nested", "wifi_connect lab")) {
+            assertNull(cmd, CommandCapabilities.firmwareGroup(cmd))
+            CommandCapabilities.check(cmd, caps, lite)
+        }
+        // Hardware gating still comes first.
+        val e = runCatching { CommandCapabilities.check("ir_rx", DeviceCaps(), lite) }.exceptionOrNull()
+        assertEquals("No confirmed hardware: ir", e?.message)
     }
 
     @Test fun whitespaceAndArgumentsCannotChangeTheHardwareFamily() {

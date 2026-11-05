@@ -81,7 +81,10 @@ void bleService() {
     bleScan->clearResults();
 }
 
+#if defined(COMPANION_HAS_GATT)
 // --- Brucia BLE GATT explorer (BLE central) ---------------------------------------
+// LITE builds compile this explorer out for app-slot headroom (config.h); CAPS then reports
+// features.ble_gatt:false and both commands answer ERR 501.
 // Connect to a peripheral by MAC, walk its GATT table, read a characteristic. NimBLE
 // is always compiled in, so no board macro is needed. These share the single BLE
 // controller with the ble.scan stream, so each op stops the scan first (bleStop) and
@@ -230,6 +233,7 @@ static void runBleGattRead(const String &args, uint32_t id) {
     if (printable) outMsg += " text=" + txt;
     companionAckMsg(id, true, outMsg.c_str());
 }
+#endif // COMPANION_HAS_GATT
 
 #if !defined(LITE_VERSION)
 // --- Brucia Bad BLE (Ducky over BLE HID): headless, bounded runner ----------------
@@ -457,12 +461,20 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
         //   ble_gatt_connect <mac>            (discover services+chars)
         //   ble_gatt_read <mac> <char_uuid>   (read one characteristic)
         if (cmdStr.startsWith("ble_gatt_connect ")) {
+#if defined(COMPANION_HAS_GATT)
             runBleGattConnect(cmdStr.substring(17), id);
+#else
+            sendErr(id, 501, "ble_gatt not available in this (lite) build");
+#endif
             break;
         }
 
         if (cmdStr.startsWith("ble_gatt_read ")) {
+#if defined(COMPANION_HAS_GATT)
             runBleGattRead(cmdStr.substring(14), id);
+#else
+            sendErr(id, 501, "ble_gatt not available in this (lite) build");
+#endif
             break;
         }
 

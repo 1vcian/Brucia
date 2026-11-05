@@ -2,18 +2,19 @@
 #include "core/mykeyboard.h"
 #include "internal.h"
 #include <globals.h>
-#if defined(COMPANION_HAS_IR)
+#if defined(COMPANION_HAS_IR) && defined(COMPANION_HAS_IR_CMDS)
 #include "modules/ir/TV-B-Gone.h"
 #include "modules/ir/custom_ir.h"
 #include "modules/ir/ir_read.h"
 #endif
 
-#if defined(COMPANION_HAS_IR)
+#if defined(COMPANION_HAS_IR) && defined(COMPANION_HAS_IR_CMDS)
 #include "modules/ir/ir_jammer.h"
 #endif
 
 namespace brucia {
 namespace companion {
+#if defined(COMPANION_HAS_IR_CMDS)
 // --- IR companion commands (parity with Bruce's onboard IR) ----------------------------
 // Reuse Bruce's own IR code; on boards without IR the handlers compile to an ok:false reply.
 
@@ -145,6 +146,19 @@ bool dispatchInfraredCommand(const CommandRequest &request) {
     } while (false);
     return true;
 }
+#else  // !COMPANION_HAS_IR_CMDS
+// LITE builds compile these companion IR endpoints out for app-slot headroom (config.h). Bruce's
+// own IR menus and `ir` CLI are unchanged; CAPS keeps caps.ir and reports features.ir_cmds:false.
+bool dispatchInfraredCommand(const CommandRequest &request) {
+    const String &cmdStr = request.command;
+    if (cmdStr == "ir_rx" || cmdStr == "ir_tvbgone" || cmdStr.startsWith("ir_tvbgone ") ||
+        cmdStr.startsWith("ir_tx_raw ") || cmdStr.startsWith("ir_jammer")) {
+        sendErr(request.id, 501, "ir companion commands not available in this (lite) build");
+        return true;
+    }
+    return false;
+}
+#endif // COMPANION_HAS_IR_CMDS
 
 } // namespace companion
 } // namespace brucia

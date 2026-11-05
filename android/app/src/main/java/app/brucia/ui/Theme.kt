@@ -1,9 +1,14 @@
 package app.brucia.ui
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.unit.dp
 
 // Brucia "flame" palette - the UI has to burn.
 val Ember = Color(0xFFFF6D1A)
@@ -29,17 +34,39 @@ private val BruciaColors = darkColorScheme(
     onSurfaceVariant = Muted,
     error = Color(0xFFFF5449),
     outline = Color(0xFF3A3A3F),
+    // Material3 1.4 draws Card and the unchecked Switch track with surfaceContainerHighest
+    // (1.2 used surfaceVariant): keep them on the same Brucia grey.
+    surfaceContainerHighest = SurfHi,
+)
+
+/**
+ * Roles that Material3 1.4 components read where 1.2 used other ones:
+ * - surfaceContainerHigh (AlertDialog) and surfaceContainer (DropdownMenu) replace the
+ *   surface tinted by surfaceTint at 6 dp / 3 dp tonal elevation that 1.2 drew; same
+ *   colors as before (surfaceTint stays Ember, also with a device accent, as before).
+ * - secondaryContainer is the track of sliders and progress indicators: a dark blend of
+ *   the surface and primary (Ember or the device accent), visible on the background
+ *   and on cards.
+ */
+private fun ColorScheme.withBruciaContainers(): ColorScheme = copy(
+    surfaceContainerHigh = surfaceColorAtElevation(6.dp),
+    surfaceContainer = surfaceColorAtElevation(3.dp),
+    secondaryContainer = lerp(Surf, primary, 0.3f),
+    onSecondaryContainer = OnDark,
 )
 
 @Composable
 fun BruciaTheme(accent: Color? = null, content: @Composable () -> Unit) {
     // When connected, the device's UI theme wins: its primary color becomes the app accent so the
     // whole UI (buttons, titles, the flame) matches the device (e.g. a pink device -> a pink app).
-    val scheme = if (accent == null) BruciaColors else BruciaColors.copy(
-        primary = accent,
-        secondary = accent,
-        tertiary = accent,
-    )
+    val scheme = remember(accent) {
+        val base = if (accent == null) BruciaColors else BruciaColors.copy(
+            primary = accent,
+            secondary = accent,
+            tertiary = accent,
+        )
+        base.withBruciaContainers()
+    }
     MaterialTheme(colorScheme = scheme, content = content)
 }
 

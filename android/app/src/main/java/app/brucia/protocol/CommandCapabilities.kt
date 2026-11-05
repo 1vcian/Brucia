@@ -1,8 +1,10 @@
 package app.brucia.protocol
 
 import app.brucia.wardrive.DeviceCaps
+import app.brucia.wardrive.DeviceFeatures
 
-/** Hardware preflight for native companion commands and the app's radio CLI aliases.
+/** Hardware preflight for native companion commands and the app's radio CLI aliases, plus the
+ * companion endpoint groups a LITE firmware reports as compiled out (CAPS `features.<group>: false`).
  * Unknown CLI/script contents remain the firmware's responsibility, not a sandbox.
  * Stop commands are always permitted on an open session so lost CAPS cannot block cleanup.
  */
@@ -34,8 +36,21 @@ object CommandCapabilities {
         return if (verb == "fm_audio_begin" && words.getOrNull(2) == "mic") setOf(cap, "mic") else setOf(cap)
     }
 
-    fun check(command: String, caps: DeviceCaps?) {
+    /** The companion endpoint group (DeviceFeatures.OMITTABLE) a LITE build may compile out, or null. */
+    fun firmwareGroup(command: String): String? {
+        val verb = command.trim().split(Regex("\\s+"), limit = 2).firstOrNull().orEmpty()
+        return when {
+            verb == "mifare_keycheck" -> DeviceFeatures.MIFARE_KEYCHECK
+            verb in setOf("ir_rx", "ir_tvbgone", "ir_tx_raw", "ir_jammer") -> DeviceFeatures.IR_CMDS
+            verb.startsWith("ble_gatt_") -> DeviceFeatures.BLE_GATT
+            else -> null
+        }
+    }
+
+    fun check(command: String, caps: DeviceCaps?, features: DeviceFeatures? = null) {
         val missing = required(command).filter { caps?.allows(it) != true }
         check(missing.isEmpty()) { "No confirmed hardware: ${missing.joinToString(", ")}" }
+        val group = firmwareGroup(command)
+        check(group == null || features?.omits(group) != true) { DeviceFeatures.OMITTED_REASON }
     }
 }

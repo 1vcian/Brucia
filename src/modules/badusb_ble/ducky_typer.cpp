@@ -46,10 +46,10 @@ static const uint8_t FUNC_MACS[4][6] = {
 void setBleMac(const uint8_t *mac) {
 #ifdef ESP_MAC_BT
     esp_iface_mac_addr_set(mac, ESP_MAC_BT);
-    Serial.println("[setBleMac] Set MAC using esp_iface_mac_addr_set");
+    if (!g_companionActive) Serial.println("[setBleMac] Set MAC using esp_iface_mac_addr_set");
 #else
     esp_base_mac_addr_set(mac);
-    Serial.println("[setBleMac] Set MAC using esp_base_mac_addr_set");
+    if (!g_companionActive) Serial.println("[setBleMac] Set MAC using esp_base_mac_addr_set");
 #endif
 }
 
@@ -68,20 +68,20 @@ void cleanupDuckyBLE(HIDInterface *&hid) {
         // Stop advertising
         if (NimBLEDevice::getAdvertising()) {
             NimBLEDevice::getAdvertising()->stop();
-            Serial.println("[cleanupDuckyBLE] Advertising stopped");
+            if (!g_companionActive) Serial.println("[cleanupDuckyBLE] Advertising stopped");
         }
         delay(50);
 
         // If this was the active instance, clear the pointer
         if (hid_ble == hid) {
             hid_ble = nullptr;
-            Serial.println("[cleanupDuckyBLE] Cleared hid_ble pointer");
+            if (!g_companionActive) Serial.println("[cleanupDuckyBLE] Cleared hid_ble pointer");
         }
 
         // Decrement active instance count
         if (activeBLEInstances > 0) {
             activeBLEInstances--;
-            Serial.printf("[cleanupDuckyBLE] Active BLE instances: %d\n", activeBLEInstances);
+            if (!g_companionActive) Serial.printf("[cleanupDuckyBLE] Active BLE instances: %d\n", activeBLEInstances);
         }
 
         // CRITICAL: Only call end() if this is the LAST instance
@@ -89,24 +89,24 @@ void cleanupDuckyBLE(HIDInterface *&hid) {
         if (activeBLEInstances == 0) {
             // Last instance - call end() to fully clean up
             bleKb->end();
-            Serial.println("[cleanupDuckyBLE] Last instance: BleKeyboard::end() called (deinits BLE)");
+            if (!g_companionActive) Serial.println("[cleanupDuckyBLE] Last instance: BleKeyboard::end() called (deinits BLE)");
         } else {
             // Not the last instance - just delete the object without calling end()
-            Serial.println("[cleanupDuckyBLE] Not last instance: deleting HID without end()");
+            if (!g_companionActive) Serial.println("[cleanupDuckyBLE] Not last instance: deleting HID without end()");
         }
 
         // Delete the wrapper object
         delete hid;
         hid = nullptr;
-        Serial.println("[cleanupDuckyBLE] hid deleted");
+        if (!g_companionActive) Serial.println("[cleanupDuckyBLE] hid deleted");
     }
 
     // Only deinit BLE when NO instances are left (safety)
     if (activeBLEInstances == 0 && NimBLEDevice::isInitialized()) {
-        Serial.println("[cleanupDuckyBLE] Last instance, ensuring BLE deinit...");
+        if (!g_companionActive) Serial.println("[cleanupDuckyBLE] Last instance, ensuring BLE deinit...");
         NimBLEDevice::deinit();
         delay(50);
-        Serial.println("[cleanupDuckyBLE] BLE stack deinitialized");
+        if (!g_companionActive) Serial.println("[cleanupDuckyBLE] BLE stack deinitialized");
     }
 
     BLEConnected = false;
@@ -117,25 +117,25 @@ void cleanupDuckyBLE(HIDInterface *&hid) {
 // ============================================================================
 
 void safeCleanupDuckyBLE(HIDInterface *&hid) {
-    Serial.println("[safeCleanupDuckyBLE] First cleanup pass...");
+    if (!g_companionActive) Serial.println("[safeCleanupDuckyBLE] First cleanup pass...");
     cleanupDuckyBLE(hid);
     delay(200);
 
     // Second pass to catch anything lingering
     if (hid != nullptr) {
-        Serial.println("[safeCleanupDuckyBLE] Second cleanup pass...");
+        if (!g_companionActive) Serial.println("[safeCleanupDuckyBLE] Second cleanup pass...");
         cleanupDuckyBLE(hid);
         delay(200);
     }
 
     // Extra safety: if BLE is still initialized, force deinit
     if (NimBLEDevice::isInitialized()) {
-        Serial.println("[safeCleanupDuckyBLE] Force deinitializing BLE...");
+        if (!g_companionActive) Serial.println("[safeCleanupDuckyBLE] Force deinitializing BLE...");
         NimBLEDevice::deinit();
         delay(200);
     }
 
-    Serial.println("[safeCleanupDuckyBLE] Cleanup complete");
+    if (!g_companionActive) Serial.println("[safeCleanupDuckyBLE] Cleanup complete");
 }
 
 // ============================================================================
@@ -580,10 +580,10 @@ DuckyCombination *findDuckyCombination(const char *cmd) {
 // ============================================================================
 
 void ducky_startKb(HIDInterface *&hid, bool ble, int functionId) {
-    Serial.printf("\nducky_startKb: BLE=%d, hid=%p, func=%d\n", ble, hid, functionId);
+    if (!g_companionActive) Serial.printf("\nducky_startKb: BLE=%d, hid=%p, func=%d\n", ble, hid, functionId);
 
     if (hid == nullptr) {
-        Serial.printf("Creating new HID instance for BLE=%d\n", ble);
+        if (!g_companionActive) Serial.printf("Creating new HID instance for BLE=%d\n", ble);
         if (ble) {
             if (!radioHasMemForBle()) {
                 displayError("Low RAM: free WiFi/SD first", true);
@@ -593,11 +593,13 @@ void ducky_startKb(HIDInterface *&hid, bool ble, int functionId) {
 
             // Set function-specific MAC address (Logitech OUIs)
             if (functionId >= 0 && functionId < 4) {
-                Serial.printf("[ducky_startKb] Setting MAC for function %d: ", functionId);
-                for (int i = 0; i < 6; i++) {
-                    Serial.printf("%02X%s", FUNC_MACS[functionId][i], i < 5 ? ":" : "");
+                if (!g_companionActive) {
+                    Serial.printf("[ducky_startKb] Setting MAC for function %d: ", functionId);
+                    for (int i = 0; i < 6; i++) {
+                        Serial.printf("%02X%s", FUNC_MACS[functionId][i], i < 5 ? ":" : "");
+                    }
+                    Serial.println();
                 }
-                Serial.println();
                 setBleMac(FUNC_MACS[functionId]);
                 delay(50);
             }
@@ -606,34 +608,34 @@ void ducky_startKb(HIDInterface *&hid, bool ble, int functionId) {
             String deviceName = bruceConfigPins.bleName;
             if (deviceName.isEmpty()) { deviceName = "keyboard_99"; }
 
-            Serial.printf("[ducky_startKb] Device name: %s\n", deviceName.c_str());
+            if (!g_companionActive) Serial.printf("[ducky_startKb] Device name: %s\n", deviceName.c_str());
 
             // Check if BLE needs initialization
             if (!NimBLEDevice::isInitialized()) {
-                Serial.println("[ducky_startKb] Initializing BLE stack...");
+                if (!g_companionActive) Serial.println("[ducky_startKb] Initializing BLE stack...");
                 NimBLEDevice::init(std::string(deviceName.c_str()));
-                Serial.println("[ducky_startKb] BLE stack initialized");
+                if (!g_companionActive) Serial.println("[ducky_startKb] BLE stack initialized");
                 delay(50);
             } else {
-                Serial.println("[ducky_startKb] BLE stack already initialized");
+                if (!g_companionActive) Serial.println("[ducky_startKb] BLE stack already initialized");
                 // Stop any existing advertising
                 if (NimBLEDevice::getAdvertising()) {
                     NimBLEDevice::getAdvertising()->stop();
-                    Serial.println("[ducky_startKb] Stopped existing advertising");
+                    if (!g_companionActive) Serial.println("[ducky_startKb] Stopped existing advertising");
                 }
             }
 
             // Increment active instance count
             activeBLEInstances++;
-            Serial.printf("[ducky_startKb] Active BLE instances: %d\n", activeBLEInstances);
+            if (!g_companionActive) Serial.printf("[ducky_startKb] Active BLE instances: %d\n", activeBLEInstances);
 
             // Create HID service
             hid = new BleKeyboard(deviceName, "BruceFW", 100);
-            Serial.println("[ducky_startKb] New BleKeyboard created");
+            if (!g_companionActive) Serial.println("[ducky_startKb] New BleKeyboard created");
 
             // Set hid_ble to point to the active instance
             hid_ble = hid;
-            Serial.printf("[ducky_startKb] hid_ble now points to instance %p\n", hid_ble);
+            if (!g_companionActive) Serial.printf("[ducky_startKb] hid_ble now points to instance %p\n", hid_ble);
 
             const uint8_t *layout =
                 (const uint8_t *)pgm_read_ptr(&keyboardLayouts[bruceConfig.badUSBBLEKeyboardLayout]);
@@ -648,7 +650,7 @@ void ducky_startKb(HIDInterface *&hid, bool ble, int functionId) {
             // Force a clean state
             hid->releaseAll();
 
-            Serial.println("[ducky_startKb] HID service started, advertising");
+            if (!g_companionActive) Serial.println("[ducky_startKb] HID service started, advertising");
             return;
         } else {
 #if defined(USB_as_HID)
@@ -671,7 +673,7 @@ void ducky_startKb(HIDInterface *&hid, bool ble, int functionId) {
 
     if (ble) {
         if (hid->isConnected()) {
-            Serial.println("BLE Already connected, updating settings");
+            if (!g_companionActive) Serial.println("BLE Already connected, updating settings");
             const uint8_t *layout =
                 (const uint8_t *)pgm_read_ptr(&keyboardLayouts[bruceConfig.badUSBBLEKeyboardLayout]);
             hid->setLayout(layout);
@@ -679,7 +681,7 @@ void ducky_startKb(HIDInterface *&hid, bool ble, int functionId) {
             return;
         }
 
-        Serial.println("Starting/restarting BLE advertising");
+        if (!g_companionActive) Serial.println("Starting/restarting BLE advertising");
         const uint8_t *layout =
             (const uint8_t *)pgm_read_ptr(&keyboardLayouts[bruceConfig.badUSBBLEKeyboardLayout]);
         hid->begin(layout);

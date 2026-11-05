@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import app.brucia.protocol.FrameBudget
 import java.io.IOException
 
 /** Whether the device reports per-frame accepted counts (fm_audio_data `accepted`). */
@@ -17,8 +18,21 @@ data class PcmStreamState(
     /** Device-reported cumulative loss after acceptance (FM `lost`); 0 when unknown. */
     val deviceDropped: Long = 0,
 )
-data class PcmStreamSpec(val fmKHz: Int? = null, val deviceMic: Boolean = false) {
-    val frameSamples: Int get() = if (fmKHz == null) 2048 else 1024
+/**
+ * [rxMax] is CAPS `rx_max`: data frames are sized to fit the device's RX buffer; null (older
+ * firmware) keeps 2048 speaker / 1024 FM samples per frame.
+ */
+data class PcmStreamSpec(val fmKHz: Int? = null, val deviceMic: Boolean = false, val rxMax: Int? = null) {
+    val frameSamples: Int get() =
+        if (fmKHz == null) FrameBudget.pcmFrameSamples(2048, rxMax, SPKR_BODY.length)
+        else FrameBudget.pcmFrameSamples(1024, rxMax, FM_BODY.length)
+
+    private companion object {
+        // Bodies of the data frames without their base64 (SessionPcmLink): {"pcm":..,"cmd":..}
+        // as built by CommandSession.awaitFields, and the FM CMD line.
+        const val SPKR_BODY = """{"pcm":"","cmd":"spkr_pcm_data"}"""
+        const val FM_BODY = """{"cmd":"fm_audio_data "}"""
+    }
 }
 data class PcmStreamSource(val reader: PcmSource.PcmReader, val totalSamples: Long? = null)
 

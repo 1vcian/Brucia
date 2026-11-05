@@ -50,7 +50,7 @@ Release correctness and physical acceptance gates still apply before publication
 | S02 | P0 | IN_PROGRESS | 2026-11-04 Claude subagent, clean worktree, no keystore access: `clean :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:lintDebug` (JDK 23) BUILD SUCCESSFUL, KSP fresh, 584/584, lint 0 errors (some compile tasks restored from the global Gradle build cache). Debug+release: app.brucia 0.1.3/1000103, minSdk 26, targetSdk 34; release unsigned as expected. Emulator (Medium_Phone_API_36.1): debug->debug `adb install -r` of 59f6f749 -> current kept Room v3 rows, identity hash, prefs and files; relaunch without crash (same versionCode, no UI drive). Signed release -> debug correctly refused (signature). CI gaps: Temurin 21 vs local 23, no assembleRelease, runner-signed debug APK only, no SDK setup step. Remaining: signed release build/verify and signed release->release upgrade (keystore), real versionCode upgrade, actual CI run. Batch 2 CI: all actions pinned to full SHAs (verified with git ls-remote against tags), Temurin 21 kept and documented, explicit android-actions/setup-android (platform 34, build-tools 34.0.0), CI builds unsigned assembleRelease, `tools/check_apk_identity.py` (+13 host tests) checks applicationId/VERSION/minSdk/targetSdk/debuggable on both APKs, artifacts renamed, iButton host test added to CI. Not executed on GitHub yet. Batch 4 (EMU, emulator API 36, debug signing only): real versionCode upgrade 1000103 -> 1000104 (VERSION bumped only for the build, not kept) kept Room v3 identity hash and all seeded rows, prefs and files byte-identical, no app FATAL; downgrade refused with INSTALL_FAILED_VERSION_DOWNGRADE. Still open: signed release build and release->release upgrade (keystore), actual GitHub CI run. 2026-11-05: 0.1.4 published to BruciaDev (release.sh). Batch 5 (EMU2, emulator API 36, published APKs, no keystore access): v0.1.3 and v0.1.4 signed by the same certificate (SHA-256 deac265d...c84b, v2 scheme); 0.1.3 -> 0.1.4 `install -r` kept firstInstallTime, a macro saved through the UI and the location grant, no FATAL; debug over release refused (INSTALL_FAILED_UPDATE_INCOMPATIBLE). Release Room/prefs not directly observable (non-debuggable). First real CI run (0.1.4 push): android and protocol-e2e jobs PASS; firmware jobs built but the AAC noise-bounds test FAILED on all three boards - fresh-checkout patch-ordering defect, fixed in batch 5 (see Additional retained review points); CI rerun pending on the next push. Remaining: targetSdk 35 signed release upgrade on a phone. CI rerun on the batch 5 push (4743f248): all jobs PASS (firmware x3 incl. AAC noise bounds on a fresh runner, android, protocol-e2e); artifacts uploaded. Note: ubuntu-latest moves to Ubuntu 26 (runner annotation); consider pinning the runner image. |
 | S03 | P0 | DONE | 2026-11-04 coordinator: software matrix covers all 50 tools + Theme in APP_CONTROLS_CHECKLIST.md, with CMD/SUB/BURST/LOCAL ownership, requirements, deadlines, input validation and explicit evidence/limits. Added central CommandCapabilities and StreamSubscriptions; uncertain ACK outcomes remain eligible for OFF cleanup. Fixed BurstLoop/WIDS cancellation/startup, invalid duration waits, LoRa Stop/supersession, mixed-tool gates and failed-capture persistence. 24 new regressions; full cached Kotlin compilation 158 files, 557 tests / 88 suites passed. Tab matrix matches source (51/51); physical checkboxes untouched. Gradle/lint still denied global lock. Remaining Android/job/firmware boundaries stay S02/S04–S11; S04 subsequently completed below; next S06, do not auto-chain. |
 | S04 | P0 | DONE | 2026-11-04 coordinator: additive transactional_uploads CAPS and fs_upload_* protocol; app validates token/cumulative bytes/commit CRC, never falls back to truncate, and reports uncertain commit outcomes. Firmware stages/verifies before promotion; LittleFS rename, FAT journal/backup/rollback with retained previous bytes on recovery failure. Reserved paths and concurrent legacy writes reject; idle expiry starts after slow IO. 41 UBSan engine scenarios plus real-handler fixtures, 563 cached JVM tests / 88 suites / 158 production files; three board builds (see TESTS.md). FAT visibility/power-loss durability, card swaps and Android provider rollback are not certified. No worker launched; next S06 only on explicit request. |
-| S05 | P0 | BLOCKED | Final app/device acceptance and flash recovery; phone, board and appropriate peripherals required. |
+| S05 | P0 | BLOCKED | Final app/device acceptance and flash recovery; phone, board and appropriate peripherals required. 2026-11-05: first `tools/hw_acceptance.py` run on the T-Embed CC1101 found an inbound frame loss (RX queue too small for upload chunks) and a framing loss on `cc1101 Connection OK`; both fixed in software in batch 8 (HWLINK, see "S05 helper" below). Rerun on the same board with the batch 8 firmware: 12/12 PASS (upload with 3072-byte chunks, subghz.raw with 0 noise bytes, heap -7,576 B as predicted; report hw-acceptance-20261105T103009045Z, details in TESTS.md). Still open: the app on a phone, live RX traffic, TX/RF/NFC/IR peripherals, flash recovery. |
 | S06 | P1 NEXT | IN_PROGRESS | 2026-11-04 PortLease/ownership slice integrated: `transport/UsbOwnership` (PortLease close-once, FlashPortOwner token per flash with 90 s handoff deadline, stale/duplicate/expired ports closed on arrival, `launchFlashOwned` releases on cancellation-before-start via invokeOnCompletion; UsbPermissionRequests correlated by process-wide id + EXTRA_DEVICE name, 60 s deadline). MainActivity: one permission receiver onCreate..onDestroy, unique request codes, onDestroy cancels pending requests and aborts a waiting flash; Connect/openPort refused while flashing; transport construction failure closes the connection. VM: `flashEnteringBootloader()` returns a token, `flashFirmware(token, io, lease)` adopts by identity (no blanket isFlashing rejection), `flashAbort` ignores stale tokens, `onCleared` shuts the owner. Tests: UsbOwnershipTest 14. Behavior change: Activity recreation during the permission wait aborts the flash. Open: flash still calls `vm.disconnect()` (service/wake lock stopped during flash), companion-link vs flash arbitration (slice B), port.close()/connection semantics (D4/D5). No device evidence. Batch 2 (slice B): FlashPortOwner now arbitrates the USB device between companion link and flash by token (Connect/attach auto-connect via beginCompanionLink/connect(token)/abortCompanionLink; second open refused, flash preempts and closes the companion port, abandoned open expires after 10 s; "USB device busy" toast). D6a fixed: flash no longer calls disconnect(); ConnectionService switches to owner `flash:<token>` (keeps wake lock) and every flash end path (finish/abort/expiry/late handoff/cancel-before-start/onCleared) stops it once via onEnded. D4/D5 evidence from usb-serial-for-android 3.8.1 bytecode: `CommonUsbSerialPort.close()` closes the UsbDeviceConnection (l.155), `open()` throws "Already open" before taking the connection (l.114-115); new `releaseUsbPort(openedHere)` avoids killing a live link on a failed second open. onCleared disconnects before closing the owner. UsbOwnershipTest 22. Device-only: wake lock through a real flash, claimInterface on two connections, close() idempotency API 26-35. |
 | S07 | P1 | BLOCKED | Obtain real Room v1/v2 schemas and fixtures before supporting historical migrations. |
 | S08 | P1 | IN_PROGRESS | Long-session memory/queue/drop/Stop tests with deterministic virtual transport; physical stress remains separate. 2026-11-04 batch 2: `SessionStressTest` (6 tests, virtual clock + fake fragmenting/coalescing transport, no sleeps): 5,000 mixed commands with timeouts/cancellation/late replies, 20,000-frame flood incl. 8192-byte and malformed frames (buffer <= 12,292 bytes), 3,000-step SUB model check, 500 Stop-all cycles with rejected/missing/unwritten OFF, 300 reconnects with residual callbacks, exact 8000 ms deadlines. All pending maps/buffers/timers asserted empty per round; mutation check (5 injected leaks) caught every one; 5 consecutive runs green. No defect found, no production change. Limits: no app-side drop counter for malformed frames (silently skipped), VM reader loop/disconnect mimicked not executed, real threads/heap/USB out of scope. Batch 4 (DIAG): app-side `protocol/LinkCounters` now counts malformed and invalid-length frames (previously skipped silently), timeouts and unmatched replies; shown in the Diagnostics card and exports. |
@@ -230,12 +230,31 @@ compatibility remain unscored until measured separately.
   play-services-location 21.4.0; Kotlin warnings 0; Paparazzi snapshots byte-identical.
   New AGP 8.13 lint findings fixed (UseKtx x10 to KTX forms) or justified per site (Recycle
   x2, false positives on `use {}`). Lint 0 errors / 11 warnings, all held versions: SDK 36
-  (Paparazzi 1.3.5 crashes on the API 36 android.jar), compose-bom (Material3 1.3/1.4 redesign
-  progress bars/sliders and turns 151 OutlinedButton labels grey - DESIGN DECISION pending;
+  (Paparazzi 1.3.5 crashes on the API 36 android.jar), compose-bom (done in batch 7 below;
   the blank-snapshot cause is understood: Paparazzi needs compileSdkVersion = 34 in the test
-  environment for Compose 1.8+), core/activity/lifecycle (go with that step), zxing and
+  environment for Compose 1.8+), core/activity/lifecycle (see batch 7), zxing and
   BouncyCastle (need their own review), org.json (test-only). Gradle 9.3+ breaks Paparazzi
   1.3.5 reports; AGP 9 not attempted.
+  Batch 7 (COMPOSE): compose-bom 2024.06.00 -> 2026.06.01 (Compose UI 1.11.4, Material3
+  1.2.1 -> 1.4.0), lifecycle 2.8.7 -> 2.10.0; newest steps that keep AGP 8.13.2/compileSdk 35
+  (BOM 2026.08+ = UI 1.12 and lifecycle 2.11 need AGP 9.1/compileSdk 37; core-ktx 1.17+ and
+  activity 1.11+ need compileSdk 36, so core-ktx 1.16.0 / activity-compose 1.10.1 stay).
+  Look kept centrally: `ui/BruciaButtons.kt` wraps Button/OutlinedButton/TextButton with
+  1.2 colors (outlined label = primary, 1 dp `outline` border in every state, disabled
+  onSurface 38 %/12 %), screens import them and `BruciaButtonDefaults` (guarded by
+  ButtonThemeUsageTest); Theme sets surfaceContainerHighest = surfaceVariant grey (Card,
+  Switch track), surfaceContainerHigh/surfaceContainer = surface tinted at 6/3 dp (AlertDialog,
+  DropdownMenu as before), secondaryContainer = surface/primary blend (new slider and progress
+  track). Paparazzi compileSdkVersion = 34 workaround was already in the test; snapshots
+  not blank; pixel-exact diff: 13/17 identical, crack/crackDownloads changed only in the
+  progress bar (new design, Brucia track), the two mirror snapshots only in the unthemed
+  letterbox (default light surface FFFBFE -> FEF7FF). Emulator API 36 before/after: home,
+  utilities (switches/fields), updates, support dialog pixel-identical below the status bar;
+  sliders and progress bars changed as intended. Kotlin warnings 0 (LocalClipboardManager ->
+  LocalClipboard; screenHeightDp -> LocalWindowInfo for the two new lint warnings). Lint 0
+  errors / 11 warnings, same categories as before: held versions (compileSdk 36, core-ktx,
+  activity, compose-bom 2026.09, lifecycle 2.11, zxing, org.json, BouncyCastle x2) and
+  OldTargetApi. Room schema unchanged.
 - Concurrent update/install and download cancellation: covered by batch 3 (see S01).
 - Root dependencies are pinned; board-specific overrides and the full environment
   matrix still need coverage. Current builds establish only the documented boards.
@@ -262,6 +281,37 @@ compatibility remain unscored until measured separately.
   the guard fails when the order is wrong. Saved 4.9-12 KB per env (T-Embed 92.62%,
   LAUNCHER_CYD 98.17% so its 99% override stays, CYD 93.77%, lora-pager 92.92%). Other options (LITE compile-outs of keycheck/NRF24/IR/
   diag/GATT, short error codes, NimBLE NDEBUG) need a product decision.
+  Batch 7 (LITE, owner-approved): LITE_VERSION builds compile out the companion layer only for
+  mifare_keycheck, nrf24_*, ir_tvbgone/ir_rx/ir_tx_raw/ir_jammer, ble_gatt_* and diag (+ its
+  counter hooks); group macros in src/companion/config.h. Bruce's menus/CLI untouched (TV-B-Gone,
+  NRF24 menus, `ir rx`/`ir tx_raw` still linked on LITE). LITE CAPS: features.mifare_keycheck/
+  ir_cmds/ble_gatt/diag = literal false (absent = present, so full builds and older firmware are
+  unaffected), no mifare_keycheck_report/_stop, caps.nrf24 false + evidence level none with a
+  detail; the commands answer ERR 501 "... not available in this (lite) build". App: central
+  CommandCapabilities preflight rejects those commands with "Not available on this firmware
+  (compiled out of LITE builds).", key-check/TV-B-Gone/IR-jammer buttons disabled with that
+  reason, GATT Explore hidden; IR receive and raw IR replay fall back to Bruce's `ir rx` /
+  `ir tx_raw` CLI; Diagnostics already shows "not supported by this firmware". Measured on
+  LAUNCHER_CYD-2432S028, cumulative firmware.bin deltas in this order: keycheck -1,680 B,
+  IR -3,568, GATT -9,152, diag -2,192, NRF24 -3,568; total -20,160 (2,509,008 -> 2,488,848 B,
+  98.17% -> 97.38%, 67,056 B free). LTO repartitioning makes single-step deltas approximate
+  (the GATT step includes layout shifts outside companion code). m5stack-core4mb 2,673,872 ->
+  2,659,520 B (-14,352; 68.00% -> 67.64%). T-Embed (4,309,632 B) and Cardputer (4,317,392 B)
+  byte-identical before/after; non-LITE preprocessed companion TUs are token-identical to HEAD
+  for three board macro sets. LAUNCHER_* override lowered to warn 95 / fail 98 (not removed:
+  CYD above 92% and the other 16 LAUNCHER_* envs unmeasured). Host: tools/test_lite_companion.py
+  (preprocessor-checked CAPS/dispatch on LITE vs full, no-op diag hooks, mock --profile lite).
+  Left for a later decision: Brucia's driver-side PN532::mifareKeyCheck (~1 KB, virtual so it
+  stays linked on LITE). Not hardware-tested.
+  Review fix: Bruce's `ir tx_raw` has two positional args and SimpleCLI (rennancockles b23d3779)
+  splits on unquoted spaces, so a third word is "unknown argument"; IrButton.cliRaw now emits
+  one double-quoted samples word (also fixes the pre-existing saved-raw-button replay via
+  toCli on every build; rows saved before are rewritten at replay by IrButton.replayable in
+  the VM's single replayPayload path, used by saved items and geo-signals; no schema change). tools/test_ir_cli_tokenizer.py
+  runs the app tests' literals through the real SimpleCLI C sources when .pio/libdeps exists
+  (cited port otherwise) plus sendRawCommand's split. The LITE `ir rx` fallback reply comes back
+  through commands.cpp routeCommand (CapturingSerialDevice, 3500-char cap) and carries
+  "Waiting for signal..." / "Turning off IR LED" (the `ir` composite callback), which the app strips.
 - Fresh-checkout library patch ordering (batch 5, CIFIX + FRESH): owner-less registry specs
   (`ESP8266Audio@2.4.1`, NTPClient, ESP32Time; also LibSSH-ESP32 and Adafruit Si4713 install
   late) are skipped by `pio pkg install` and installed by the LDF after pre-scripts, so the
@@ -280,6 +330,21 @@ compatibility remain unscored until measured separately.
   board (CAPS/provenance/evidence, ping latency, diag counters, malformed frame, verified file
   read and scratch upload/remove, receive-only streams wifi.probe/wifi.sta/subghz.raw) behind a
   command allowlist; wifi.ap and ble.scan are active scans and are refused. Mock-tested only.
+  First hardware run (T-Embed CC1101, 2026-11-05) found two link defects: (1) a 1.45 KB
+  `fs_upload_chunk` frame was lost (no reply in 3 s; a later abort showed size 0) because the
+  HWCDC RX ISR drops bytes when the 1024-byte RX queue (`SAFE_STACK_BUFFER_SIZE / 4`) is full
+  while the companion loop is busy - app uploads (3072-byte chunks, ~4.2 KB frames) would fail
+  the same way; (2) `SUB subghz.raw on` printed `cc1101 Connection OK` (rf_utils.cpp
+  initRfModule) into the framed stream and the host lost framing. Fixed in software (batch 8,
+  HWLINK): RX buffer sized at boot for a whole frame (PSRAM 8448 B / rx_max 8192, no PSRAM
+  2048 B / rx_max 1792), CAPS `rx_max`/`rx_buf`, app and runner size large frames to it (768
+  without it), host readers resync on `len + {"v":` and count noise, companion-path module
+  prints guarded and IDF logs muted in companion mode (tools/test_companion_print_hygiene.py).
+  Simulated (mock RX queue drops bytes, injected noise); nothing re-verified on hardware until
+  the coordinator reruns the runner. Remaining unguarded companion-reachable prints: speaker/
+  mic (modules/others/audio.cpp, mic.cpp), Ethernet tools, Evil Portal setup and Bruce CLI
+  commands routed through CMD (`ir tx`, `subghz rx/scan/tx_from_file`, ...); the readers
+  resync over them.
 - Test concurrent updates/install requests and cancellation during downloads.
 - Validate capability probes with pin/bus conflicts and firmware Stop/resource
   ownership; distinguish compiled, detected, initialized and tested.

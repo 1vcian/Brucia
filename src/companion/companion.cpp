@@ -9,6 +9,7 @@
 #include "modules/others/qrcode_menu.h"
 #include <WiFi.h>
 #include <brucia_identity.h>
+#include <esp_log.h>
 #include <globals.h>
 
 volatile bool g_enterCompanionRequested = false;
@@ -19,6 +20,16 @@ namespace companion {
 // They auto-restore if the app goes away, so the device never gets stuck dark.
 static bool g_screenOff = false;
 static bool g_ledOff = false;
+
+// ESP-IDF / arduino log output (log_e, ESP_LOGx; CONFIG_ARDUHAL_ESP_LOG routes log_x through
+// esp_log) reaches the same USB serial from any task, also the IDF console's secondary
+// USB-Serial-JTAG output. While companion mode owns the link it would corrupt framing, so it is
+// dropped; the previous writer is restored on exit. Bare printf()/ets_printf are not covered.
+static vprintf_like_t g_prevLogVprintf = nullptr;
+static int companionMutedLog(const char *fmt, va_list args) {
+    if (g_companionActive) return 0;
+    return g_prevLogVprintf ? g_prevLogVprintf(fmt, args) : vprintf(fmt, args);
+}
 
 void companionSetScreen(bool on) {
     uint8_t b = bruceConfig.bright > 0 ? (uint8_t)bruceConfig.bright : 100;
@@ -136,6 +147,7 @@ static void runCompanionUSB(bool headless) {
     resetFrameReader();
     diagNoteSession();
     g_companionActive = true; // from here Serial is the framed protocol: mute module debug prints
+    g_prevLogVprintf = esp_log_set_vprintf(companionMutedLog);
     startCompanionStorage();
 
     bool helloSeen = false;
@@ -461,6 +473,8 @@ static void runCompanionUSB(bool headless) {
     stopCompanionBluetoothControls();
     companionRestoreOutputs(); // leaving companion mode: screen/LED back on
     g_companionActive = false; // Serial is a normal console again
+    esp_log_set_vprintf(g_prevLogVprintf ? g_prevLogVprintf : vprintf);
+    g_prevLogVprintf = nullptr;
     if (serialcmdsTaskHandle) vTaskResume(serialcmdsTaskHandle);
 }
 

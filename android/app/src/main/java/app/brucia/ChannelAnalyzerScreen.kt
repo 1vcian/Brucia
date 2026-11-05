@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.brucia.wardrive.ChannelAdvisor
 import app.brucia.wardrive.WardriveViewModel
+import app.brucia.ui.Button
 
 /**
  * Live 2.4GHz channel analyzer: runs the wifi.ap scan and shows, per channel, how many APs are on it

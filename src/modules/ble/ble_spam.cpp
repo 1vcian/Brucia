@@ -472,7 +472,7 @@ BLEAdvertisementData GetUniversalAdvertisementData(EBLEPayloadType Type, const S
             break;
         }
         default: {
-            Serial.println("Please Provide a Company Type");
+            if (!g_companionActive) Serial.println("Please Provide a Company Type");
             break;
         }
     }

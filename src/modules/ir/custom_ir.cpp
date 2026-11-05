@@ -628,7 +628,7 @@ void sendRawCommand(uint16_t frequency, String rawData, bool hideDefaultUI) {
         dataBuffer[count++] = (dataChunk.toInt());
     }
 
-    Serial.println("Parsing raw data complete.");
+    if (!g_companionActive) Serial.println("Parsing raw data complete.");
     // Serial.println(count);
     // Serial.println(dataBuffer[count-1]);
     // Serial.println(dataBuffer[0]);
@@ -644,7 +644,7 @@ void sendRawCommand(uint16_t frequency, String rawData, bool hideDefaultUI) {
 
     free(dataBuffer);
 
-    Serial.println(
+    if (!g_companionActive) Serial.println(
         "Sent Raw Command" + (bruceConfigPins.irTxRepeats > 0
                                   ? " (1 initial + " + String(bruceConfigPins.irTxRepeats) + " repeats)"
                                   : "")

@@ -452,7 +452,7 @@ String IrRead::loop_headless(int max_loops) {
     while (!irrecv.decode(&results)) {
         max_loops -= 1;
         if (max_loops <= 0) {
-            Serial.println("timeout");
+            if (!g_companionActive) Serial.println("timeout");
             return "";
         }
         delay(1000);
@@ -461,7 +461,7 @@ String IrRead::loop_headless(int max_loops) {
     irrecv.disableIRIn();
 
     if (!raw && results.decode_type == decode_type_t::UNKNOWN) {
-        Serial.println("# decoding failed, try raw mode");
+        if (!g_companionActive) Serial.println("# decoding failed, try raw mode");
         return "";
     }
 

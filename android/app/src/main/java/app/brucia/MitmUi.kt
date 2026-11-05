@@ -16,11 +16,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +39,9 @@ import app.brucia.mitm.MitmCa
 import app.brucia.mitm.MitmController
 import app.brucia.mitm.MitmLog
 import app.brucia.mitm.MitmTxn
+import app.brucia.ui.BruciaButtonDefaults
+import app.brucia.ui.Button
+import app.brucia.ui.OutlinedButton
 
 /**
  * MITM intercepting-proxy tool UI. Phone-only (needs no connected device): it runs the
@@ -79,7 +80,7 @@ private fun ArpSpoofCard(vm: app.brucia.wardrive.WardriveViewModel, connected: B
             Button(
                 enabled = connected,
                 modifier = Modifier.fillMaxWidth(),
-                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                colors = BruciaButtonDefaults.buttonColors(
                     containerColor = if (active) androidx.compose.ui.graphics.Color(0xFFD32F2F) else cs.primary),
                 onClick = {
                     if (active) vm.stopArpSpoof()

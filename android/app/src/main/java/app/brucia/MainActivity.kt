@@ -62,19 +62,15 @@ import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -88,6 +84,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,15 +96,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -184,6 +183,10 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.io.File
 import androidx.core.net.toUri
+import app.brucia.ui.BruciaButtonDefaults
+import app.brucia.ui.Button
+import app.brucia.ui.OutlinedButton
+import app.brucia.ui.TextButton
 
 private enum class View { LIST, MAP, STATS }
 private enum class ApSort(val label: String) { STABLE("Found"), NAME("Name"), SIGNAL("Signal"), RISK("Risk") }
@@ -1134,7 +1137,7 @@ private fun ApCard(ap: ApObservation, deauthing: Boolean = false, onDeauth: () -
                         onDeauth()
                         Toast.makeText(context, if (deauthing) "Deauth stopped" else "Deauth ${ap.bssid}...", Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = cs.error),
+                    colors = BruciaButtonDefaults.buttonColors(containerColor = cs.error),
                 ) { Text(if (deauthing) "Stop deauth" else "Deauth (continuous)") }
             }
         }
@@ -1720,6 +1723,15 @@ private fun TopStatusBar(
     }
 }
 
+/**
+ * Height of the activity window in dp, for capping dialog heights. Read it before
+ * `Dialog { }`: inside the dialog content LocalWindowInfo describes the dialog window.
+ * (Replaces Configuration.screenHeightDp, which Compose lint discourages.)
+ */
+@Composable
+private fun windowHeightDp(): androidx.compose.ui.unit.Dp =
+    with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+
 @Composable
 private fun CommandLogDialog(
     entries: List<CommandLogEntry>,
@@ -1728,7 +1740,7 @@ private fun CommandLogDialog(
     onDismiss: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    val maxH = (LocalConfiguration.current.screenHeightDp * 0.6f).dp
+    val maxH = windowHeightDp() * 0.6f
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             modifier = Modifier
@@ -1871,7 +1883,7 @@ private fun HomeDashboard(
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { showSupport = false },
                 confirmButton = {
-                    androidx.compose.material3.TextButton(onClick = { showSupport = false }) { Text("Close") }
+                    TextButton(onClick = { showSupport = false }) { Text("Close") }
                 },
                 title = { Text("Support Brucia") },
                 text = { Column(Modifier.verticalScroll(rememberScrollState())) { SupportCard() } },
@@ -2063,11 +2075,29 @@ private fun SupportCard() {
     }
 }
 
+/**
+ * Copies plain text to the system clipboard. LocalClipboard replaces the deprecated
+ * LocalClipboardManager; its setClipEntry is a suspend function, so it runs in the
+ * composition's scope. Same "plain text" label the old setText(AnnotatedString) used.
+ */
+@Composable
+private fun rememberTextCopier(): (String) -> Unit {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    return remember(clipboard, scope) {
+        { text ->
+            scope.launch {
+                clipboard.setClipEntry(ClipEntry(android.content.ClipData.newPlainText("plain text", text)))
+            }
+        }
+    }
+}
+
 /** One crypto donation row: a self-generated QR, the address and a copy-to-clipboard button. */
 @Composable
 private fun CryptoRow(name: String, address: String) {
     val cs = MaterialTheme.colorScheme
-    val clipboard = LocalClipboardManager.current
+    val copyText = rememberTextCopier()
     val context = LocalContext.current
     val qr = remember(address) { app.brucia.utils.QrCodes.encode(address, 256) }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2087,7 +2117,7 @@ private fun CryptoRow(name: String, address: String) {
             )
             Spacer(Modifier.height(4.dp))
             OutlinedButton(onClick = {
-                clipboard.setText(AnnotatedString(address))
+                copyText(address)
                 Toast.makeText(context, "$name address copied", Toast.LENGTH_SHORT).show()
             }) { Text("Copy address") }
         }
@@ -2292,10 +2322,11 @@ private fun NavButton(
 private fun HelpDialog(onDismiss: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
+    val maxH = windowHeightDp() * 0.8f
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             modifier = Modifier.fillMaxWidth().padding(16.dp)
-                .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.8f).dp),
+                .heightIn(max = maxH),
             shape = RoundedCornerShape(14.dp), color = cs.surface, tonalElevation = 4.dp,
         ) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
@@ -3717,7 +3748,7 @@ private fun RkButton(
         modifier = modifier.heightIn(min = 52.dp),
         shape = RoundedCornerShape(14.dp),
         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
-        colors = ButtonDefaults.buttonColors(
+        colors = BruciaButtonDefaults.buttonColors(
             containerColor = container,
             contentColor = content,
             disabledContainerColor = cs.surface.copy(alpha = 0.35f),
@@ -3782,6 +3813,10 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
     val tvStatus by vm.irTvBGoneStatus.collectAsState()
     val rxStatus by vm.irRxStatus.collectAsState()
     val rxResult by vm.irRxResult.collectAsState()
+    val device by vm.device.collectAsState()
+    // A LITE firmware compiles ir_tvbgone / ir_jammer out (features.ir_cmds:false); receive and raw
+    // replay fall back to Bruce's own `ir` CLI in the ViewModel, so only these two are disabled.
+    val irCmdsOmitted = device?.features?.omits(app.brucia.wardrive.DeviceFeatures.IR_CMDS) == true
     var region by remember { mutableStateOf("na") }
     DisposableEffect(Unit) { onDispose { vm.stopIrJammer(silent = true) } }
 
@@ -3817,7 +3852,7 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
             }
             Spacer(Modifier.height(8.dp))
             Button(
-                enabled = connected,
+                enabled = connected && !irCmdsOmitted,
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     vm.irTvBGone(region)
@@ -3829,6 +3864,9 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
                 style = MaterialTheme.typography.bodySmall,
                 color = cs.onSurfaceVariant,
             )
+            if (irCmdsOmitted) {
+                Text(app.brucia.wardrive.DeviceFeatures.OMITTED_REASON, style = MaterialTheme.typography.bodySmall, color = cs.error)
+            }
             if (tvStatus.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(tvStatus, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurface)
@@ -3840,9 +3878,9 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
             val irJamming by vm.irJamming.collectAsState()
             val irJamStatus by vm.irJammerStatus.collectAsState()
             Button(
-                enabled = connected,
+                enabled = connected && (irJamming || !irCmdsOmitted),
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = if (irJamming) Color(0xFFD32F2F) else cs.primary),
+                colors = BruciaButtonDefaults.buttonColors(containerColor = if (irJamming) Color(0xFFD32F2F) else cs.primary),
                 onClick = { if (irJamming) vm.stopIrJammer() else vm.startIrJammer() },
             ) { Text(if (irJamming) "Stop IR jammer" else "IR jammer (flood IR)") }
             Text(
@@ -3850,6 +3888,9 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
                 style = MaterialTheme.typography.bodySmall,
                 color = cs.onSurfaceVariant,
             )
+            if (irCmdsOmitted) {
+                Text(app.brucia.wardrive.DeviceFeatures.OMITTED_REASON, style = MaterialTheme.typography.bodySmall, color = cs.error)
+            }
             if (irJamStatus.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(irJamStatus, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurface)
@@ -3951,7 +3992,7 @@ private fun SubGhzJammerCard(vm: WardriveViewModel, connected: Boolean, freqHz: 
             Button(
                 enabled = connected,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = if (jamming) Color(0xFFD32F2F) else cs.primary),
+                colors = BruciaButtonDefaults.buttonColors(containerColor = if (jamming) Color(0xFFD32F2F) else cs.primary),
                 onClick = { if (jamming) vm.stopSubghzJammer() else vm.startSubghzJammer((freqHz / 1000).toInt()) },
             ) { Text(if (jamming) "Stop jammer" else "Start jammer") }
             if (jamStatus.isNotEmpty()) {
@@ -4631,10 +4672,10 @@ private fun ScriptsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 private fun UtilitiesScreen() {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
+    val copyText = rememberTextCopier()
     fun copy(label: String, text: String) {
         if (text.isEmpty()) return
-        clipboard.setText(AnnotatedString(text))
+        copyText(text)
         Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
     }
 
@@ -4781,7 +4822,7 @@ private fun UtilitiesScreen() {
                     OutlinedButton(
                         onClick = { auth = a },
                         modifier = Modifier.weight(1f),
-                        colors = if (active) ButtonDefaults.outlinedButtonColors(containerColor = cs.primaryContainer) else ButtonDefaults.outlinedButtonColors(),
+                        colors = if (active) BruciaButtonDefaults.outlinedButtonColors(containerColor = cs.primaryContainer) else BruciaButtonDefaults.outlinedButtonColors(),
                     ) { Text(if (a == "nopass") "Open" else a) }
                 }
             }
@@ -5194,7 +5235,7 @@ private fun ResponderScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     durations.forEach { d ->
                         val sel = secs == d
                         OutlinedButton(onClick = { secs = d }, modifier = Modifier.weight(1f),
-                            colors = if (sel) ButtonDefaults.outlinedButtonColors(containerColor = cs.primaryContainer) else ButtonDefaults.outlinedButtonColors()) {
+                            colors = if (sel) BruciaButtonDefaults.outlinedButtonColors(containerColor = cs.primaryContainer) else BruciaButtonDefaults.outlinedButtonColors()) {
                             Text("${d}s", style = MaterialTheme.typography.labelMedium)
                         }
                     }
@@ -5204,7 +5245,7 @@ private fun ResponderScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 if (!rRunning) {
                     Button(enabled = connected, onClick = { vm.startResponder(secs) }, modifier = Modifier.fillMaxWidth()) { Text("Start (${secs}s)") }
                 } else {
-                    Button(onClick = { vm.stopResponder() }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
+                    Button(onClick = { vm.stopResponder() }, modifier = Modifier.fillMaxWidth(), colors = BruciaButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
                 }
                 if (rStatus.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
@@ -5257,7 +5298,7 @@ private fun KarmaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         val sel = secs == d
                         OutlinedButton(
                             onClick = { secs = d }, modifier = Modifier.weight(1f),
-                            colors = if (sel) ButtonDefaults.outlinedButtonColors(containerColor = cs.primaryContainer) else ButtonDefaults.outlinedButtonColors(),
+                            colors = if (sel) BruciaButtonDefaults.outlinedButtonColors(containerColor = cs.primaryContainer) else BruciaButtonDefaults.outlinedButtonColors(),
                         ) { Text("${d}s", style = MaterialTheme.typography.labelMedium) }
                     }
                 }
@@ -5266,7 +5307,7 @@ private fun KarmaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 if (!kRunning) {
                     Button(enabled = connected, onClick = { vm.startKarma(secs) }, modifier = Modifier.fillMaxWidth()) { Text("Start (${secs}s)") }
                 } else {
-                    Button(onClick = { vm.stopKarma() }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
+                    Button(onClick = { vm.stopKarma() }, modifier = Modifier.fillMaxWidth(), colors = BruciaButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop") }
                 }
                 if (kStatus.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
@@ -5326,7 +5367,7 @@ private fun BrucegotchiScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         val sel = secs == d
                         OutlinedButton(
                             onClick = { secs = d }, modifier = Modifier.weight(1f),
-                            colors = if (sel) ButtonDefaults.outlinedButtonColors(containerColor = cs.primaryContainer) else ButtonDefaults.outlinedButtonColors(),
+                            colors = if (sel) BruciaButtonDefaults.outlinedButtonColors(containerColor = cs.primaryContainer) else BruciaButtonDefaults.outlinedButtonColors(),
                         ) { Text("${d}s", style = MaterialTheme.typography.labelMedium) }
                     }
                 }
@@ -5342,7 +5383,7 @@ private fun BrucegotchiScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     Button(
                         onClick = { vm.stopBrucegotchi() },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = cs.error),
+                        colors = BruciaButtonDefaults.buttonColors(containerColor = cs.error),
                     ) { Text("Stop") }
                 }
                 if (gStatus.isNotBlank()) {
@@ -5520,9 +5561,9 @@ private fun IrRemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showAdd = false },
             confirmButton = {
-                androidx.compose.material3.TextButton(enabled = connected, onClick = { vm.captureRemoteKey(label); showAdd = false; label = "" }) { Text("Capture") }
+                TextButton(enabled = connected, onClick = { vm.captureRemoteKey(label); showAdd = false; label = "" }) { Text("Capture") }
             },
-            dismissButton = { androidx.compose.material3.TextButton(onClick = { showAdd = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel") } },
             title = { Text("Add a button") },
             text = {
                 Column {
@@ -5538,8 +5579,8 @@ private fun IrRemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     if (deleteIdx >= 0) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { deleteIdx = -1 },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { vm.deleteRemoteKey(deleteIdx); deleteIdx = -1 }) { Text("Delete", color = cs.error) } },
-            dismissButton = { androidx.compose.material3.TextButton(onClick = { deleteIdx = -1 }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { vm.deleteRemoteKey(deleteIdx); deleteIdx = -1 }) { Text("Delete", color = cs.error) } },
+            dismissButton = { TextButton(onClick = { deleteIdx = -1 }) { Text("Cancel") } },
             title = { Text("Delete button?") },
             text = { Text(keys.getOrNull(deleteIdx)?.name ?: "") },
         )
@@ -5800,6 +5841,8 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text("Key dictionary attack (MIFARE)", fontWeight = FontWeight.SemiBold, color = cs.primary)
+                // LITE firmware compiles mifare_keycheck out (features.mifare_keycheck:false).
+                val keycheckOmitted = device?.features?.omits(app.brucia.wardrive.DeviceFeatures.MIFARE_KEYCHECK) == true
                 Text(
                     "Try the well-known MIFARE Classic default keys against each sector. The phone hosts the dictionary; the device tests the keys in batches.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
@@ -5807,7 +5850,7 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Spacer(Modifier.height(10.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
-                        enabled = connected && !mifare.running,
+                        enabled = connected && !mifare.running && !keycheckOmitted,
                         modifier = Modifier.weight(1f),
                         onClick = { vm.runMifareKeyCheck(); Toast.makeText(context, "Running key attack...", Toast.LENGTH_SHORT).show() }
                     ) { Text(if (mifare.running) "Running..." else "Run key attack") }
@@ -5816,6 +5859,9 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         modifier = Modifier.weight(1f),
                         onClick = { keyImportLauncher.launch(arrayOf("*/*")) }
                     ) { Text("Import keys") }
+                }
+                if (keycheckOmitted) {
+                    Text(app.brucia.wardrive.DeviceFeatures.OMITTED_REASON, style = MaterialTheme.typography.bodySmall, color = cs.error)
                 }
                 if (mifare.running) {
                     TextButton(onClick = { vm.stopMifareKeyCheck() }) { Text("Stop batches") }
@@ -6096,7 +6142,7 @@ private fun BadUsbScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val scripts = remember { DuckyLibrary.load(context) }
-    val clipboard = LocalClipboardManager.current
+    val copyText = rememberTextCopier()
     var expanded by remember { mutableIntStateOf(-1) }
     val transportKind by vm.transportKind.collectAsState()
     val status by vm.status.collectAsState()
@@ -6157,7 +6203,7 @@ private fun BadUsbScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                             Text(sc.script, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                             Spacer(Modifier.height(6.dp))
                             OutlinedButton(onClick = {
-                                clipboard.setText(AnnotatedString(sc.script))
+                                copyText(sc.script)
                                 Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
                             }) { Text("Copy script") }
                         }
@@ -6205,7 +6251,7 @@ private fun BleIbeaconCard(vm: WardriveViewModel, connected: Boolean) {
             Spacer(Modifier.height(8.dp))
             Button(
                 enabled = connected, modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = if (active) Color(0xFFD32F2F) else cs.primary),
+                colors = BruciaButtonDefaults.buttonColors(containerColor = if (active) Color(0xFFD32F2F) else cs.primary),
                 onClick = { if (active) vm.stopIbeacon() else vm.startIbeacon(uuid) },
             ) { Text(if (active) "Stop iBeacon" else "Broadcast iBeacon") }
             if (status.isNotBlank()) {
@@ -6291,8 +6337,16 @@ private fun BleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 OutlinedButton(enabled = devices.isNotEmpty(), onClick = { vm.clearBle() }) { Text("Clear") }
             }
         }
+        // LITE firmware compiles the GATT explorer out (features.ble_gatt:false): no Explore button.
+        val gattOmitted = device?.features?.omits(app.brucia.wardrive.DeviceFeatures.BLE_GATT) == true
+        if (gattOmitted) {
+            item {
+                Text("GATT explorer: " + app.brucia.wardrive.DeviceFeatures.OMITTED_REASON,
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+        }
         items(devices) { d ->
-            BleCard(d, connected = connected, onExplore = { vm.gattConnect(d.mac) })
+            BleCard(d, connected = connected, onExplore = if (gattOmitted) null else ({ vm.gattConnect(d.mac) }))
         }
     }
 }
@@ -7229,7 +7283,7 @@ private fun MacroScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
         if (running) {
             Button(onClick = { vm.stopMacro() }, modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop macro") }
+                colors = BruciaButtonDefaults.buttonColors(containerColor = cs.error)) { Text("Stop macro") }
             Text("Stops the sequence; a command already sent may continue on the device.",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
@@ -8160,7 +8214,6 @@ private fun CatalogRow(
                     progress = { frac },
                     modifier = Modifier.fillMaxWidth(),
                     color = cs.primary,
-                    trackColor = cs.surfaceVariant,
                 )
                 Text(
                     "${progress.downloaded / 1_000_000}MB" + if (progress.total > 0) " / ${progress.total / 1_000_000}MB" else "",
@@ -8300,7 +8353,7 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                     Spacer(Modifier.height(6.dp))
                     val frac = if (download.total > 0) (download.downloaded.toFloat() / download.total).coerceIn(0f, 1f) else 0f
                     androidx.compose.material3.LinearProgressIndicator(
-                        progress = { frac }, modifier = Modifier.fillMaxWidth(), color = cs.primary, trackColor = cs.surfaceVariant,
+                        progress = { frac }, modifier = Modifier.fillMaxWidth(), color = cs.primary,
                     )
                 }
 
@@ -8395,14 +8448,14 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                     enabled = !flashing && appUpdate.flashUrl != null,
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { vm.resetFlash(); onFlash() },
-                    colors = ButtonDefaults.buttonColors(containerColor = cs.error),
+                    colors = BruciaButtonDefaults.buttonColors(containerColor = cs.error),
                 ) { Text(if (flashing) "Flashing..." else if (selectedBoard != null) "Flash ${selectedBoard.label}" else "Flash latest firmware") }
 
                 if (flashing) {
                     Spacer(Modifier.height(6.dp))
                     val frac = if (flash.total > 0) (flash.written.toFloat() / flash.total).coerceIn(0f, 1f) else 0f
                     androidx.compose.material3.LinearProgressIndicator(
-                        progress = { frac }, modifier = Modifier.fillMaxWidth(), color = cs.primary, trackColor = cs.surfaceVariant,
+                        progress = { frac }, modifier = Modifier.fillMaxWidth(), color = cs.primary,
                     )
                 }
 

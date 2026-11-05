@@ -34,7 +34,10 @@ RFIDInterface *createCompanionRfidModule() {
     }
 }
 
+#if defined(COMPANION_HAS_MIFARE_KEYCHECK)
 // mifare_keycheck <hexKey1,hexKey2,...>  (comma-separated 12-hex-char keys, up to 64)
+// LITE builds compile this endpoint out for app-slot headroom (config.h); CAPS then reports
+// features.mifare_keycheck:false and the command answers ERR 501.
 static void runMifareKeycheck(const String &argsIn, uint32_t id) {
     String args = argsIn;
     args.trim();
@@ -148,6 +151,7 @@ static void runMifareKeycheck(const String &argsIn, uint32_t id) {
     }
     sendEnvelope(o);
 }
+#endif // COMPANION_HAS_MIFARE_KEYCHECK
 
 // --- NFC parity commands (reuse Bruce's existing RFID stack) ---------------
 // All of these reuse the same always-linking RFID stack as mifare_keycheck, so
@@ -374,7 +378,11 @@ bool dispatchNfcCommand(const CommandRequest &request) {
         // Brucia: phone-driven MIFARE Classic key-dictionary check (offload).
         //   mifare_keycheck <hexKey1,hexKey2,...>
         if (cmdStr.startsWith("mifare_keycheck ")) {
+#if defined(COMPANION_HAS_MIFARE_KEYCHECK)
             runMifareKeycheck(cmdStr.substring(16), id);
+#else
+            sendErr(id, 501, "mifare_keycheck not available in this (lite) build");
+#endif
             break;
         }
 

@@ -20,6 +20,10 @@ import app.brucia.wardrive.WardriveViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import app.brucia.ui.BruciaButtonDefaults
+import app.brucia.ui.Button
+import app.brucia.ui.OutlinedButton
+import app.brucia.ui.TextButton
 
 /** Captive-portal HTML templates pushed to the device. Each posts to /post with name='password'
  *  (and the firmware captures it). Generic, non-impersonating pages for authorized testing. */
@@ -139,9 +143,9 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { previewHtml = false }, modifier = Modifier.weight(1f),
-                            colors = if (!previewHtml) ButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.18f)) else ButtonDefaults.outlinedButtonColors()) { Text("Edit") }
+                            colors = if (!previewHtml) BruciaButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.18f)) else BruciaButtonDefaults.outlinedButtonColors()) { Text("Edit") }
                         OutlinedButton(onClick = { previewHtml = true }, modifier = Modifier.weight(1f),
-                            colors = if (previewHtml) ButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.18f)) else ButtonDefaults.outlinedButtonColors()) { Text("Preview") }
+                            colors = if (previewHtml) BruciaButtonDefaults.outlinedButtonColors(containerColor = cs.primary.copy(alpha = 0.18f)) else BruciaButtonDefaults.outlinedButtonColors()) { Text("Preview") }
                     }
                     Spacer(Modifier.height(8.dp))
                     if (previewHtml) {
@@ -235,7 +239,7 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Button(
                     enabled = connected,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (active) Color(0xFFD32F2F) else cs.primary),
+                    colors = BruciaButtonDefaults.buttonColors(containerColor = if (active) Color(0xFFD32F2F) else cs.primary),
                     onClick = {
                         if (active) vm.stopEvilPortal()
                         else {

@@ -33,7 +33,7 @@ class DiagnosticsExportTest {
         val lines = Diagnostics.exportLines(counters.snapshot(), ready())
         val header = BruciaLog.exportHeader("9.9.9", 1L, "Firmware: x", lines)
         assertTrue(header.contains("\nDiagnostics:\n"))
-        assertTrue(header.contains("  App skipped frames: 1 malformed, 0 invalid length (link reset)\n"))
+        assertTrue(header.contains("  App skipped frames: 1 malformed, 0 invalid length (resynced), 0 noise bytes\n"))
         assertTrue(header.contains("  Device reset reason: panic (code 4), uptime 00:01:01\n"))
         assertTrue(header.contains("  Device ERR replies: 409 x3"))
         assertTrue(header.endsWith("----\n"))

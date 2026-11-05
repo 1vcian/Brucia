@@ -21,4 +21,11 @@ void companionModeUSB(bool headless = false);
 // loop polls this flag and enters companion mode from the main task instead.
 extern volatile bool g_enterCompanionRequested;
 
+// Called from setup() before Serial.begin(): sizes Serial's RX buffer so one whole inbound
+// companion frame fits (src/companion/serial_rx.h), falling back to `bruceDefault` (Bruce's own
+// SAFE_STACK_BUFFER_SIZE / 4) if the larger allocation fails. Applies to the Serial CLI too:
+// a larger buffer only means fewer dropped bytes; it cannot be resized later at runtime.
+#include <stddef.h>
+void companionSerialRxSetup(size_t bruceDefault);
+
 #endif // BRUCIA_COMPANION_H

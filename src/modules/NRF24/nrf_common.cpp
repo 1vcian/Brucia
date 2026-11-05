@@ -37,7 +37,7 @@ bool nrf_start(NRF24_MODE mode) {
             result = false;
         }
         NRFSerial.begin(115200, SERIAL_8N1, bruceConfigPins.uart_bus.rx, bruceConfigPins.uart_bus.tx);
-        Serial.println("NRF24 on Serial Started");
+        if (!g_companionActive) Serial.println("NRF24 on Serial Started");
         result = true;
     };
 
@@ -55,7 +55,7 @@ bool nrf_start(NRF24_MODE mode) {
     NRFSPI =
         acquireSPIBus(bruceConfigPins.NRF24_bus.sck, bruceConfigPins.NRF24_bus.miso, bruceConfigPins.NRF24_bus.mosi);
     if (!NRFSPI) {
-        Serial.println("No hardware SPI bus available for NRF24, falling back to default SPI");
+        if (!g_companionActive) Serial.println("No hardware SPI bus available for NRF24, falling back to default SPI");
         NRFSPI = &SPI;
     }
     delay(10);

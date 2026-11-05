@@ -29,9 +29,11 @@ DEFAULT_FAIL = 98.0
 # Keep this table short and justify every entry; flags --warn/--fail override it.
 ENV_THRESHOLDS = {
     # LAUNCHER_* share custom_4Mb.csv (2,496 KiB app slot so M5Launcher can coexist).
-    # Measured at ~98.4% in batch 4: the ceiling sits just above today's figure so any
-    # further growth fails the build instead of silently eating the last ~40 KB.
-    'LAUNCHER_*': (95.0, 99.0),
+    # Batch 7 LITE compile-outs: LAUNCHER_CYD-2432S028 98.17% -> 97.38% (67,056 B free), so
+    # the fail ceiling drops from 99% to the default 98% (~15.8 KB of growth left on CYD).
+    # Kept as an override, warn 95%, because CYD is still above the 92% default warn and
+    # the other 16 LAUNCHER_* envs have not been measured.
+    'LAUNCHER_*': (95.0, 98.0),
 }
 
 APP_TYPE = 0x00

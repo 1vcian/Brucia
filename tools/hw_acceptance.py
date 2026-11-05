@@ -19,6 +19,10 @@ the stream check uses promiscuous `wifi.probe` / `wifi.sta` or CC1101 `subghz.ra
 The `busy` check (receive-only `jam_detect`) is opt-in because its Wi-Fi setup calls
 esp_wifi_disconnect(), which sends a disassociation if the device is joined to an AP.
 
+Link handling: frames sent never exceed CAPS `rx_max` (768 bytes for firmware without it) and
+the reader resyncs after device text in the framed stream (a 4-byte length in range followed
+by '{"v":'), recording the skipped bytes as warnings instead of failing (proto/PROTOCOL.md).
+
 Simulated runs (tools/test_hw_acceptance.py against tools/mock_device.py) prove the runner,
 not the device. Exit code: 0 no FAIL, 1 at least one FAIL, 2 link/usage error, 130 Ctrl-C.
 """
@@ -42,6 +46,18 @@ KIND_NAMES = {1: "HELLO", 2: "CAPS", 3: "CMD", 4: "ACK", 5: "ERR", 6: "EVENT", 7
               9: "PING", 10: "PONG"}
 MAX_FRAME = 8192
 MALFORMED_PAYLOAD = b"{not json"  # the one deliberately bad frame (ERR 400 path, harmless)
+# Every device frame payload starts with this (beginEnvelope() writes "v" first). A 4-byte LE
+# length in 5..MAX_FRAME followed by it marks a frame start; the reader resyncs on it after
+# stray text (proto/PROTOCOL.md "Resynchronisation").
+ENVELOPE_PREFIX = b'{"v":'
+NOISE_SAMPLE_BYTES = 120   # bytes of each skipped noise run kept for the report
+NOISE_SAMPLES_KEPT = 10
+# Inbound frame capacity (proto/PROTOCOL.md "Inbound frame capacity"). CAPS rx_max is the
+# largest frame payload the device's serial RX buffer holds whole; firmware without it is
+# assumed to have the 1024-byte PSRAM-board queue measured on hardware: 1024 - 256 headroom.
+LEGACY_RX_MAX = 768
+UPLOAD_MAX_CHUNK = 3072    # firmware upload::MAX_CHUNK (src/companion/storage_upload.h)
+UPLOAD_MAX_SIZE = 8192     # the scratch file never exceeds this
 
 # --------------------------------------------------------------------------------------------
 # Allowlist (hard safety). Anything not matched here is a programming error.
@@ -73,7 +89,7 @@ COMMAND_RULES = (
     ("storage list", re.compile(r"^storage list (/.*)$"), lambda m: _safe_read_path(m.group(1))),
     ("fs_read", re.compile(r"^fs_read (/.*)$"), lambda m: _safe_read_path(m.group(1))),
     ("fs_upload_begin", re.compile(rf"^fs_upload_begin {_TOKEN} (\d{{1,5}}) (\d{{1,10}}) (\S+)$"),
-     lambda m: int(m.group(1)) <= 8192 and int(m.group(2)) <= 0xFFFFFFFF and SCRATCH_RE.match(m.group(3))),
+     lambda m: int(m.group(1)) <= UPLOAD_MAX_SIZE and int(m.group(2)) <= 0xFFFFFFFF and SCRATCH_RE.match(m.group(3))),
     ("fs_upload_chunk", re.compile(rf"^fs_upload_chunk {_TOKEN} (\d{{1,5}}) ({_B64})$"),
      lambda m: len(m.group(2)) <= 4096),
     ("fs_upload_commit", re.compile(rf"^fs_upload_commit {_TOKEN}$"), None),
@@ -136,6 +152,11 @@ class Link:
         self.bad_rx_json = 0
         self.commands = []       # audit trail of what was sent: {t, kind, summary}
         self.malformed_sent = 0
+        self.rx_max = MAX_FRAME  # outbound payload limit; set from CAPS rx_max (or LEGACY_RX_MAX)
+        self.noise_bytes = 0     # bytes skipped to resynchronise on a frame start
+        self.resyncs = 0         # separate noise runs
+        self.noise_samples = []  # first NOISE_SAMPLES_KEPT runs: {utc, rx_index, bytes, sample}
+        self._resyncing = False
 
     def _write(self, data):
         try:
@@ -154,6 +175,8 @@ class Link:
         payload = json.dumps({"v": 0, "t": kind, "id": mid, "d": d}, separators=(",", ":")).encode()
         if len(payload) > MAX_FRAME:
             raise AllowlistViolation("frame exceeds COMPANION_MAX_FRAME")
+        if len(payload) > self.rx_max:
+            raise AllowlistViolation(f"frame of {len(payload)} bytes exceeds the device rx_max {self.rx_max}")
         self._write(struct.pack("<I", len(payload)) + payload)
         self.sent += 1
         self.sent_by_kind[KIND_NAMES[kind]] = self.sent_by_kind.get(KIND_NAMES[kind], 0) + 1
@@ -162,7 +185,7 @@ class Link:
         elif kind == CMD:
             summary = d["cmd"]
         self.commands.append({"t": round(time.time(), 3), "kind": KIND_NAMES[kind], "id": mid,
-                              "summary": summary})
+                              "summary": summary, "bytes": len(payload)})
         if self.echo:
             self.echo(f"> {KIND_NAMES[kind]} id={mid} {summary}")
         return mid
@@ -187,15 +210,59 @@ class Link:
         self.buf = b""
         return dropped
 
+    def _skip_noise(self, count):
+        """Drop `count` leading bytes that are not a frame start; account them as noise."""
+        noise, self.buf = self.buf[:count], self.buf[count:]
+        if not self._resyncing:
+            self._resyncing = True
+            self.resyncs += 1
+            if len(self.noise_samples) < NOISE_SAMPLES_KEPT:
+                self.noise_samples.append({"utc": utc_now(), "after_rx_frames": self.received,
+                                           "bytes": 0, "sample": ""})
+        if self.noise_samples and self.resyncs <= NOISE_SAMPLES_KEPT:
+            ev = self.noise_samples[-1]
+            ev["bytes"] += len(noise)
+            if len(ev["sample"]) < NOISE_SAMPLE_BYTES:
+                ev["sample"] += noise[:NOISE_SAMPLE_BYTES - len(ev["sample"])].decode("latin-1")
+        self.noise_bytes += len(noise)
+
+    def _sync(self):
+        """Align self.buf on a frame start. True when buf starts with a plausible header and the
+        envelope prefix; False when more bytes are needed. Skips stray bytes (device text output)
+        up to the next position where a 4-byte LE length in range is followed by '{"v":'."""
+        need = 4 + len(ENVELOPE_PREFIX)
+        while len(self.buf) >= 4:
+            n = struct.unpack("<I", self.buf[:4])[0]
+            plausible = len(ENVELOPE_PREFIX) <= n <= MAX_FRAME
+            if plausible and len(self.buf) < need:
+                return False
+            if plausible and self.buf[4:need] == ENVELOPE_PREFIX:
+                return True
+            if not self._resyncing and self.buf.startswith(b"COMMAND:"):
+                # Bruce's serial CLI echoed our frame: the board is in its normal menu
+                # (companion mode also auto-exits after 60 s without host frames).
+                raise LinkError("the board answered with Bruce's serial CLI, not companion frames: "
+                                "open Brucia on the device and run again right away")
+            at = self.buf.find(ENVELOPE_PREFIX, 5)
+            while at != -1 and not (len(ENVELOPE_PREFIX) <= struct.unpack("<I", self.buf[at - 4:at])[0] <= MAX_FRAME):
+                at = self.buf.find(ENVELOPE_PREFIX, at + 1)
+            if at != -1:
+                self._skip_noise(at - 4)
+                continue
+            keep = need - 1  # a frame start may straddle the end of what has arrived so far
+            if len(self.buf) <= keep:
+                return False
+            self._skip_noise(len(self.buf) - keep)
+        return False
+
     def recv(self, deadline):
         """One frame (dict, or {'_bad': raw}) or None at the deadline."""
         while True:
-            if len(self.buf) >= 4:
+            if self._sync():
                 n = struct.unpack("<I", self.buf[:4])[0]
-                if n == 0 or n > MAX_FRAME:
-                    raise LinkError(f"invalid frame length {n} from device: framing lost")
                 if len(self.buf) >= 4 + n:
                     raw, self.buf = self.buf[4:4 + n], self.buf[4 + n:]
+                    self._resyncing = False
                     self.received += 1
                     try:
                         msg = json.loads(raw.decode("utf-8", errors="replace"))
@@ -280,7 +347,29 @@ def caps_problems(d):
         p.append("caps present but not a map of booleans")
     if "battery" in d and not isinstance(d["battery"], int):
         p.append("battery present but not an integer")
+    if "rx_max" in d and not (_u32(d["rx_max"]) and 1 <= d["rx_max"] <= MAX_FRAME):
+        p.append(f"rx_max {d['rx_max']!r} is not an integer in 1..{MAX_FRAME}")
+    if "rx_buf" in d and not (_u32(d["rx_buf"]) and d["rx_buf"] > 0):
+        p.append(f"rx_buf {d['rx_buf']!r} is not a positive integer")
     return p
+
+
+def device_rx_max(caps):
+    """(rx_max, source): CAPS rx_max when valid, else LEGACY_RX_MAX for older firmware."""
+    v = (caps or {}).get("rx_max")
+    if _u32(v) and 1 <= v <= MAX_FRAME:
+        return v, "caps"
+    return LEGACY_RX_MAX, "legacy default (CAPS has no rx_max)"
+
+
+def upload_chunk_size(rx_max, token, total):
+    """Largest raw fs_upload_chunk whose frame payload (compact JSON, 10-digit id) fits rx_max,
+    capped at the firmware's UPLOAD_MAX_CHUNK. Base64 has no characters json.dumps escapes."""
+    head = json.dumps({"v": 0, "t": CMD, "id": U32,
+                       "d": {"cmd": f"fs_upload_chunk {token} {'9' * len(str(total))} "}},
+                      separators=(",", ":"))
+    room = rx_max - len(head.encode())
+    return max(0, min(UPLOAD_MAX_CHUNK, (room // 4) * 3))
 
 
 def build_problems(b):
@@ -341,9 +430,11 @@ def diag_problems(d):
                              and all(_u32(d["psram"].get(k)) for k in ("size", "free", "min_free", "largest"))):
         p.append("psram malformed")
     link = d.get("link")
-    if not isinstance(link, dict) or list(link) != DIAG_LINK_KEYS or not isinstance(link.get("err"), dict) \
-            or list(link["err"]) != DIAG_ERR_KEYS:
-        p.append("link keys/order differ from the contract")
+    # JSON object order is not part of the contract (the firmware emits "err" first, the app reads
+    # by name), so compare key sets.
+    if not isinstance(link, dict) or set(link) != set(DIAG_LINK_KEYS) or not isinstance(link.get("err"), dict) \
+            or set(link["err"]) != set(DIAG_ERR_KEYS):
+        p.append("link keys differ from the contract")
     elif not all(_u32(link[k]) for k in DIAG_LINK_KEYS[:-1]) or not all(_u32(v) for v in link["err"].values()):
         p.append("link counter not a uint32")
     if not isinstance(d.get("drops"), dict):
@@ -453,6 +544,7 @@ class Runner:
         self.interrupted = False
         self.link_error = None
         self.hello_evidence = {}
+        self.rx_max, self.rx_max_source = LEGACY_RX_MAX, "not read yet"
 
     # -- helpers ---------------------------------------------------------------------------
     def cmd(self, text, timeout, on_other=None):
@@ -481,6 +573,7 @@ class Runner:
             return
         r.started = utc_now()
         t0 = time.time()
+        noise0, resync0 = self.link.noise_bytes, self.link.resyncs
         self.log(f"[{cid}] {r.title} ...")
         try:
             fn(r)
@@ -493,7 +586,17 @@ class Runner:
             r.status, r.reason = "FAIL", f"unexpected reply or runner error: {type(e).__name__}: {e}"
         finally:
             r.duration_ms = int((time.time() - t0) * 1000)
+            self.note_noise(r.warnings, noise0, resync0)
         self.log(f"[{cid}] {r.status}: {r.reason}")
+
+    def note_noise(self, warnings, noise0, resync0):
+        """Stray device bytes are not fatal: the reader resynced. Record them as a warning."""
+        skipped = self.link.noise_bytes - noise0
+        if skipped:
+            runs = self.link.resyncs - resync0
+            sample = next((e["sample"] for e in reversed(self.link.noise_samples) if e["sample"]), "")
+            warnings.append(f"skipped {skipped} non-frame byte(s) from the device in {runs} run(s) and resynced "
+                            f"(unframed serial output in companion mode); sample: {sample[:80]!r}")
 
     @staticmethod
     def verdict(r, problems, ok_reason):
@@ -506,10 +609,15 @@ class Runner:
         mid = self.link.send(HELLO, {"app": "hw_acceptance", "appVersion": str(RUNNER_VERSION)})
         caps = self.link.wait(lambda f: f.get("t") == CAPS, self.o.timeout)
         self.hello_evidence = {"stale_bytes_dropped": dropped, "hello_id": mid,
-                               "caps_id": caps.get("id") if caps else None}
+                               "caps_id": caps.get("id") if caps else None,
+                               "noise_bytes_before_caps": self.link.noise_bytes}
         if caps is None:
             raise LinkError(f"no CAPS within {self.o.timeout}s; is the device in companion mode?")
         self.caps = caps.get("d") if isinstance(caps.get("d"), dict) else {}
+        self.rx_max, self.rx_max_source = device_rx_max(self.caps)
+        self.link.rx_max = self.rx_max
+        self.hello_evidence["rx_max"] = self.rx_max
+        self.hello_evidence["rx_max_source"] = self.rx_max_source
         self.features = self.caps.get("features") if isinstance(self.caps.get("features"), dict) else {}
         self.diag_ok = self.features.get("diag") is True
 
@@ -571,6 +679,9 @@ class Runner:
         r.evidence["features_true"] = feats
         if "caps" not in c:
             r.warnings.append("no per-module caps map (older firmware): app tools stay disabled")
+        if "rx_max" not in c:
+            r.warnings.append(f"no rx_max in CAPS (older firmware): large frames sized for {LEGACY_RX_MAX} bytes")
+        r.evidence["rx_max"] = {"value": self.rx_max, "source": self.rx_max_source, "rx_buf": c.get("rx_buf")}
         self.verdict(r, problems, f"{c.get('board')} / {c.get('chip')} fw {c.get('fw')}; features: "
                                   f"{', '.join(feats) or 'none'}")
 
@@ -795,12 +906,20 @@ class Runner:
             return
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         path = f"{SCRATCH_PREFIX}{stamp}-{random.getrandbits(24):06x}.txt"
-        line = f"Brucia hw_acceptance scratch file {stamp}; safe to delete.\n".encode()
-        body = (line * (1 + 1500 // len(line)))[:1500]
-        crc = zlib.crc32(body) & U32
         token = "%032x" % random.getrandbits(128)
+        # The first chunk is the largest frame the device advertises it can take (rx_max), the
+        # second half that: the size class that was lost on hardware with a too-small RX queue.
+        chunk = upload_chunk_size(self.rx_max, token, UPLOAD_MAX_CHUNK * 2)
+        if chunk < 3:
+            r.status, r.reason = "FAIL", f"rx_max {self.rx_max} leaves no room for an upload chunk"
+            return
+        size = min(chunk + chunk // 2, UPLOAD_MAX_SIZE)
+        line = f"Brucia hw_acceptance scratch file {stamp}; safe to delete.\n".encode()
+        body = (line * (1 + size // len(line)))[:size]
+        crc = zlib.crc32(body) & U32
         steps, problems = [], []
-        r.evidence = {"path": path, "size": len(body), "crc32": crc, "steps": steps}
+        r.evidence = {"path": path, "size": len(body), "crc32": crc, "steps": steps, "rx_max": self.rx_max,
+                      "rx_max_source": self.rx_max_source, "chunk_raw": chunk, "frame_payloads": []}
 
         def step(name, resp, ok):
             steps.append({"step": name, "reply": resp.get("d") if resp else None, "ok": bool(ok)})
@@ -817,11 +936,15 @@ class Runner:
         resp = self.cmd(f"fs_upload_begin {token} {len(body)} {crc} {path}", self.o.fs_timeout)
         ok = step("begin", resp, resp and resp.get("t") == ACK and resp["d"].get("token") == token
                   and resp["d"].get("size") == 0)
-        off = 0
+        off = chunks = 0
         while ok and off < len(body):
-            part = body[off:off + 1024]
+            part = body[off:off + chunk]
+            sent_before = len(self.link.commands)
             resp = self.cmd(f"fs_upload_chunk {token} {off} {base64.b64encode(part).decode()}", self.o.timeout)
+            if len(self.link.commands) > sent_before:
+                r.evidence["frame_payloads"].append(self.link.commands[sent_before].get("bytes"))
             off += len(part)
+            chunks += 1
             ok = step(f"chunk@{off - len(part)}", resp, resp and resp.get("t") == ACK
                       and resp["d"].get("token") == token and resp["d"].get("size") == off)
         acked_commit = False
@@ -862,7 +985,8 @@ class Runner:
             self.upload["removed"] = removed or gone
         else:
             self.upload["removed"] = True  # nothing was promoted
-        self.verdict(r, problems, f"{path}: begin, 2 chunks, commit, read-back and remove verified")
+        self.verdict(r, problems, f"{path}: begin, {chunks} chunks (largest {chunk} raw bytes, rx_max "
+                                  f"{self.rx_max}), commit, read-back and remove verified")
 
     def check_streams(self, r):
         r.evidence = {}
@@ -1068,9 +1192,11 @@ def dry_run_plan(opts):
         plan.append(("fs_read", CMD, {"cmd": f"fs_read {opts.read_path or '/{smallest-file-at-root}'}"}))
     if "fs_upload" in sel:
         plan += [("fs_upload", CMD, {"cmd": "storage list /"}),
-                 ("fs_upload", CMD, {"cmd": f"fs_upload_begin {tok} 1500 0 {scratch}"}),
+                 ("fs_upload", None, "... chunk size from CAPS rx_max (largest frame first), "
+                                     f"{LEGACY_RX_MAX} bytes when CAPS has none"),
+                 ("fs_upload", CMD, {"cmd": f"fs_upload_begin {tok} 4608 0 {scratch}"}),
                  ("fs_upload", CMD, {"cmd": f"fs_upload_chunk {tok} 0 QUJD"}),
-                 ("fs_upload", CMD, {"cmd": f"fs_upload_chunk {tok} 1024 QUJD"}),
+                 ("fs_upload", CMD, {"cmd": f"fs_upload_chunk {tok} 3072 QUJD"}),
                  ("fs_upload", CMD, {"cmd": f"fs_upload_commit {tok}"}),
                  ("fs_upload", CMD, {"cmd": f"fs_read {scratch}"}),
                  ("fs_upload", CMD, {"cmd": f"storage remove {scratch}"}),
@@ -1121,9 +1247,14 @@ def write_reports(report, out_dir):
         f"- Build: id `{b.get('id')}`, commit `{b.get('commit')}`, dirty `{b.get('dirty', 'not reported')}`, "
         f"time `{b.get('time')}` ({b.get('time_src')}), env `{b.get('env')}`" if b else "- Build: not reported",
         f"- Frames: sent {report['frames']['sent']}, received {report['frames']['received']}",
+        f"- Link: rx_max {report['link']['rx_max']} ({report['link']['rx_max_source']}); "
+        f"{report['link']['noise_bytes']} non-frame byte(s) skipped in {report['link']['resyncs']} resync(s)",
     ]
     if report.get("fatal"):
         lines.append(f"- Fatal: {report['fatal']}")
+    for ev in report["link"]["noise_samples"]:
+        lines.append(f"- warning: device noise at {ev['utc']} after frame {ev['after_rx_frames']}: "
+                     f"{ev['bytes']} byte(s), sample `{_md_escape(repr(ev['sample'][:80]))}`")
     lines += ["", "Passive checks only; nothing here proves radio TX/RX quality. "
               "Simulated runs (mock device) are not hardware evidence.", "",
               "| Check | Status | Summary |", "|---|---|---|"]
@@ -1173,6 +1304,9 @@ def build_report(runner, opts, started, fatal=None, cleanup=None):
         "checks": checks,
         "frames": {"sent": runner.link.sent, "received": runner.link.received,
                    "sent_by_kind": runner.link.sent_by_kind, "recv_by_kind": runner.link.recv_by_kind},
+        "link": {"rx_max": runner.rx_max, "rx_max_source": runner.rx_max_source,
+                 "noise_bytes": runner.link.noise_bytes, "resyncs": runner.link.resyncs,
+                 "noise_samples": runner.link.noise_samples},
         "commands_sent": runner.link.commands,
         "cleanup": cleanup or [],
         "coverage": COVERAGE_NOTE,

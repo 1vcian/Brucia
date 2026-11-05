@@ -11,6 +11,7 @@ by `internal.h`. The USB wire contract remains in
 |---|---|
 | `companion.cpp` / `session.h` | Enter/leave companion mode, own Serial, suspend/resume the standalone CLI, poll services, restore outputs and clean up |
 | `protocol.*` | Incremental bounded framing and JSON response construction; no radio drivers |
+| `serial_rx.*` | Serial RX buffer sized in `setup()` to hold one inbound frame; CAPS `rx_max`/`rx_buf` |
 | `capabilities.*` / `capability_evidence_core.*` | Probe supported chips once before capture, cache results and report CAPS; Arduino-free evidence-level and static pin-conflict logic |
 | `commands.*` / `command_request.h` | Small dispatcher registry, CLI output capture and session/UI commands |
 | `wifi.*`, `bluetooth.*`, `subghz.*` | Radio-specific command matching, capture state, callbacks, service polling and cleanup |
@@ -20,7 +21,7 @@ by `internal.h`. The USB wire contract remains in
 | `storage.*` / `storage_upload.*` / `codec.*` | FS adapter, Arduino-free upload transaction/recovery engine and bounded binary/text encoding |
 | `system.*` | Clock, scripts, ESP-NOW and other device tools |
 | `diag.*` / `diag_core.h` | `diag` reply (reset reason, heap, uptime); Arduino-free saturating link counters incremented by the framing/ERR paths, read only on request |
-| `config.h` | Compile-time driver support; it must not be mistaken for physical presence |
+| `config.h` | Compile-time driver support; it must not be mistaken for physical presence. Also the endpoint groups LITE builds compile out (`mifare_keycheck`, companion IR commands, GATT explorer, `diag`, NRF24); CAPS reports them and the commands answer ERR 501 |
 
 A service implements `dispatch…Command(const CommandRequest&)`: return `false`
 when it does not recognize the command, or handle it and return `true` after
@@ -41,6 +42,9 @@ the ST25R3916-before-PN532 include ordering where both libraries are needed.
    to that module's dispatcher. Do not add another subsystem to the session loop.
 2. Report missing hardware/init failures using the common ACK/ERR helpers. Use
    the incoming request ID and keep every JSON frame within the advertised MTU.
+   Module code the handler calls must not write to `Serial` in companion mode: guard
+   such prints with `if (!g_companionActive)` (`tools/test_companion_print_hygiene.py`
+   lists the scanned files; add the module's file there).
 3. Register a new service handler only when a new subsystem is warranted. For a
    stream, add explicit start/service/stop hooks and cleanup on session exit.
 4. Gate the app from confirmed capabilities; update the protocol reference and
@@ -51,7 +55,8 @@ the ST25R3916-before-PN532 include ordering where both libraries are needed.
 Host checks: `python3 tools/test_firmware_framing.py`,
 `python3 tools/test_firmware_codec.py`, `python3 tools/test_firmware_storage.py`,
 `python3 tools/test_firmware_upload.py`, `python3 tools/test_firmware_capability_evidence.py`,
-`python3 tools/test_firmware_diag.py`
+`python3 tools/test_firmware_diag.py`, `python3 tools/test_lite_companion.py`,
+`python3 tools/test_firmware_serial_rx.py`, `python3 tools/test_companion_print_hygiene.py`
 and `python3 tools/test_protocol_e2e.py`.
 These cover the real reader/codec with host shims and simulated protocol traffic;
 they do not validate electrical timing, chip probes or the Android USB stack.

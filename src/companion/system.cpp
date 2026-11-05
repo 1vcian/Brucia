@@ -279,7 +279,11 @@ bool dispatchSystemCommand(const CommandRequest &request) {
         // Brucia: recovery diagnostics, only when the app asks (no automatic telemetry).
         //   diag
         if (cmdStr == "diag") {
+#if defined(COMPANION_HAS_DIAG)
             runDiagCommand(id);
+#else
+            sendErr(id, 501, "diag not available in this (lite) build");
+#endif
             break;
         }
 
