@@ -26,7 +26,7 @@ class GattServiceTest {
         return status.value
     }
 
-    @Test(timeout = 5_000) fun connectSetsStateSendsCommandAndMapsResult() = runBlocking {
+    @Test(timeout = 5_000) fun connectSetsStateSendsCommandAndMapsResult() = runVirtual {
         val svc = svc()
         svc.connect("AA:BB:CC:DD:EE:FF")
         assertEquals("Connecting to AA:BB:CC:DD:EE:FF...", svc.status.value)
@@ -40,7 +40,7 @@ class GattServiceTest {
         assertEquals("Connected - services below.", svc.status.value)
     }
 
-    @Test(timeout = 5_000) fun connectFailureTexts() = runBlocking {
+    @Test(timeout = 5_000) fun connectFailureTexts() = runVirtual {
         val svc = svc()
         assertEquals("Connect failed.", svc.connectDone("M1", false, ""))
         assertEquals("device busy", svc.connectDone("M2", false, "device busy"))
@@ -48,7 +48,7 @@ class GattServiceTest {
         assertEquals(3, resetCount.get())
     }
 
-    @Test(timeout = 5_000) fun readsAreIndependentAndOrderInsensitive() = runBlocking {
+    @Test(timeout = 5_000) fun readsAreIndependentAndOrderInsensitive() = runVirtual {
         val svc = svc()
         svc.connectDone("M", true, "disc")
         svc.read("M", "u1")
@@ -64,7 +64,7 @@ class GattServiceTest {
         assertEquals("BB", svc.reads.value["u2"])
     }
 
-    @Test(timeout = 5_000) fun readEmptyAndErrorFallbacks() = runBlocking {
+    @Test(timeout = 5_000) fun readEmptyAndErrorFallbacks() = runVirtual {
         val svc = svc()
         svc.connectDone("M", true, "disc")
         svc.read("M", "u1")
@@ -75,7 +75,7 @@ class GattServiceTest {
         until { svc.reads.value["u1"] == "(empty)" && svc.reads.value["u2"] == "read failed: error" }
     }
 
-    @Test(timeout = 5_000) fun stopClearsEverythingAndSuppressesStaleRead() = runBlocking {
+    @Test(timeout = 5_000) fun stopClearsEverythingAndSuppressesStaleRead() = runVirtual {
         val svc = svc()
         svc.connectDone("M", true, "disc")
         svc.read("M", "u1")
@@ -92,7 +92,7 @@ class GattServiceTest {
         assertTrue(svc.reads.value.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun reconnectSuppressesPreviousRead() = runBlocking {
+    @Test(timeout = 5_000) fun reconnectSuppressesPreviousRead() = runVirtual {
         val svc = svc()
         svc.connectDone("A", true, "disc")
         svc.read("A", "u1")
@@ -108,7 +108,7 @@ class GattServiceTest {
         assertEquals("disc2", svc.status.value)
     }
 
-    @Test(timeout = 5_000) fun notConnectedRejectsConnectAndRead() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedRejectsConnectAndRead() = runVirtual {
         connected = false
         val svc = svc()
         svc.connect("M")

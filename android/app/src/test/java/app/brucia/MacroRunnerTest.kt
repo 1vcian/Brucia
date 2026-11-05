@@ -21,7 +21,7 @@ class MacroRunnerTest {
     private suspend fun until(condition: () -> Boolean) = withTimeout(2000) { while (!condition()) delay(1) }
     private suspend fun finished(service: MacroRunner) = until { !service.running.value }
 
-    @Test(timeout = 5000) fun snapshotsStepsPreservesCommandsAndPausesAfterEachAck() = runBlocking {
+    @Test(timeout = 5000) fun snapshotsStepsPreservesCommandsAndPausesAfterEachAck() = runVirtual {
         val events = mutableListOf<String>()
         val steps = mutableListOf(MacroStep("fixture first", 12), MacroStep("fixture second", 20))
         val service = MacroRunner(this, { CommandRunner { cmd, timeout ->
@@ -36,7 +36,7 @@ class MacroRunnerTest {
         assertEquals("Macro \"snapshot\" finished.", service.status.value)
     }
 
-    @Test(timeout = 5000) fun rejectionStopsBeforePauseAndNextCommand() = runBlocking {
+    @Test(timeout = 5000) fun rejectionStopsBeforePauseAndNextCommand() = runVirtual {
         val sent = mutableListOf<String>(); val pauses = mutableListOf<Long>()
         val service = MacroRunner(this, { CommandRunner { cmd, _ ->
             sent += cmd
@@ -49,7 +49,7 @@ class MacroRunnerTest {
         assertEquals("Step 1/2: fixture -> failed: module unavailable", service.status.value)
     }
 
-    @Test(timeout = 5000) fun exceptionAndTimeoutRemainFailuresNotFinished() = runBlocking {
+    @Test(timeout = 5000) fun exceptionAndTimeoutRemainFailuresNotFinished() = runVirtual {
         for (timeout in listOf(false, true)) {
             var sent = 0
             val service = MacroRunner(this, { CommandRunner { _, _ ->
@@ -63,7 +63,7 @@ class MacroRunnerTest {
         }
     }
 
-    @Test(timeout = 5000) fun emptyOrBlankStepsAndMissingConnectionSendNothing() = runBlocking {
+    @Test(timeout = 5000) fun emptyOrBlankStepsAndMissingConnectionSendNothing() = runVirtual {
         var connections = 0
         val service = MacroRunner(this, { connections++; null })
         service.start(macro()); assertFalse(service.running.value)
@@ -73,7 +73,7 @@ class MacroRunnerTest {
         assertFalse(service.running.value)
     }
 
-    @Test(timeout = 5000) fun rapidSecondStartIsIgnoredWhileRunning() = runBlocking {
+    @Test(timeout = 5000) fun rapidSecondStartIsIgnoredWhileRunning() = runVirtual {
         var connections = 0
         val sent = mutableListOf<String>(); val gate = CompletableDeferred<Pair<Boolean, String>>()
         val service = MacroRunner(this, { connections++; CommandRunner { cmd, _ -> sent += cmd; gate.await() } })
@@ -83,7 +83,7 @@ class MacroRunnerTest {
         gate.complete(true to "ok"); finished(service)
     }
 
-    @Test(timeout = 5000) fun stopThenRestartCannotBeOverwrittenByOldNonCancellableReply() = runBlocking {
+    @Test(timeout = 5000) fun stopThenRestartCannotBeOverwrittenByOldNonCancellableReply() = runVirtual {
         var old: Continuation<Pair<Boolean, String>>? = null
         val gate = CompletableDeferred<Pair<Boolean, String>>()
         val sent = mutableListOf<String>()
@@ -104,7 +104,7 @@ class MacroRunnerTest {
         gate.complete(true to "ok"); finished(service)
     }
 
-    @Test(timeout = 5000) fun stopDuringPausePreventsNextCommand() = runBlocking {
+    @Test(timeout = 5000) fun stopDuringPausePreventsNextCommand() = runVirtual {
         val sent = mutableListOf<String>(); val paused = CompletableDeferred<Unit>()
         val service = MacroRunner(this, { CommandRunner { cmd, _ -> sent += cmd; true to "ok" } }, {
             paused.complete(Unit); awaitCancellation()
@@ -117,7 +117,7 @@ class MacroRunnerTest {
         assertTrue(service.status.value.startsWith("Macro stopped"))
     }
 
-    @Test(timeout = 5000) fun cancelledParentBeforeOrDuringRunClearsRunning() = runBlocking {
+    @Test(timeout = 5000) fun cancelledParentBeforeOrDuringRunClearsRunning() = runVirtual {
         for (before in listOf(true, false)) {
             val parent = Job()
             if (before) parent.cancel()
@@ -133,7 +133,7 @@ class MacroRunnerTest {
         }
     }
 
-    @Test(timeout = 5000) fun directAndSavedMacrosUseSameDelayBounds() = runBlocking {
+    @Test(timeout = 5000) fun directAndSavedMacrosUseSameDelayBounds() = runVirtual {
         val direct = Macro("bounds", listOf(MacroStep("first", -1), MacroStep("second", Int.MAX_VALUE)))
         val saved = Macro.fromJson(direct.toJson())
         for (input in listOf(direct, saved)) {
@@ -155,7 +155,7 @@ class MacroRunnerTest {
         JSONObject().put("v", 0).put("t", Kind.ACK).put("id", frame.getInt("id"))
             .put("d", JSONObject().put("ok", ok).put("out", out))
 
-    @Test(timeout = 5000) fun realSessionTimeoutReleasesPendingAndStopsSequence() = runBlocking {
+    @Test(timeout = 5000) fun realSessionTimeoutReleasesPendingAndStopsSequence() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         val service = MacroRunner(this, { CommandRunner { cmd, _ -> session.await(cmd, 30) } })
         service.start(macro("first", "never")); finished(service)
@@ -164,7 +164,7 @@ class MacroRunnerTest {
         assertTrue(service.status.value.contains("failed: No response from the device."))
     }
 
-    @Test(timeout = 5000) fun realSessionStopReleasesPendingAndIgnoresLateAck() = runBlocking {
+    @Test(timeout = 5000) fun realSessionStopReleasesPendingAndIgnoresLateAck() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         val service = MacroRunner(this, { CommandRunner { cmd, timeout -> session.await(cmd, timeout) } })
         service.start(macro("first", "never")); until { wire.frames.isNotEmpty() }
@@ -176,7 +176,7 @@ class MacroRunnerTest {
         assertEquals(1, wire.frames.size)
     }
 
-    @Test(timeout = 5000) fun disconnectAndReconnectNeverTransferOldSequenceToNewLink() = runBlocking {
+    @Test(timeout = 5000) fun disconnectAndReconnectNeverTransferOldSequenceToNewLink() = runVirtual {
         val oldWire = Wire(); val oldSession = CommandSession(CompanionClient(oldWire), oldWire)
         val newWire = Wire(); val newSession = CommandSession(CompanionClient(newWire), newWire)
         var current = oldSession

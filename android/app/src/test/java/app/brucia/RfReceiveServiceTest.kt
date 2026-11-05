@@ -22,7 +22,7 @@ class RfReceiveServiceTest {
         settle()
     }
 
-    @Test(timeout = 5_000) fun decodedCaptureIsSavedWithReplayCommand() = runBlocking {
+    @Test(timeout = 5_000) fun decodedCaptureIsSavedWithReplayCommand() = runVirtual {
         val s = svc()
         s.capture(433_920_000L)
         assertTrue(s.busy.value)
@@ -33,14 +33,14 @@ class RfReceiveServiceTest {
         assertEquals(listOf("rf rx 433920000" to 20_000L), runner.calls.toList())
     }
 
-    @Test(timeout = 5_000) fun captureWithoutReplayFieldsKeepsRawOutput() = runBlocking {
+    @Test(timeout = 5_000) fun captureWithoutReplayFieldsKeepsRawOutput() = runVirtual {
         val s = svc()
         s.capture(315_000_000L)
         answer(0, true, "Protocol: RAW\nRAW_Data: 100 -200 300")
         assertEquals(listOf(Captured("signal", "RAW", "Protocol: RAW\nRAW_Data: 100 -200 300")), captured.toList())
     }
 
-    @Test(timeout = 5_000) fun failureShowsOutputButSavesNothing() = runBlocking {
+    @Test(timeout = 5_000) fun failureShowsOutputButSavesNothing() = runVirtual {
         val s = svc()
         s.capture(433_920_000L)
         answer(0, false, "No response from the device.")
@@ -48,7 +48,7 @@ class RfReceiveServiceTest {
         assertTrue(captured.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun supersededOrStoppedCaptureIsIgnored() = runBlocking {
+    @Test(timeout = 5_000) fun supersededOrStoppedCaptureIsIgnored() = runVirtual {
         val s = svc()
         s.capture(433_920_000L)
         settle()
@@ -65,7 +65,7 @@ class RfReceiveServiceTest {
         assertTrue(captured.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun notConnectedSendsNothing() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedSendsNothing() = runVirtual {
         connected = false
         val s = svc()
         s.capture(433_920_000L)

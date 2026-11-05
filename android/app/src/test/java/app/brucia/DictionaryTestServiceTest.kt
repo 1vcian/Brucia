@@ -15,6 +15,8 @@ class DictionaryTestServiceTest {
         val ap = ByteArray(6) { it.toByte() }; val sta = ByteArray(6) { (it + 6).toByte() }
         return PmkidTarget(WpaCracker.pmkid(password, "Fixture", ap, sta), ap, sta, "Fixture")
     }
+    // Runs on the test's virtual clock (the cracker is synchronous CPU work), except
+    // cancelledOldReaderCannotOverwriteNewResult, which needs a real worker thread blocked in open().
     private suspend fun finished(s: DictionaryTestService) {
         withTimeout(3000) { while (s.status.value.running) delay(5) }
     }
@@ -30,11 +32,11 @@ class DictionaryTestServiceTest {
         } finally { scope.cancel() }
     }
 
-    @Test(timeout = 5000) fun reportsActualTriedCountOnEarlyMatchAndClosesReader() = runBlocking {
-        val scope = CoroutineScope(Job() + Dispatchers.Default)
+    @Test(timeout = 5000) fun reportsActualTriedCountOnEarlyMatchAndClosesReader() = runVirtual {
+        val scope = CoroutineScope(Job() + clock)
         try {
             val closed = CountDownLatch(1)
-            val s = DictionaryTestService(scope)
+            val s = DictionaryTestService(scope, clock)
             s.start(null, target(), 900, "fixture") {
                 object : BufferedReader(StringReader("wrong-pass\n$password\nnever-tried")) {
                     override fun close() { super.close(); closed.countDown() }
@@ -47,10 +49,10 @@ class DictionaryTestServiceTest {
         } finally { scope.cancel() }
     }
 
-    @Test(timeout = 5000) fun failureIsNotSuccessfulExhaustion() = runBlocking {
-        val scope = CoroutineScope(Job() + Dispatchers.Default)
+    @Test(timeout = 5000) fun failureIsNotSuccessfulExhaustion() = runVirtual {
+        val scope = CoroutineScope(Job() + clock)
         try {
-            val s = DictionaryTestService(scope)
+            val s = DictionaryTestService(scope, clock)
             s.start(null, target(), 1, "fixture") { throw java.io.IOException("fixture") }
             finished(s)
             assertEquals("read error", s.status.value.note)
@@ -83,10 +85,10 @@ class DictionaryTestServiceTest {
         } finally { release.countDown(); scope.cancel() }
     }
 
-    @Test(timeout = 5000) fun exhaustionUsesObservedCountInsteadOfStaleMetadata() = runBlocking {
-        val scope = CoroutineScope(Job() + Dispatchers.Default)
+    @Test(timeout = 5000) fun exhaustionUsesObservedCountInsteadOfStaleMetadata() = runVirtual {
+        val scope = CoroutineScope(Job() + clock)
         try {
-            val s = DictionaryTestService(scope)
+            val s = DictionaryTestService(scope, clock)
             s.start(null, target(), 900, "fixture") { StringReader("wrong-pass").buffered() }
             finished(s)
             assertTrue(s.status.value.finished)
@@ -96,13 +98,13 @@ class DictionaryTestServiceTest {
         } finally { scope.cancel() }
     }
 
-    @Test(timeout = 5000) fun handshakePathUsesExistingVerifier() = runBlocking {
-        val scope = CoroutineScope(Job() + Dispatchers.Default)
+    @Test(timeout = 5000) fun handshakePathUsesExistingVerifier() = runVirtual {
+        val scope = CoroutineScope(Job() + clock)
         try {
             val base = Handshake("Fixture", ByteArray(6), ByteArray(6) { 1 },
                 ByteArray(32) { 2 }, ByteArray(32) { 3 }, ByteArray(99), ByteArray(16), 2)
             val h = base.copy(mic = WpaCracker.computeMic(password, base))
-            val s = DictionaryTestService(scope)
+            val s = DictionaryTestService(scope, clock)
             s.start(h, null, 1, "fixture") { StringReader(password).buffered() }
             finished(s)
             assertEquals(password, s.status.value.result)
@@ -110,10 +112,10 @@ class DictionaryTestServiceTest {
         } finally { scope.cancel() }
     }
 
-    @Test(timeout = 5000) fun cancelledParentDoesNotLeaveRunningState() = runBlocking {
-        val scope = CoroutineScope(Job() + Dispatchers.Default)
+    @Test(timeout = 5000) fun cancelledParentDoesNotLeaveRunningState() = runVirtual {
+        val scope = CoroutineScope(Job() + clock)
         scope.cancel()
-        val s = DictionaryTestService(scope)
+        val s = DictionaryTestService(scope, clock)
         s.start(null, target(), 1, "fixture") { error("Must not open") }
         finished(s)
         assertEquals("Cancelled", s.status.value.note)

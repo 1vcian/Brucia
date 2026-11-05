@@ -15,6 +15,45 @@ versionCode upgrade keeping Room v3 data. Firmware builds: T-Embed CC1101 (RAM 4
 matrix run. Reproducible: two checkouts of one commit gave identical firmware.bin. No device
 was connected for any of this; every item below in "Batches 1-4 - verify on hardware" is open.
 
+### Batch 11 (UI-ADAPT) - wide-window layout and local network gate, software and emulator only
+
+Wide windows: home grid columns follow the grid width (tiles >= 160dp, 2-6 columns),
+dashboard centered at <= 1040dp, tool screens and category lists centered at <= 840dp.
+Local network: `ACCESS_LOCAL_NETWORK` is not declared or requested while targetSdk is 36
+(developer.android.com/privacy-and-security/local-network-permission, split permission
+model); the gate asks only when device and target are both >= 37, and a UDP probe that
+fails with EPERM shows "Local network blocked by Android" for Network Scan / MITM proxy.
+Evidence: `:app:testDebugUnitTest` 811/811 on the batch alone, 813/813 (115 suites) merged
+with batch UPLOADTEST (new `AdaptiveLayoutTest` 4,
+`LocalNetworkAccessTest` 9 incl. a manifest/targetSdk tripwire, `AdaptiveLayoutScreenshotTest`
+8), `lintDebug` 0 errors / 7 warnings (same set as batch 10), no Kotlin warnings,
+`verifyPaparazziDebug` pass, `assembleDebug`/`assembleRelease` pass,
+`connectedDebugAndroidTest` 12/12, `tools/test_android_logic.py` 182, `unittest discover` 132
+(2 skipped). Paparazzi: real `HomeDashboard` and Network Scan phone snapshots recorded on
+the unmodified layout, then re-rendered after the change byte-identical (all 17 older
+snapshots too); new tablet snapshots (1920x1200 at 240 dpi, landscape 5 / portrait 4
+columns) and the NEEDS_PERMISSION / BLOCKED states reviewed before keeping. API 36.1
+emulator: phone home and Network Scan unchanged; `am compat enable RESTRICT_LOCAL_NETWORK
+app.brucia` + reboot -> Scan shows the blocked card (logcat `sendto failed: EPERM`), flag
+reset + reboot -> scan runs and finds 10.0.2.2 / 10.0.2.3; `wm size 1920x1200` + density
+240: home 5 columns, Sub-GHz / Network Scan / Intercept list centered at 840dp; portrait
+1200x1920: home 4 columns, tools full width (800dp < 840dp). Display and flag restored.
+Not covered: the Android 17 permission prompt and denial path (no API 37 image; the app
+targets 36 so it never asks), MITM proxy gate on the emulator, a real tablet or foldable.
+
+- [ ] Phone (portrait): home grid still 2 columns, tools full width, Network Scan scans as
+      before (no new prompt, no blocked card on a normal Wi-Fi).
+- [ ] Phone in landscape: home grid about 4 columns, tool screens nearly full width (cap
+      840dp), nothing clipped.
+- [ ] Tablet or foldable (if available), both orientations and after unfold/resize: home grid
+      gains columns, tools centered, category lists centered; nothing clipped.
+- [ ] Android 16 phone, developer check: `adb shell am compat enable RESTRICT_LOCAL_NETWORK
+      app.brucia`, reboot, Network Scan and MITM "Start proxy" show "Local network blocked by
+      Android"; `am compat reset RESTRICT_LOCAL_NETWORK app.brucia`, reboot, Scan works.
+- [ ] Before raising targetSdk to 37 (Android 17 device): declare the permission, then
+      first Scan shows the reason card and the Nearby devices prompt; deny twice -> "Open app
+      settings"; allow in settings and return -> Scan enabled.
+
 ### Batch 10 (TARGET36) - targetSdk 36, software and emulator only
 
 targetSdk 35 -> 36 after a review of the Android 16 behavior changes (developer.android.com

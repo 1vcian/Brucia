@@ -45,6 +45,8 @@ class CaptureWorkflow(
         h to if (h == null) HandshakeParser.parsePmkid(bytes, ssid.ifEmpty { null }) else null
     },
     private val blockedReason: () -> String? = { null },
+    /** Parsing and hashing run here, off the caller's dispatcher (tests inject a virtual-time one). */
+    private val compute: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val state = MutableStateFlow(HandshakeFlow())
     val status: StateFlow<HandshakeFlow> = state.asStateFlow()
@@ -166,7 +168,7 @@ class CaptureWorkflow(
 
     /** Parse pulled bytes and confirm the capture is for the requested BSSID; null = not ours. */
     private suspend fun toTarget(bytes: ByteArray, path: String, ssid: String, mac: String): CapturedTarget? {
-        val (h, p) = withContext(Dispatchers.Default) { parse(bytes, ssid) }
+        val (h, p) = withContext(compute) { parse(bytes, ssid) }
         val ap = h?.apMac ?: p?.apMac ?: return null
         if (ap.joinToString("") { "%02X".format(it.toInt() and 255) } != mac) return null
         return CapturedTarget(h, p, path, bytes)
@@ -194,6 +196,6 @@ class CaptureWorkflow(
             throw IOException("Capture listing is ambiguous or too large; select a file manually.")
         return matches
     }
-    private suspend fun digest(bytes: ByteArray) = withContext(Dispatchers.Default) { MessageDigest.getInstance("SHA-256").digest(bytes) }
+    private suspend fun digest(bytes: ByteArray) = withContext(compute) { MessageDigest.getInstance("SHA-256").digest(bytes) }
     companion object { const val DIRECTORY = "/BrucePCAP/handshakes" }
 }

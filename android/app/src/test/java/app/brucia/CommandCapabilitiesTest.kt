@@ -92,7 +92,7 @@ class CommandCapabilitiesTest {
         assertEquals(emptySet<String>(), CommandCapabilities.required("storage list /ibutton_read"))
     }
 
-    @Test(timeout = 5000) fun sessionRejectsTextJsonAndStructuredCommandsWithoutWritingOrLeakingPending() = runBlocking {
+    @Test(timeout = 5000) fun sessionRejectsTextJsonAndStructuredCommandsWithoutWritingOrLeakingPending() = runVirtual {
         var writes = 0
         lateinit var s: CommandSession
         val t = object : Transport {

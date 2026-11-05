@@ -8,7 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DeviceFileReaderTest {
-    @Test fun rejectsSameSizeCorruptionAndMissingChecksum() = runBlocking {
+    @Test fun rejectsSameSizeCorruptionAndMissingChecksum() = runVirtual {
         for (checksum in listOf(-1L, 0L)) {
             val reader = DeviceFileReader()
             assertNull(reader.read(101) {
@@ -17,7 +17,7 @@ class DeviceFileReaderTest {
             }.bytes)
         }
     }
-    @Test fun validatesChunksAndCompletionSize() = runBlocking {
+    @Test fun validatesChunksAndCompletionSize() = runVirtual {
         val reader = DeviceFileReader()
         val result = reader.read(101) {
             reader.chunk(101, 0, "YWJj")
@@ -27,13 +27,13 @@ class DeviceFileReaderTest {
         assertArrayEquals("abcd".toByteArray(), result.bytes)
     }
 
-    @Test fun emptyFileRequiresExplicitZeroSizeAck() = runBlocking {
+    @Test fun emptyFileRequiresExplicitZeroSizeAck() = runVirtual {
         val reader = DeviceFileReader()
         assertArrayEquals(ByteArray(0), reader.read(101) { reader.reply(101, true, 0, "", 0) }.bytes)
         assertNull(reader.read(102) { reader.reply(102, true, -1, "") }.bytes)
     }
 
-    @Test fun neverAcceptsPartialDataAsSuccess() = runBlocking {
+    @Test fun neverAcceptsPartialDataAsSuccess() = runVirtual {
         val reader = DeviceFileReader()
         val result = reader.read(101) {
             reader.chunk(101, 0, "YWJj")
@@ -43,7 +43,7 @@ class DeviceFileReaderTest {
         assertEquals("File size mismatch", result.error)
     }
 
-    @Test fun rejectsMalformedOutOfOrderAndDuplicateChunks() = runBlocking {
+    @Test fun rejectsMalformedOutOfOrderAndDuplicateChunks() = runVirtual {
         for (mode in 0..2) {
             val reader = DeviceFileReader()
             val result = reader.read(101) {
@@ -59,14 +59,14 @@ class DeviceFileReaderTest {
         }
     }
 
-    @Test fun boundsBothDecodedAndEncodedInput() = runBlocking {
+    @Test fun boundsBothDecodedAndEncodedInput() = runVirtual {
         for (encoded in listOf("YWJjZA==", "A".repeat(8193))) {
             val reader = DeviceFileReader(maxBytes = 3)
             assertNull(reader.read(101) { reader.chunk(101, 0, encoded) }.bytes)
         }
     }
 
-    @Test fun ignoresUnrelatedChunksAndRepliesIncludingLegacyIdZero() = runBlocking {
+    @Test fun ignoresUnrelatedChunksAndRepliesIncludingLegacyIdZero() = runVirtual {
         val reader = DeviceFileReader()
         val result = reader.read(101) {
             reader.chunk(0, 0, "YmFk")
@@ -78,13 +78,13 @@ class DeviceFileReaderTest {
         assertArrayEquals("ok".toByteArray(), result.bytes)
     }
 
-    @Test fun missingReplyTimesOutAndNextTransferStillWorks() = runBlocking {
+    @Test fun missingReplyTimesOutAndNextTransferStillWorks() = runVirtual {
         val reader = DeviceFileReader(timeoutMs = 20)
         assertEquals("File download timed out", reader.read(101) {}.error)
         assertArrayEquals(ByteArray(0), reader.read(102) { reader.reply(102, true, 0, "", 0) }.bytes)
     }
 
-    @Test fun concurrentRequestsAreSerialized() = runBlocking {
+    @Test fun concurrentRequestsAreSerialized() = runVirtual {
         val reader = DeviceFileReader()
         val sent = mutableListOf<Int>()
         val first = async(start = CoroutineStart.UNDISPATCHED) { reader.read(101) { sent.add(101) } }
@@ -98,7 +98,7 @@ class DeviceFileReaderTest {
         assertEquals(listOf(101, 102), sent)
     }
 
-    @Test fun disconnectFailsActiveAndQueuedTransfersWithoutSendingQueuedCommand() = runBlocking {
+    @Test fun disconnectFailsActiveAndQueuedTransfersWithoutSendingQueuedCommand() = runVirtual {
         val reader = DeviceFileReader()
         val first = async(start = CoroutineStart.UNDISPATCHED) { reader.read(101) {} }
         var sentSecond = false
@@ -110,7 +110,7 @@ class DeviceFileReaderTest {
         assertNotNull(reader.read(103) { reader.reply(103, true, 0, "", 0) }.bytes)
     }
 
-    @Test fun cancellationReleasesReaderAndLateChunksCannotContaminateNextPull() = runBlocking {
+    @Test fun cancellationReleasesReaderAndLateChunksCannotContaminateNextPull() = runVirtual {
         val reader = DeviceFileReader()
         val first = async(start = CoroutineStart.UNDISPATCHED) { reader.read(101) {} }
         first.cancel(); first.join()

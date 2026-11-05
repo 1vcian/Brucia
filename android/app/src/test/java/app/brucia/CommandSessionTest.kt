@@ -41,7 +41,7 @@ class CommandSessionTest {
     private val t = RecordingTransport()
     private val session = CommandSession(CompanionClient(t), t)
 
-    @Test fun immediateReplyResolvesAndReleases() = runBlocking {
+    @Test fun immediateReplyResolvesAndReleases() = runVirtual {
         t.onWrite = { env -> session.route(ack(env.getInt("id"), "done")) }
         assertEquals(true to "done", session.await("info", 1000))
         val sent = t.frames.single()
@@ -50,7 +50,7 @@ class CommandSessionTest {
         assertFalse(session.hasPending)
     }
 
-    @Test fun timeoutReleases() = runBlocking {
+    @Test fun timeoutReleases() = runVirtual {
         assertEquals(false to "No response from the device.", session.await("info", 20))
         assertFalse(session.hasPending)
         val json = session.awaitJson("info", 20)
@@ -59,7 +59,7 @@ class CommandSessionTest {
         assertFalse(session.hasPending)
     }
 
-    @Test fun cancellationReleasesAndPropagates() = runBlocking {
+    @Test fun cancellationReleasesAndPropagates() = runVirtual {
         val request = async(start = CoroutineStart.UNDISPATCHED) { session.await("spam", 10_000) }
         assertTrue(session.hasPending)
         request.cancel()
@@ -67,13 +67,13 @@ class CommandSessionTest {
         assertFalse(session.hasPending)
     }
 
-    @Test fun writeExceptionCompletesThroughErrPath() = runBlocking {
+    @Test fun writeExceptionCompletesThroughErrPath() = runVirtual {
         t.writeError = java.io.IOException("pipe broken")
         assertEquals(false to "pipe broken", session.await("info", 1000))
         assertFalse(session.hasPending)
     }
 
-    @Test fun transportClosedBeforeOrDuringWriteFails() = runBlocking {
+    @Test fun transportClosedBeforeOrDuringWriteFails() = runVirtual {
         t.onWrite = { t.close() }
         assertEquals(false to "USB write failed", session.await("info", 1000))
         assertEquals(1, t.frames.size)
@@ -82,7 +82,7 @@ class CommandSessionTest {
         assertFalse(session.hasPending)
     }
 
-    @Test fun preflightRejectionFailsWithoutWriting() = runBlocking {
+    @Test fun preflightRejectionFailsWithoutWriting() = runVirtual {
         val guarded = CommandSession(CompanionClient(t), t) { cmd ->
             check(!cmd.startsWith("ibutton_")) { "No confirmed iButton interface" }
         }
@@ -94,7 +94,7 @@ class CommandSessionTest {
         assertFalse(guarded.hasPending)
     }
 
-    @Test fun concurrentRequestsResolveOnlyByTheirOwnId() = runBlocking {
+    @Test fun concurrentRequestsResolveOnlyByTheirOwnId() = runVirtual {
         val first = async(start = CoroutineStart.UNDISPATCHED) { session.await("a", 10_000) }
         val second = async(start = CoroutineStart.UNDISPATCHED) { session.await("b", 10_000) }
         val (idA, idB) = t.frames.map { it.getInt("id") }
@@ -108,7 +108,7 @@ class CommandSessionTest {
         assertFalse(session.hasPending)
     }
 
-    @Test fun closeFailsEachPendingOnceAndIgnoresLateReplies() = runBlocking {
+    @Test fun closeFailsEachPendingOnceAndIgnoresLateReplies() = runVirtual {
         val text = async(start = CoroutineStart.UNDISPATCHED) { session.await("a", 10_000) }
         val json = async(start = CoroutineStart.UNDISPATCHED) { session.awaitJson("b", 10_000) }
         val (idA, idB) = t.frames.map { it.getInt("id") }
@@ -124,14 +124,14 @@ class CommandSessionTest {
         assertTrue(session.isClosed)
     }
 
-    @Test fun sendAfterCloseFailsWithoutWriting() = runBlocking {
+    @Test fun sendAfterCloseFailsWithoutWriting() = runVirtual {
         session.close()
         assertEquals(false to "USB connection is closed or changed", session.await("info", 1000))
         assertTrue(t.frames.isEmpty())
         assertFalse(session.hasPending)
     }
 
-    @Test fun awaitJsonDeliversFullDataObject() = runBlocking {
+    @Test fun awaitJsonDeliversFullDataObject() = runVirtual {
         t.onWrite = { env ->
             session.route(reply(Kind.ACK, env.getInt("id"),
                 JSONObject().put("ok", true).put("out", "2 keys").put("found", JSONArray().put("A0").put("B1"))))

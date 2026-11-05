@@ -19,7 +19,7 @@ class DiagnosticsServiceTest {
         settle()
     }
 
-    @Test(timeout = 5_000) fun outputKeepsPreviousTextWhileWaitingThenShowsReply() = runBlocking {
+    @Test(timeout = 5_000) fun outputKeepsPreviousTextWhileWaitingThenShowsReply() = runVirtual {
         val s = svc()
         s.run("info")
         assertEquals("" to true, s.output.value to s.busy.value)
@@ -32,7 +32,7 @@ class DiagnosticsServiceTest {
         assertEquals("No response from the device.", s.output.value)
     }
 
-    @Test(timeout = 5_000) fun panelCommandsUseTheBoundedTimeout() = runBlocking {
+    @Test(timeout = 5_000) fun panelCommandsUseTheBoundedTimeout() = runVirtual {
         val s = svc()
         val panel = listOf("info", "free", "uptime", "i2c")
         panel.forEachIndexed { i, cmd ->
@@ -43,7 +43,7 @@ class DiagnosticsServiceTest {
         assertEquals("", s.output.value)
     }
 
-    @Test(timeout = 5_000) fun otherCommandsAreRejectedLocally() = runBlocking {
+    @Test(timeout = 5_000) fun otherCommandsAreRejectedLocally() = runVirtual {
         val s = svc()
         s.run("reboot")
         settle()
@@ -51,7 +51,7 @@ class DiagnosticsServiceTest {
         assertEquals("Unsupported diagnostic: reboot" to false, s.output.value to s.busy.value)
     }
 
-    @Test(timeout = 5_000) fun supersededReplyIgnoredAndStopShowsStopped() = runBlocking {
+    @Test(timeout = 5_000) fun supersededReplyIgnoredAndStopShowsStopped() = runVirtual {
         val s = svc()
         s.run("i2c")
         settle()
@@ -66,7 +66,7 @@ class DiagnosticsServiceTest {
         assertEquals("Stopped." to false, s.output.value to s.busy.value)
     }
 
-    @Test(timeout = 5_000) fun notConnectedSendsNothing() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedSendsNothing() = runVirtual {
         connected = false
         val s = svc()
         s.run("info")

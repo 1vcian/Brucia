@@ -13,7 +13,7 @@ import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** Reuses [GateRunner] and [until] from DeviceOperationTest. Non-sticky runner so stop() (which
- *  cancels the loop) frees any pending await and runBlocking does not hang. */
+ *  cancels the loop) frees any pending await and the test does not hang. */
 class WidsServiceTest {
     @Test(timeout = 5000) fun cancelledParentAndImmediateClosedLinkDoNotLeaveMonitorActive() {
         for (cancelled in listOf(true, false)) {
@@ -29,7 +29,7 @@ class WidsServiceTest {
         }
     }
 
-    @Test(timeout = 5000) fun invalidWindowOrThresholdDoesNotSendOrWait() = runBlocking {
+    @Test(timeout = 5000) fun invalidWindowOrThresholdDoesNotSendOrWait() = runVirtual {
         val svc = svc()
         for ((seconds, threshold) in listOf(Int.MIN_VALUE to 1, 0 to 1, 121 to 1, Int.MAX_VALUE to 1, 15 to 0)) {
             svc.start(seconds, threshold)
@@ -56,7 +56,7 @@ class WidsServiceTest {
         return seen to launch(start = CoroutineStart.UNDISPATCHED) { svc.status.collect { seen += it } }
     }
 
-    @Test(timeout = 5_000) fun windowStatusParsingAlertAndEvents() = runBlocking {
+    @Test(timeout = 5_000) fun windowStatusParsingAlertAndEvents() = runVirtual {
         val svc = svc(); val (seen, col) = record(svc)
         svc.start(windowSecs = 2, threshold = 20); until { runner.calls.size == 1 }
         assertEquals("jam_detect 2" to 10_000L, runner.calls[0])
@@ -75,7 +75,7 @@ class WidsServiceTest {
             "ALERT: deauth flood (25 in 2s)", "Clear (window 2, deauth=3)", "Clear (window 3, deauth=0)")))
     }
 
-    @Test(timeout = 5_000) fun failedWindowKeepsMonitoring() = runBlocking {
+    @Test(timeout = 5_000) fun failedWindowKeepsMonitoring() = runVirtual {
         val svc = svc(); val (seen, col) = record(svc)
         svc.start(windowSecs = 1, threshold = 20)
         answer(0, false, ""); until { runner.calls.size == 2 } // blank failure keeps looping
@@ -84,14 +84,14 @@ class WidsServiceTest {
         assertTrue(seen.containsAll(listOf("jam_detect failed", "radio busy")))
     }
 
-    @Test(timeout = 5_000) fun notConnectedAtStartSendsNothing() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedAtStartSendsNothing() = runVirtual {
         connected = false
         val svc = svc(); svc.start()
         assertEquals("Connect the device over USB first." to false, svc.state())
         delay(20); assertTrue(runner.calls.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun endsWhenLinkClosesNoSpin() = runBlocking {
+    @Test(timeout = 5_000) fun endsWhenLinkClosesNoSpin() = runVirtual {
         val svc = svc()
         svc.start(windowSecs = 2, threshold = 20); until { runner.calls.size == 1 }
         linkOpen = false
@@ -101,7 +101,7 @@ class WidsServiceTest {
         assertEquals(1, runner.calls.size) // bounded: no spin after the link closed
     }
 
-    @Test(timeout = 5_000) fun endsWhenDisconnectedNoSpin() = runBlocking {
+    @Test(timeout = 5_000) fun endsWhenDisconnectedNoSpin() = runVirtual {
         val svc = svc()
         svc.start(windowSecs = 2, threshold = 20); until { runner.calls.size == 1 }
         connected = false // the bug: VM would spin on immediate "Not connected." failures
@@ -111,7 +111,7 @@ class WidsServiceTest {
         assertEquals("Monitor stopped (link closed).", svc.status.value)
     }
 
-    @Test(timeout = 5_000) fun stopThenRestartIsOwnedByNewRun() = runBlocking {
+    @Test(timeout = 5_000) fun stopThenRestartIsOwnedByNewRun() = runVirtual {
         val svc = svc(); val (seen, col) = record(svc)
         svc.start(windowSecs = 2, threshold = 20); until { runner.calls.size == 1 }
         svc.stop()
@@ -131,7 +131,7 @@ class WidsServiceTest {
         assertFalse(seen.any { it.contains("99") }) // the stale run never wrote status
     }
 
-    @Test(timeout = 5_000) fun ignoredWhileActive() = runBlocking {
+    @Test(timeout = 5_000) fun ignoredWhileActive() = runVirtual {
         val svc = svc()
         svc.start(windowSecs = 2, threshold = 20); until { runner.calls.size == 1 }
         svc.start(windowSecs = 5, threshold = 1); delay(20) // ignored while active
@@ -139,7 +139,7 @@ class WidsServiceTest {
         assertEquals(1, runner.calls.size); svc.stop()
     }
 
-    @Test(timeout = 5_000) fun eventListCapsAt100AndClearEvents() = runBlocking {
+    @Test(timeout = 5_000) fun eventListCapsAt100AndClearEvents() = runVirtual {
         val svc = svc()
         svc.start(windowSecs = 1, threshold = 10_000) // never alerts; deauth>0 -> one event per window
         for (i in 0 until 105) answer(i, true, "deauth=1 total=1")

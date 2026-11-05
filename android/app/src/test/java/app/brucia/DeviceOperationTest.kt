@@ -28,7 +28,7 @@ internal class GateRunner : CommandRunner {
 /** Bounded polling: lets service coroutines run without fixed sleeps. */
 internal suspend fun until(cond: () -> Boolean) = withTimeout(2_000) { while (!cond()) delay(1) }
 
-/** Let every ready coroutine on the single-threaded runBlocking loop run; no wall-clock wait. */
+/** Let every ready coroutine on the single-threaded test loop run; no wall-clock wait. */
 internal suspend fun settle() = repeat(50) { yield() }
 
 class DeviceOperationTest {
@@ -47,7 +47,7 @@ class DeviceOperationTest {
         return status.value
     }
 
-    @Test fun notConnectedSkipsPrecheckAndSendsNothing() = runBlocking {
+    @Test fun notConnectedSkipsPrecheckAndSendsNothing() = runVirtual {
         val op = op(connected = false)
         op.go { fail("precheck ran"); null }
         assertEquals("Connect the device over USB first." to false, op.state())
@@ -55,7 +55,7 @@ class DeviceOperationTest {
         assertTrue(runner.calls.isEmpty())
     }
 
-    @Test fun busyLifecycleMappingAndTimeout() = runBlocking {
+    @Test fun busyLifecycleMappingAndTimeout() = runVirtual {
         val op = op()
         op.go()
         assertEquals("Running..." to true, op.state())
@@ -65,7 +65,7 @@ class DeviceOperationTest {
         assertEquals(listOf("cmd" to 1234L, "cmd" to 1234L), runner.calls.toList())
     }
 
-    @Test fun runnerExceptionBecomesFailureText() = runBlocking {
+    @Test fun runnerExceptionBecomesFailureText() = runVirtual {
         var message: String? = null
         val op = op(CommandRunner { _, _ -> throw IllegalStateException(message) })
         for ((m, text) in listOf("boom" to "boom", null to "fallback")) {
@@ -76,7 +76,7 @@ class DeviceOperationTest {
         }
     }
 
-    @Test fun localRejectAndStopSupersedeInFlight() = runBlocking {
+    @Test fun localRejectAndStopSupersedeInFlight() = runVirtual {
         val op = op()
         op.stop()
         assertEquals("", op.status.value)
@@ -96,7 +96,7 @@ class DeviceOperationTest {
         assertEquals("Stopped." to false, op.state())
     }
 
-    @Test fun supersedeIgnoresOldReplyAndNullRunningKeepsStatus() = runBlocking {
+    @Test fun supersedeIgnoresOldReplyAndNullRunningKeepsStatus() = runVirtual {
         val op = op()
         op.go()
         until { runner.calls.size == 1 }
@@ -108,7 +108,7 @@ class DeviceOperationTest {
         assertEquals("NEW", op.answer(1, true, "NEW"))
     }
 
-    @Test fun perCallTimeoutOverridesOnlyThatCommand() = runBlocking {
+    @Test fun perCallTimeoutOverridesOnlyThatCommand() = runVirtual {
         runner.auto = true to ""
         val op = op()
         op.start("a", null, timeoutMs = 30_000) { _, _ -> "a" }
@@ -117,7 +117,7 @@ class DeviceOperationTest {
         until { op.status.value == "b" }
         assertEquals(listOf("a" to 30_000L, "b" to 1234L), runner.calls.toList())
     }
-    @Test fun clearStatusOnlyWhenIdle() = runBlocking {
+    @Test fun clearStatusOnlyWhenIdle() = runVirtual {
         val op = op()
         op.go()
         assertFalse(op.clearStatus())
@@ -127,7 +127,7 @@ class DeviceOperationTest {
         assertEquals("" to false, op.state())
     }
 
-    @Test fun nullResultKeepsStatusAndClearsBusy() = runBlocking {
+    @Test fun nullResultKeepsStatusAndClearsBusy() = runVirtual {
         val op = op()
         op.go()
         assertEquals("ok:x", op.answer(0, true, "x"))
@@ -135,7 +135,7 @@ class DeviceOperationTest {
         assertEquals("ok:x" to true, op.state())
         assertEquals("ok:x", op.answer(1, false, "err"))
     }
-    @Test fun startJsonDeliversDataSharesOwnershipAndMapsErrors() = runBlocking {
+    @Test fun startJsonDeliversDataSharesOwnershipAndMapsErrors() = runVirtual {
         val replies = CopyOnWriteArrayList<CompletableDeferred<Pair<Boolean, org.json.JSONObject?>>>()
         val json = app.brucia.session.JsonCommandRunner { cmd, timeoutMs ->
             assertEquals("eth_status" to 777L, cmd to timeoutMs)
@@ -162,7 +162,7 @@ class DeviceOperationTest {
         assertEquals("boom", op.status.value)
     }
 
-    @Test fun showIfIdleNeverCancelsAPendingWait() = runBlocking {
+    @Test fun showIfIdleNeverCancelsAPendingWait() = runVirtual {
         val op = op()
         assertTrue(op.showIfIdle("idle note"))
         assertEquals("idle note" to false, op.state())

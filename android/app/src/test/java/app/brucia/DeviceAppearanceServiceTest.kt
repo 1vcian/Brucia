@@ -23,7 +23,7 @@ class DeviceAppearanceServiceTest {
         return status.value
     }
 
-    @Test fun commandsTextsAndCallbacks() = runBlocking {
+    @Test fun commandsTextsAndCallbacks() = runVirtual {
         val svc = svc()
         assertEquals("Theme set.", svc.result(true to "") {
             setTheme(0xFF8040); assertEquals("" to true, status.value to busy.value) // no running text
@@ -45,7 +45,7 @@ class DeviceAppearanceServiceTest {
         assertEquals(listOf(0x123456), leds.toList())
     }
 
-    @Test fun supersededOrStoppedReplyNeverAppliesColor() = runBlocking {
+    @Test fun supersededOrStoppedReplyNeverAppliesColor() = runVirtual {
         runner.sticky = true
         val svc = svc()
         svc.setTheme(0xFF0000)
@@ -68,7 +68,7 @@ class DeviceAppearanceServiceTest {
         assertEquals("Stopped." to emptyList<Int>(), svc.status.value to themes.toList())
     }
 
-    @Test fun notConnectedIsNotSent() = runBlocking {
+    @Test fun notConnectedIsNotSent() = runVirtual {
         val svc = svc { false }
         svc.setTheme(0x123456); svc.setLedColor(1); svc.save(); svc.setLedBright(5); svc.setLedEffect(1)
         assertEquals("Connect the device over USB first." to false, svc.status.value to svc.busy.value)

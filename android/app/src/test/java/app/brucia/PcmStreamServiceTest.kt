@@ -34,17 +34,17 @@ class PcmStreamServiceTest {
         override fun read(out: ShortArray): Int { reads++; return reader.read(out) }
         override fun close() { closes++ }
     }
-    private fun CoroutineScope.service(link: Link) = PcmStreamService(this, { link }, Dispatchers.Unconfined, pause = {})
+    private fun CoroutineScope.service(link: Link) = PcmStreamService(this, { link }, virtualUnconfined, pause = {})
     private fun PcmStreamService.startReader(reader: PcmSource.PcmReader, spec: PcmStreamSpec = PcmStreamSpec()) =
         start(spec, "preparing", "playing") { PcmStreamSource(reader, 1600) }
     private suspend fun done(service: PcmStreamService) = until { !service.status.value.active }
 
-    @Test(timeout = 5000) fun waitsForBeginThenFramesAndPacesAt16kBeforeStopping() = runBlocking {
+    @Test(timeout = 5000) fun waitsForBeginThenFramesAndPacesAt16kBeforeStopping() = runVirtual {
         val link = Link(); val gate = CompletableDeferred<Pair<Boolean, String>>()
         link.beginBody = { gate.await() }
         var clock = 0L; val waits = mutableListOf<Long>()
         val reader = Reader()
-        val service = PcmStreamService(this, { link }, Dispatchers.Unconfined, { clock }, { waits += it; clock += it })
+        val service = PcmStreamService(this, { link }, virtualUnconfined, { clock }, { waits += it; clock += it })
         service.startReader(reader, PcmStreamSpec(fmKHz = 100000))
         until { link.events.size == 1 }
         assertEquals(0, reader.reads)
@@ -60,7 +60,7 @@ class PcmStreamServiceTest {
         assertEquals(1, reader.closes)
     }
 
-    @Test(timeout = 5000) fun failedBeginSendsNoDataClosesSourceAndKeepsError() = runBlocking {
+    @Test(timeout = 5000) fun failedBeginSendsNoDataClosesSourceAndKeepsError() = runVirtual {
         val link = Link().apply { beginBody = { false to "speaker init failed" } }
         val reader = Reader(); val service = service(link)
         service.startReader(reader); done(service)
@@ -69,7 +69,7 @@ class PcmStreamServiceTest {
         assertEquals("speaker init failed", service.status.value.message)
     }
 
-    @Test(timeout = 5000) fun rejectedDataAndReadExceptionsAreNotReportedAsFinished() = runBlocking {
+    @Test(timeout = 5000) fun rejectedDataAndReadExceptionsAreNotReportedAsFinished() = runVirtual {
         for (readError in listOf(false, true)) {
             val link = Link().apply { dataBody = { PcmDataReply(false, "frame rejected") } }
             var closes = 0
@@ -83,7 +83,7 @@ class PcmStreamServiceTest {
         }
     }
 
-    @Test(timeout = 5000) fun stopDuringNonCancellableEncodeClosesLateSourceWithoutBeginning() = runBlocking {
+    @Test(timeout = 5000) fun stopDuringNonCancellableEncodeClosesLateSourceWithoutBeginning() = runVirtual {
         var encoded: Continuation<PcmStreamSource?>? = null
         val link = Link(); val reader = Reader(); val service = service(link)
         service.start(PcmStreamSpec(), "encoding", "playing") { suspendCoroutine { encoded = it } }
@@ -96,14 +96,14 @@ class PcmStreamServiceTest {
         assertEquals(stopped, service.status.value)
     }
 
-    @Test(timeout = 5000) fun restartWaitsForOldStopAndCannotBeClearedByItsFinalizer() = runBlocking {
+    @Test(timeout = 5000) fun restartWaitsForOldStopAndCannotBeClearedByItsFinalizer() = runVirtual {
         val old = Link(); val fresh = Link(); var current = old
         val begin = CompletableDeferred<Pair<Boolean, String>>()
         val stop = CompletableDeferred<Pair<Boolean, String>>()
         old.beginBody = { begin.await() }; old.stopBody = { stop.await() }
         val newBegin = CompletableDeferred<Pair<Boolean, String>>()
         fresh.beginBody = { newBegin.await() }
-        val service = PcmStreamService(this, { current }, Dispatchers.Unconfined, pause = {})
+        val service = PcmStreamService(this, { current }, virtualUnconfined, pause = {})
         val oldReader = Reader(); val newReader = Reader()
         service.startReader(oldReader); until { old.events.contains("begin") }
         service.stop(); until { old.events.contains("stop") }
@@ -139,7 +139,7 @@ class PcmStreamServiceTest {
         } finally { release.countDown(); service.stop() }
     }
 
-    @Test(timeout = 5000) fun deviceMicKeepsAnOwnerUntilStop() = runBlocking {
+    @Test(timeout = 5000) fun deviceMicKeepsAnOwnerUntilStop() = runVirtual {
         val link = Link(); val service = service(link)
         service.start(PcmStreamSpec(100000, true), "starting", "device mic")
         until { service.status.value.message == "device mic" }
@@ -149,12 +149,12 @@ class PcmStreamServiceTest {
         assertFalse(service.status.value.active)
     }
 
-    @Test(timeout = 5000) fun duplicateStartAndInvalidOrUnavailableHardwareDoNotCreateSources() = runBlocking {
+    @Test(timeout = 5000) fun duplicateStartAndInvalidOrUnavailableHardwareDoNotCreateSources() = runVirtual {
         var creates = 0
         val link = Link(); val service = service(link)
         service.start(PcmStreamSpec(1), "bad", "bad") { creates++; null }
         assertTrue(link.events.isEmpty())
-        val unavailable = PcmStreamService(this, { throw IOException("No confirmed speaker.") })
+        val unavailable = PcmStreamService(this, { throw IOException("No confirmed speaker.") }, virtualUnconfined)
         unavailable.start(PcmStreamSpec(), "bad", "bad") { creates++; null }
         assertEquals("No confirmed speaker.", unavailable.status.value.message)
         service.start(PcmStreamSpec(100000, true), "start", "playing") { creates++; null }
@@ -164,11 +164,11 @@ class PcmStreamServiceTest {
         service.stop()
     }
 
-    @Test(timeout = 5000) fun parentCancellationBeforeAndDuringPreparationClearsActive() = runBlocking {
+    @Test(timeout = 5000) fun parentCancellationBeforeAndDuringPreparationClearsActive() = runVirtual {
         for (before in listOf(true, false)) {
             val parent = Job(); if (before) parent.cancel()
             val link = Link(); var preparing = false
-            val service = PcmStreamService(CoroutineScope(coroutineContext + parent), { link }, Dispatchers.Unconfined)
+            val service = PcmStreamService(CoroutineScope(coroutineContext + parent), { link }, virtualUnconfined)
             service.start(PcmStreamSpec(), "preparing", "playing") { preparing = true; awaitCancellation() }
             if (!before) { until { preparing }; parent.cancel() }
             parent.join(); done(service)
@@ -176,14 +176,14 @@ class PcmStreamServiceTest {
         }
     }
 
-    @Test(timeout = 5000) fun zeroReadBacksOffAndInvalidCountsOrCloseFailureAreErrors() = runBlocking {
+    @Test(timeout = 5000) fun zeroReadBacksOffAndInvalidCountsOrCloseFailureAreErrors() = runVirtual {
         for (badCount in listOf(true, false)) {
             val link = Link(); val waits = mutableListOf<Long>(); var reads = 0; var closes = 0
             val reader = object : PcmSource.PcmReader {
                 override fun read(out: ShortArray): Int = if (reads++ == 0) 0 else if (badCount) out.size + 1 else -1
                 override fun close() { closes++; if (!badCount) throw IOException("close error") }
             }
-            val service = PcmStreamService(this, { link }, Dispatchers.Unconfined, pause = { waits += it })
+            val service = PcmStreamService(this, { link }, virtualUnconfined, pause = { waits += it })
             service.startReader(reader); done(service)
             assertEquals(listOf(5L), waits); assertEquals(1, closes)
             assertFalse(service.status.value.message == "Finished.")
@@ -191,7 +191,7 @@ class PcmStreamServiceTest {
         }
     }
 
-    @Test(timeout = 5000) fun failedStopIsNotReportedAsSuccessfulCompletion() = runBlocking {
+    @Test(timeout = 5000) fun failedStopIsNotReportedAsSuccessfulCompletion() = runVirtual {
         val link = Link().apply { stopBody = { false to "stop failed" } }
         val reader = Reader(); val service = service(link)
         service.startReader(reader); done(service)

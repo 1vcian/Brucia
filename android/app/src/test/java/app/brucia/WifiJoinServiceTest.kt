@@ -16,7 +16,7 @@ class WifiJoinServiceTest {
         return status.value
     }
 
-    @Test fun textsCommandsAndTimeouts() = runBlocking {
+    @Test fun textsCommandsAndTimeouts() = runVirtual {
         val svc = WifiJoinService(this, runner, { true })
         assertEquals("connected Home 192.168.1.5", svc.result(true to " connected Home 192.168.1.5\n") {
             refresh(); assertEquals("" to true, status.value to busy.value) // no running text
@@ -34,7 +34,7 @@ class WifiJoinServiceTest {
             "wifi_disconnect" to 10_000L), runner.calls.toList())
     }
 
-    @Test fun localRejectionsAreNotSent() = runBlocking {
+    @Test fun localRejectionsAreNotSent() = runVirtual {
         var connected = false
         val svc = WifiJoinService(this, runner, { connected })
         svc.join("Home", "pw")
@@ -46,7 +46,7 @@ class WifiJoinServiceTest {
         assertTrue(runner.calls.isEmpty())
     }
 
-    @Test fun refreshSupersedesPendingJoin() = runBlocking {
+    @Test fun refreshSupersedesPendingJoin() = runVirtual {
         val svc = WifiJoinService(this, runner, { true })
         svc.join("Home", "pw")
         until { runner.calls.size == 1 }

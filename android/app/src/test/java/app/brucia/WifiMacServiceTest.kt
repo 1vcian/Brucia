@@ -16,7 +16,7 @@ class WifiMacServiceTest {
         return status.value
     }
 
-    @Test fun getAndSetTextsAndCommands() = runBlocking {
+    @Test fun getAndSetTextsAndCommands() = runVirtual {
         val svc = WifiMacService(this, runner, { true })
         assertEquals("AA:BB:CC:DD:EE:FF", svc.result(true to " AA:BB:CC:DD:EE:FF\n") {
             get(); assertEquals("" to true, status.value to busy.value) // no running text
@@ -39,7 +39,7 @@ class WifiMacServiceTest {
             "aa:bb:cc:dd:ee:gg").forEach { assertFalse(it, WifiMacService.isValidMacArg(it)) }
     }
 
-    @Test fun invalidMacOrNoConnectionIsNotSent() = runBlocking {
+    @Test fun invalidMacOrNoConnectionIsNotSent() = runVirtual {
         var connected = false
         val svc = WifiMacService(this, runner, { connected })
         svc.get()

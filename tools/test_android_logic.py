@@ -33,7 +33,7 @@ TESTS = [
     "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
 ]
 # Test-only files without a test class (compiled, not run).
-TEST_HELPERS = ["DeviceJson"]
+TEST_HELPERS = ["DeviceJson", "VirtualTime"]
 SOURCES = [
     "protocol/Protocol.kt", "protocol/CompanionClient.kt", "protocol/CommandReply.kt", "protocol/LinkCounters.kt",
     "protocol/FrameBudget.kt",

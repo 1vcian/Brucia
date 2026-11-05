@@ -36,7 +36,7 @@ class ReleaseUpdateServiceTest {
         assertTrue(state.boards.isEmpty())
     }
 
-    @Test(timeout = 5000) fun changingApiResponsesNeverMixMetadataAndAssets() = runBlocking {
+    @Test(timeout = 5000) fun changingApiResponsesNeverMixMetadataAndAssets() = runVirtual {
         val responses = ArrayDeque(listOf(full("v0.2"), full("v0.3")))
         var calls = 0
         val service = ReleaseUpdateService(this, fetch = {
@@ -45,7 +45,7 @@ class ReleaseUpdateServiceTest {
                 calls++
                 responses.removeFirst()
             }
-        }, dispatcher = Dispatchers.Unconfined)
+        }, dispatcher = virtualUnconfined)
         service.refresh("0.1")!!.join()
         val first = service.state.value
         assertEquals(1, calls)
@@ -67,11 +67,11 @@ class ReleaseUpdateServiceTest {
         assertTrue(first.boards.all { it.url.contains("/v0.2/") })
     }
 
-    @Test(timeout = 5000) fun failedRefreshClearsSelectionAndEveryActionableUrlAndCanRetry() = runBlocking {
+    @Test(timeout = 5000) fun failedRefreshClearsSelectionAndEveryActionableUrlAndCanRetry() = runVirtual {
         var attempt = 0
         val service = ReleaseUpdateService(this, fetch = {
             when (++attempt) { 2 -> throw IOException("HTTP 404"); else -> parsed("v0.2") }
-        }, dispatcher = Dispatchers.Unconfined)
+        }, dispatcher = virtualUnconfined)
         service.refresh("0.1")!!.join()
         val board = service.state.value.boards.first()
         assertTrue(service.select(board))
@@ -115,8 +115,8 @@ class ReleaseUpdateServiceTest {
         assertNotNull(service.state.value.apkUrl)
     }
 
-    @Test(timeout = 5000) fun explicitUnsupportedOrForeignBoardNeverFallsBackToDefaultImage() = runBlocking {
-        val service = ReleaseUpdateService(this, { parsed("v0.2") }, Dispatchers.Unconfined)
+    @Test(timeout = 5000) fun explicitUnsupportedOrForeignBoardNeverFallsBackToDefaultImage() = runVirtual {
+        val service = ReleaseUpdateService(this, { parsed("v0.2") }, virtualUnconfined)
         service.refresh("0.1")!!.join()
         val auto = service.state.value.flashUrl
         val cardputer = service.state.value.boards.last()
@@ -130,9 +130,9 @@ class ReleaseUpdateServiceTest {
         assertEquals(auto, service.state.value.flashUrl)
     }
 
-    @Test(timeout = 5000) fun missingAssetsInNextReleaseDoNotKeepPreviousDownloads() = runBlocking {
+    @Test(timeout = 5000) fun missingAssetsInNextReleaseDoNotKeepPreviousDownloads() = runVirtual {
         var response = full("v0.2")
-        val service = ReleaseUpdateService(this, { AppUpdater.fetchSnapshot { response } }, Dispatchers.Unconfined)
+        val service = ReleaseUpdateService(this, { AppUpdater.fetchSnapshot { response } }, virtualUnconfined)
         service.refresh("0.1")!!.join()
         response = body("v0.3", "Bruce-m5stack-cardputer.bin")
         service.refresh("0.1")!!.join()
@@ -146,9 +146,9 @@ class ReleaseUpdateServiceTest {
         assertNull(service.state.value.flashUrl)
     }
 
-    @Test(timeout = 5000) fun malformedOrAmbiguousRefreshFailsAsOneUnit() = runBlocking {
+    @Test(timeout = 5000) fun malformedOrAmbiguousRefreshFailsAsOneUnit() = runVirtual {
         var response = full("v0.2")
-        val service = ReleaseUpdateService(this, { AppUpdater.fetchSnapshot { response } }, Dispatchers.Unconfined)
+        val service = ReleaseUpdateService(this, { AppUpdater.fetchSnapshot { response } }, virtualUnconfined)
         service.refresh("0.1")!!.join()
         for (invalid in listOf("not json", body("v0.3", "one.apk", "two.apk"))) {
             response = invalid
@@ -178,10 +178,10 @@ class ReleaseUpdateServiceTest {
         assertEquals("Check cancelled", service.state.value.error)
     }
 
-    @Test(timeout = 5000) fun alreadyCancelledParentDoesNotLeaveCheckingStuck() = runBlocking {
+    @Test(timeout = 5000) fun alreadyCancelledParentDoesNotLeaveCheckingStuck() = runVirtual {
         val parent = Job().apply { cancel() }
         var fetched = false
-        val service = ReleaseUpdateService(CoroutineScope(parent + Dispatchers.Unconfined), {
+        val service = ReleaseUpdateService(CoroutineScope(parent + virtualUnconfined), {
             fetched = true
             parsed("v0.2")
         })

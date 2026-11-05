@@ -49,7 +49,7 @@ class IButtonServiceTest {
     /** Bounded polling: lets the service coroutine run without fixed sleeps. */
     private suspend fun until(cond: () -> Boolean) = withTimeout(2_000) { while (!cond()) delay(1) }
 
-    @Test fun readSuccessShowsId() = runBlocking {
+    @Test fun readSuccessShowsId() = runVirtual {
         replyWith(true, "id=0123456789ABCDEF")
         val svc = service()
         svc.read()
@@ -60,7 +60,7 @@ class IButtonServiceTest {
         assertEquals(listOf("ibutton_read"), sentCmds())
     }
 
-    @Test fun readWithoutKeyShowsFirmwareText() = runBlocking {
+    @Test fun readWithoutKeyShowsFirmwareText() = runVirtual {
         replyWith(false, "no iButton")
         val svc = service()
         svc.read()
@@ -68,7 +68,7 @@ class IButtonServiceTest {
         assertEquals("no iButton", svc.status.value)
     }
 
-    @Test fun writeSendsNormalizedId() = runBlocking {
+    @Test fun writeSendsNormalizedId() = runVirtual {
         replyWith(true, "")
         val svc = service()
         svc.write(" 01:23:45:67 89ab cdef ")
@@ -78,7 +78,7 @@ class IButtonServiceTest {
         assertEquals(listOf("ibutton_write 0123456789abcdef"), sentCmds())
     }
 
-    @Test fun invalidOrBlankIdIsRejectedLocally() = runBlocking {
+    @Test fun invalidOrBlankIdIsRejectedLocally() = runVirtual {
         val svc = service()
         svc.write("0123456789ABCDEZ")
         assertEquals(IButtonService.INVALID_ID, svc.status.value)
@@ -90,7 +90,7 @@ class IButtonServiceTest {
         assertTrue(t.frames.isEmpty())
     }
 
-    @Test fun firmwareRejectionTextIsShown() = runBlocking {
+    @Test fun firmwareRejectionTextIsShown() = runVirtual {
         replyWith(false, "invalid id (need 16 hex chars)")
         val svc = service()
         svc.write("0123456789ABCDEF")
@@ -98,7 +98,7 @@ class IButtonServiceTest {
         assertEquals("invalid id (need 16 hex chars)", svc.status.value)
     }
 
-    @Test fun notConnectedOrNoInterfaceSendsNothing() = runBlocking {
+    @Test fun notConnectedOrNoInterfaceSendsNothing() = runVirtual {
         val svc = service()
         connected = false
         svc.read()
@@ -115,7 +115,7 @@ class IButtonServiceTest {
         assertTrue(t.frames.isEmpty())
     }
 
-    @Test fun timeoutReportsNoResponse() = runBlocking {
+    @Test fun timeoutReportsNoResponse() = runVirtual {
         val svc = service(timeoutMs = 50)
         svc.read()
         until { !svc.busy.value }
@@ -123,7 +123,7 @@ class IButtonServiceTest {
         assertFalse(session.hasPending)
     }
 
-    @Test fun stopCancelsAndIgnoresLateReply() = runBlocking {
+    @Test fun stopCancelsAndIgnoresLateReply() = runVirtual {
         val svc = service()
         svc.stop()
         assertEquals("", svc.status.value)
@@ -139,7 +139,7 @@ class IButtonServiceTest {
         assertFalse(svc.busy.value)
     }
 
-    @Test fun secondReadSupersedesFirst() = runBlocking {
+    @Test fun secondReadSupersedesFirst() = runVirtual {
         val svc = service()
         svc.read()
         until { t.frames.size == 1 }
@@ -155,7 +155,7 @@ class IButtonServiceTest {
         assertEquals("id=NEW", svc.status.value)
     }
 
-    @Test fun sessionCloseThenReconnectWorks() = runBlocking {
+    @Test fun sessionCloseThenReconnectWorks() = runVirtual {
         val svc = service()
         svc.read()
         until { t.frames.size == 1 }

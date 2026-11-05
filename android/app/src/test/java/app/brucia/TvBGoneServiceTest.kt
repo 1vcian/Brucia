@@ -10,7 +10,7 @@ class TvBGoneServiceTest {
 
     private fun TvBGoneService.state() = status.value to busy.value
 
-    @Test fun commandTimeoutAndTexts() = runBlocking {
+    @Test fun commandTimeoutAndTexts() = runVirtual {
         val s = TvBGoneService(this, runner) { true }
         val cases = listOf(
             Triple("na", true to "TV-B-Gone done (120 codes)", "TV-B-Gone done (120 codes)"),
@@ -32,7 +32,7 @@ class TvBGoneServiceTest {
         )
     }
 
-    @Test fun defaultRegionIsNa() = runBlocking {
+    @Test fun defaultRegionIsNa() = runVirtual {
         runner.auto = true to ""
         val s = TvBGoneService(this, runner) { true }
         s.run()
@@ -41,7 +41,7 @@ class TvBGoneServiceTest {
         assertEquals(listOf("ir_tvbgone na"), runner.cmds)
     }
 
-    @Test fun stopIgnoresLateAck() = runBlocking {
+    @Test fun stopIgnoresLateAck() = runVirtual {
         val s = TvBGoneService(this, runner) { true }
         s.run("eu")
         until { runner.calls.size == 1 }
@@ -52,7 +52,7 @@ class TvBGoneServiceTest {
         assertEquals("Stopped." to false, s.state())
     }
 
-    @Test fun notConnectedSendsNothing() = runBlocking {
+    @Test fun notConnectedSendsNothing() = runVirtual {
         val s = TvBGoneService(this, runner) { false }
         s.run("na")
         assertEquals("Connect the device over USB first." to false, s.state())

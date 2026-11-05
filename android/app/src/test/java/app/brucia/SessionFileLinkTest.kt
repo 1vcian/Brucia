@@ -43,7 +43,7 @@ class SessionFileLinkTest {
         }
     }
 
-    @Test(timeout = 5000) fun readsOnlyMatchingSizeAndCrcOnRealSession() = runBlocking {
+    @Test(timeout = 5000) fun readsOnlyMatchingSizeAndCrcOnRealSession() = runVirtual {
         for (valid in listOf(true, false)) {
             val f = Fixture(); val bytes = "fixture".toByteArray()
             f.wire.onWrite = { frame ->
@@ -60,7 +60,7 @@ class SessionFileLinkTest {
         }
     }
 
-    @Test(timeout = 5000) fun stagedChunkedAndEmptyUploadRequireMatchingCommit() = runBlocking {
+    @Test(timeout = 5000) fun stagedChunkedAndEmptyUploadRequireMatchingCommit() = runVirtual {
         for (size in listOf(0, 7000)) {
             val f = Fixture(); val received = mutableListOf<Byte>()
             var token = ""; var checksum = 0L
@@ -119,7 +119,7 @@ class SessionFileLinkTest {
         return chunks to largest
     }
 
-    @Test(timeout = 10000) fun uploadChunksFollowTheDeviceRxMax() = runBlocking {
+    @Test(timeout = 10000) fun uploadChunksFollowTheDeviceRxMax() = runVirtual {
         // Bytes 0..255 cycle: their base64 contains '/' and '+', the characters org.json may escape.
         val bytes = ByteArray(7000) { it.toByte() }
         val (legacyChunks, legacyLargest) = uploadWithBudget(FrameBudget.LEGACY_RX_MAX, bytes)
@@ -133,7 +133,7 @@ class SessionFileLinkTest {
         assertTrue(fullLargest in 4096..FrameBudget.MAX_FRAME)
     }
 
-    @Test(timeout = 5000) fun budgetTooSmallForAnyChunkFailsBeforeSendingChunks() = runBlocking {
+    @Test(timeout = 5000) fun budgetTooSmallForAnyChunkFailsBeforeSendingChunks() = runVirtual {
         val f = Fixture(budget = 90) // below the ~96-byte chunk command envelope
         f.wire.onWrite = { frame ->
             val words = frame.getJSONObject("d").getString("cmd").split(' ')
@@ -154,7 +154,7 @@ class SessionFileLinkTest {
         f.session.route(JSONObject().put("t", Kind.ACK).put("id", frame.getInt("id")).put("d", data))
     }
 
-    @Test(timeout = 5000) fun incorrectBeginAckAbortsWithoutSendingChunks() = runBlocking {
+    @Test(timeout = 5000) fun incorrectBeginAckAbortsWithoutSendingChunks() = runVirtual {
         for (wrongToken in listOf(true, false)) {
             val f = Fixture()
             f.wire.onWrite = { frame ->
@@ -169,7 +169,7 @@ class SessionFileLinkTest {
         }
     }
 
-    @Test(timeout = 5000) fun uploadTimeoutAndCancellationAbortWithoutContinuing() = runBlocking {
+    @Test(timeout = 5000) fun uploadTimeoutAndCancellationAbortWithoutContinuing() = runVirtual {
         for (cancel in listOf(false, true)) {
             val f = Fixture()
             val job = launch { runCatching { f.link.write("/fixture", ByteArray(7000)) } }
@@ -185,7 +185,7 @@ class SessionFileLinkTest {
         }
     }
 
-    @Test(timeout = 5000) fun olderFirmwareReadStillWorksButUploadNeverFallsBackToTruncate() = runBlocking {
+    @Test(timeout = 5000) fun olderFirmwareReadStillWorksButUploadNeverFallsBackToTruncate() = runVirtual {
         val f = Fixture(transactional = false)
         assertTrue(runCatching { f.link.write("/fixture", ByteArray(0)) }.exceptionOrNull()!!.message!!.contains("transactional"))
         assertTrue(f.wire.frames.isEmpty())
@@ -193,7 +193,7 @@ class SessionFileLinkTest {
         assertArrayEquals(ByteArray(0), f.link.read("/fixture"))
     }
 
-    @Test(timeout = 5000) fun badChunkOrCommitAckCannotReportSaved() = runBlocking {
+    @Test(timeout = 5000) fun badChunkOrCommitAckCannotReportSaved() = runVirtual {
         for (failure in listOf("chunk", "crc", "committed", "error")) {
             val f = Fixture()
             f.wire.onWrite = { frame ->
@@ -212,7 +212,7 @@ class SessionFileLinkTest {
         }
     }
 
-    @Test(timeout = 5000) fun disconnectNeverAbortsOnReplacementSession() = runBlocking {
+    @Test(timeout = 5000) fun disconnectNeverAbortsOnReplacementSession() = runVirtual {
         val f = Fixture()
         f.wire.onWrite = { frame ->
             val token = frame.getJSONObject("d").getString("cmd").split(' ')[1]
@@ -224,7 +224,7 @@ class SessionFileLinkTest {
         assertFalse(f.session.hasPending)
     }
 
-    @Test(timeout = 5000) fun lostOrMismatchedCommitReplyRequiresVerificationWithoutRetry() = runBlocking {
+    @Test(timeout = 5000) fun lostOrMismatchedCommitReplyRequiresVerificationWithoutRetry() = runVirtual {
         for (lost in listOf(true, false)) {
             val f = Fixture()
             f.wire.onWrite = { frame ->
@@ -240,7 +240,7 @@ class SessionFileLinkTest {
         }
     }
 
-    @Test(timeout = 5000) fun traversalReservedNamesAndInvalidPathComponentsRejectBeforeBegin() = runBlocking {
+    @Test(timeout = 5000) fun traversalReservedNamesAndInvalidPathComponentsRejectBeforeBegin() = runVirtual {
         val f = Fixture()
         for (path in listOf("/", "/a/../b", "/a//b", "/a/", "/a.", "/.BRUCIA-UPLOAD.part", "/a\\b", "/a:b", "/" + "x".repeat(192))) {
             assertTrue(path, runCatching { f.link.write(path, ByteArray(0)) }.isFailure)
@@ -248,7 +248,7 @@ class SessionFileLinkTest {
         assertTrue(f.wire.frames.isEmpty())
     }
 
-    @Test(timeout = 5000) fun queuedWireOperationsRecheckSessionAndRespectCancellation() = runBlocking {
+    @Test(timeout = 5000) fun queuedWireOperationsRecheckSessionAndRespectCancellation() = runVirtual {
         for (cancel in listOf(false, true)) {
             val f = Fixture(); f.mutex.lock()
             val queued = launch { runCatching { f.link.read("/fixture") } }
@@ -259,7 +259,7 @@ class SessionFileLinkTest {
         }
     }
 
-    @Test(timeout = 5000) fun cancelledReadReleasesRequestAndRejectsLateData() = runBlocking {
+    @Test(timeout = 5000) fun cancelledReadReleasesRequestAndRejectsLateData() = runVirtual {
         val f = Fixture()
         val job = launch { f.link.read("/fixture") }
         until { f.wire.frames.isNotEmpty() }
@@ -271,7 +271,7 @@ class SessionFileLinkTest {
         assertArrayEquals(ByteArray(0), f.link.read("/new"))
     }
 
-    @Test(timeout = 5000) fun invalidPathsOversizeAndClosedSessionSendNothing() = runBlocking {
+    @Test(timeout = 5000) fun invalidPathsOversizeAndClosedSessionSendNothing() = runVirtual {
         val f = Fixture()
         assertTrue(runCatching { f.link.read("/bad\npath") }.isFailure)
         assertTrue(runCatching { f.link.write("/fixture", ByteArray(SessionFileLink.MAX_BYTES + 1)) }.isFailure)

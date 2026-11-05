@@ -147,7 +147,7 @@ class LinkResyncTest {
         assertEquals("""{"a":"\u0001\"q"}""", c.unescapeSlashes("""{"a":"\u0001\"q"}"""))
     }
 
-    @Test fun pcmFramesFitTheReportedRxMaxEvenForSlashHeavyAudio() = runBlocking {
+    @Test fun pcmFramesFitTheReportedRxMaxEvenForSlashHeavyAudio() = runVirtual {
         for ((rxMax, fm) in listOf(1792 to false, 1792 to true, 768 to false, 8192 to false, 8192 to true)) {
             val spec = PcmStreamSpec(fmKHz = if (fm) 100000 else null, rxMax = rxMax)
             val wire = Wire(); val client = CompanionClient(wire).apply { sendLimit = rxMax }

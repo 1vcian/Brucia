@@ -34,7 +34,7 @@ class BleHidServiceTest {
         delay(20)
     }
 
-    @Test fun beginTextsTimeoutAndInitialOff() = runBlocking {
+    @Test fun beginTextsTimeoutAndInitialOff() = runVirtual {
         val svc = svc()
         assertEquals("off" to false, svc.state())
         svc.begin()
@@ -51,7 +51,7 @@ class BleHidServiceTest {
         assertEquals(10_000L, BleHidService.TIMEOUT_MS)
     }
 
-    @Test fun disconnectedBeginSetsConnectTextOthersNoop() = runBlocking {
+    @Test fun disconnectedBeginSetsConnectTextOthersNoop() = runVirtual {
         connected = false
         val svc = svc()
         svc.begin()
@@ -62,7 +62,7 @@ class BleHidServiceTest {
         assertTrue(runner.calls.isEmpty())           // nothing sent at all
     }
 
-    @Test fun refreshKeyTypeAlongsideTextsAndEmptyIgnored() = runBlocking {
+    @Test fun refreshKeyTypeAlongsideTextsAndEmptyIgnored() = runVirtual {
         val svc = svc()
         assertEquals("advertising", svc.result(true to "") { begin() })
         svc.type("")                                       // empty -> ignored, no send
@@ -83,7 +83,7 @@ class BleHidServiceTest {
         assertTrue(runner.calls.all { it.second == 10_000L })
     }
 
-    @Test fun endSupersedesPendingBeginToOff() = runBlocking {
+    @Test fun endSupersedesPendingBeginToOff() = runVirtual {
         val svc = svc()
         runner.sticky = true
         svc.begin()
@@ -100,7 +100,7 @@ class BleHidServiceTest {
         assertEquals(listOf("ble_hid_begin", "ble_hid_end"), runner.cmds)
     }
 
-    @Test fun alongsideDoesNotSupersedePendingBegin() = runBlocking {
+    @Test fun alongsideDoesNotSupersedePendingBegin() = runVirtual {
         val svc = svc()
         runner.sticky = true
         svc.begin()
@@ -115,7 +115,7 @@ class BleHidServiceTest {
         assertEquals("advertising", svc.status.value)
         assertEquals(listOf("ble_hid_begin", "ble_hid_key next"), runner.cmds)
     }
-    @Test fun stopSupersedesWaitingBegin() = runBlocking {
+    @Test fun stopSupersedesWaitingBegin() = runVirtual {
         val svc = svc()
         runner.sticky = true
         svc.begin()

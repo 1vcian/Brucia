@@ -32,7 +32,7 @@ class BadBleServiceTest {
         assertEquals(n, runner.calls.size)
     }
 
-    @Test fun runTextsAndTimeout() = runBlocking {
+    @Test fun runTextsAndTimeout() = runVirtual {
         val svc = svc()
         svc.run("STRING hi")
         assertEquals("Running over BLE..." to true, svc.state())
@@ -49,14 +49,14 @@ class BadBleServiceTest {
         assertEquals(650_000L, BadBleService.TIMEOUT_MS)
     }
 
-    @Test fun blankOrDisconnectedRejectedWithoutSending() = runBlocking {
+    @Test fun blankOrDisconnectedRejectedWithoutSending() = runVirtual {
         val svc = svc()
         svc.rejects("Script is empty.") { run("") }
         svc.rejects("Script is empty.") { run("   \n  ") }
         connected = false
         svc.rejects(notConnected) { run("x") }
     }
-    @Test fun stopSupersedesWaitingRun() = runBlocking {
+    @Test fun stopSupersedesWaitingRun() = runVirtual {
         val svc = svc()
         runner.sticky = true
         svc.run("payload")

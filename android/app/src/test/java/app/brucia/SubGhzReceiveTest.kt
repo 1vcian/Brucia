@@ -42,11 +42,11 @@ class SubGhzReceiveTest {
         val rx = SubGhzReceiveState()
         val subs = StreamSubscriptions(scope, { session }, { caps },
             onState = { s, on -> rx.onState(s, on) }, onError = rx::onError,
-            dispatcher = Dispatchers.Unconfined, timeoutMs = 30)
+            dispatcher = scope.virtualUnconfined, timeoutMs = 30)
         fun set(stream: String, on: Boolean) { rx.request(stream, on); subs.set(stream, on) }
     }
 
-    @Test(timeout = 5000) fun rawStartRejectedWith503TurnsListenOffAndShowsError() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun rawStartRejectedWith503TurnsListenOffAndShowsError() = runVirtual<Unit> {
         val f = Fixture(this)
         f.device.reply = { err(it, 503, "sub-ghz receiver init failed") }
         f.set("subghz.raw", true)
@@ -61,7 +61,7 @@ class SubGhzReceiveTest {
         assertEquals("", f.rx.rawError.value)
     }
 
-    @Test(timeout = 5000) fun spectrumStartRejectedTurnsSpectrumOffAndShowsError() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun spectrumStartRejectedTurnsSpectrumOffAndShowsError() = runVirtual<Unit> {
         val f = Fixture(this)
         f.device.reply = { err(it, 503, "CC1101 init failed") }
         f.set("subghz.spectrum", true)
@@ -70,7 +70,7 @@ class SubGhzReceiveTest {
         assertEquals("", f.rx.rawError.value)
     }
 
-    @Test(timeout = 5000) fun missingAckTurnsListenOffAfterTheDeadline() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun missingAckTurnsListenOffAfterTheDeadline() = runVirtual<Unit> {
         val f = Fixture(this)
         f.set("subghz.raw", true)
         assertTrue(f.rx.listening.value) // optimistic while pending
@@ -78,7 +78,7 @@ class SubGhzReceiveTest {
         assertEquals("No stream acknowledgement from the device", f.rx.rawError.value)
     }
 
-    @Test(timeout = 5000) fun stopFailuresAndSupersededStartsAreNotReportedAsListenErrors() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun stopFailuresAndSupersededStartsAreNotReportedAsListenErrors() = runVirtual<Unit> {
         val f = Fixture(this)
         f.device.reply = { ack(it) }
         f.set("subghz.raw", true)
@@ -97,7 +97,7 @@ class SubGhzReceiveTest {
         assertFalse(f.rx.listening.value || f.rx.spectrumActive.value)
     }
 
-    @Test(timeout = 5000) fun missingHardwareStartIsReportedWithoutWriting() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun missingHardwareStartIsReportedWithoutWriting() = runVirtual<Unit> {
         val f = Fixture(this, DeviceCaps())
         f.set("subghz.raw", true)
         assertTrue(f.device.frames.isEmpty())

@@ -13,7 +13,7 @@ class MicRecordServiceTest {
     private fun CoroutineScope.svc(connected: Boolean = true) = MicRecordService(this, runner, { connected })
     private fun MicRecordService.state() = status.value to busy.value
 
-    @Test fun recordTextsCommandsAndTimeouts() = runBlocking {
+    @Test fun recordTextsCommandsAndTimeouts() = runVirtual {
         val svc = svc()
         svc.record(5)
         assertEquals("Recording 5s..." to true, svc.state())
@@ -34,7 +34,7 @@ class MicRecordServiceTest {
             "mic_record 30" to 40_000L, "mic_record 1" to 11_000L), runner.calls.toList())
     }
 
-    @Test fun localRejectionsAreNotSent() = runBlocking {
+    @Test fun localRejectionsAreNotSent() = runVirtual {
         val svc = svc()
         for (secs in listOf(0, -3)) {
             svc.record(secs)
@@ -47,7 +47,7 @@ class MicRecordServiceTest {
         assertTrue(runner.calls.isEmpty())
     }
 
-    @Test fun stopIgnoresLateReply() = runBlocking {
+    @Test fun stopIgnoresLateReply() = runVirtual {
         runner.sticky = true
         val svc = svc()
         svc.record(10)

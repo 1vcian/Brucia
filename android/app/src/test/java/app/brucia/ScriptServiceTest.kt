@@ -16,7 +16,7 @@ class ScriptServiceTest {
         return output.value
     }
 
-    @Test fun runTextsCommandAndTimeout() = runBlocking {
+    @Test fun runTextsCommandAndTimeout() = runVirtual {
         val svc = ScriptService(this, runner, { true })
         assertEquals("hello\n", svc.result(true to "hello\n") {
             run(" print('hello') "); assertEquals("Running..." to true, output.value to busy.value)
@@ -28,7 +28,7 @@ class ScriptServiceTest {
             "script_run 1" to 25_000L, "script_run 1" to 25_000L), runner.calls.toList())
     }
 
-    @Test fun localRejectionsAreNotSent() = runBlocking {
+    @Test fun localRejectionsAreNotSent() = runVirtual {
         var connected = false
         val svc = ScriptService(this, runner, { connected })
         svc.run("1")
@@ -47,7 +47,7 @@ class ScriptServiceTest {
         assertNull(ScriptService.precheck("é".repeat(3000)))
     }
 
-    @Test fun clearOnlyWhenIdleAndNeverCancelsARun() = runBlocking {
+    @Test fun clearOnlyWhenIdleAndNeverCancelsARun() = runVirtual {
         var connected = true
         val svc = ScriptService(this, runner, { connected })
         assertEquals("out", svc.result(true to "out") { run("1") })

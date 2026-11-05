@@ -31,7 +31,7 @@ class MifareKeyCheckServiceTest {
     private suspend fun until(condition: () -> Boolean) = withTimeout(2000) { while (!condition()) delay(1) }
     private suspend fun finished(service: MifareKeyCheckService) = until { !service.status.value.running }
 
-    @Test(timeout = 5000) fun batchesSnapshotAndNormalizeKeysWithExistingTimeout() = runBlocking {
+    @Test(timeout = 5000) fun batchesSnapshotAndNormalizeKeysWithExistingTimeout() = runVirtual {
         val original = (keys(49) + "ffffffffffff" + " FFFFFFFFFFFF ").toMutableList()
         val sent = mutableListOf<String>()
         val service = MifareKeyCheckService(this, { JsonCommandRunner { cmd, timeout ->
@@ -50,7 +50,7 @@ class MifareKeyCheckServiceTest {
         assertEquals(key, service.status.value.found.single().key)
     }
 
-    @Test(timeout = 5000) fun failureRetainsPriorResultsAndStopsRemainingBatches() = runBlocking {
+    @Test(timeout = 5000) fun failureRetainsPriorResultsAndStopsRemainingBatches() = runVirtual {
         var calls = 0
         val service = MifareKeyCheckService(this, { JsonCommandRunner { _, _ ->
             calls++
@@ -63,7 +63,7 @@ class MifareKeyCheckServiceTest {
         assertFalse(service.status.value.completed)
     }
 
-    @Test(timeout = 5000) fun rejectsMalformedRepliesWithoutPartialCommitOrNextBatch() = runBlocking {
+    @Test(timeout = 5000) fun rejectsMalformedRepliesWithoutPartialCommitOrNextBatch() = runVirtual {
         val invalid = listOf<JSONObject?>(null, JSONObject(), JSONObject().put("found", "bad"),
             reply(hit(sector = -1)), reply(hit(sector = 40)), reply(hit(type = "C")),
             reply(hit("NOTHEX")), reply(hit(keys(1)[0])), reply(hit().put("sector", 0.5)),
@@ -79,7 +79,7 @@ class MifareKeyCheckServiceTest {
         }
     }
 
-    @Test(timeout = 5000) fun validationAndMissingConnectionSendNothing() = runBlocking {
+    @Test(timeout = 5000) fun validationAndMissingConnectionSendNothing() = runVirtual {
         var connections = 0
         val service = MifareKeyCheckService(this, { connections++; null })
         service.start(emptyList()); assertEquals("No keys in dictionary.", service.status.value.message)
@@ -89,7 +89,7 @@ class MifareKeyCheckServiceTest {
         assertTrue(service.status.value.message.startsWith("Connect"))
     }
 
-    @Test(timeout = 5000) fun stopResetAndSupersedeIgnoreNonCancellableOldReply() = runBlocking {
+    @Test(timeout = 5000) fun stopResetAndSupersedeIgnoreNonCancellableOldReply() = runVirtual {
         for (action in listOf("stop", "reset", "restart")) {
             var continuation: Continuation<Pair<Boolean, JSONObject?>>? = null
             var calls = 0
@@ -112,7 +112,7 @@ class MifareKeyCheckServiceTest {
         }
     }
 
-    @Test(timeout = 5000) fun cancelledParentNeverLeavesRunningState() = runBlocking {
+    @Test(timeout = 5000) fun cancelledParentNeverLeavesRunningState() = runVirtual {
         val parent = Job().apply { cancel() }
         var calls = 0
         val service = MifareKeyCheckService(CoroutineScope(coroutineContext + parent), {
@@ -123,7 +123,7 @@ class MifareKeyCheckServiceTest {
         assertFalse(service.status.value.completed)
     }
 
-    @Test(timeout = 5000) fun exceptionIsTerminalAndEmptySuccessIsCompleted() = runBlocking {
+    @Test(timeout = 5000) fun exceptionIsTerminalAndEmptySuccessIsCompleted() = runVirtual {
         var fail = true
         val service = MifareKeyCheckService(this, { JsonCommandRunner { _, _ ->
             if (fail) throw java.io.IOException("read failed") else true to reply()
@@ -139,7 +139,7 @@ class MifareKeyCheckServiceTest {
         assertEquals("No keys reported (completeness unknown; update firmware).", service.status.value.message)
     }
 
-    @Test(timeout = 5000) fun v1CompleteReplyMarksExhaustiveWithUid() = runBlocking {
+    @Test(timeout = 5000) fun v1CompleteReplyMarksExhaustiveWithUid() = runVirtual {
         val service = MifareKeyCheckService(this, { JsonCommandRunner { _, _ ->
             true to replyV1(uid = "04AABBCC", complete = true, hit())
         } })
@@ -152,7 +152,7 @@ class MifareKeyCheckServiceTest {
         assertEquals("Done - 1 key(s); all sectors tested.", s.message)
     }
 
-    @Test(timeout = 5000) fun v1PartialBatchStopsSequenceAndKeepsHits() = runBlocking {
+    @Test(timeout = 5000) fun v1PartialBatchStopsSequenceAndKeepsHits() = runVirtual {
         var calls = 0
         val service = MifareKeyCheckService(this, { JsonCommandRunner { _, _ ->
             calls++; true to replyV1(uid = "04AABBCC", complete = false, hit(keys(1)[0]))
@@ -166,7 +166,7 @@ class MifareKeyCheckServiceTest {
         assertTrue(s.message.startsWith("Partial scan"))
     }
 
-    @Test(timeout = 5000) fun v1UidChangeBetweenBatchesStopsBeforeMixingCards() = runBlocking {
+    @Test(timeout = 5000) fun v1UidChangeBetweenBatchesStopsBeforeMixingCards() = runVirtual {
         var calls = 0
         val service = MifareKeyCheckService(this, { JsonCommandRunner { _, _ ->
             calls++
@@ -182,7 +182,7 @@ class MifareKeyCheckServiceTest {
         assertTrue(s.message.startsWith("Card changed between batches"))
     }
 
-    @Test(timeout = 5000) fun oldFirmwareReplyRunsButIsLabeledUnknown() = runBlocking {
+    @Test(timeout = 5000) fun oldFirmwareReplyRunsButIsLabeledUnknown() = runVirtual {
         val service = MifareKeyCheckService(this, { JsonCommandRunner { _, _ -> true to reply(hit()) } })
         service.start(listOf(key)); finished(service)
         val s = service.status.value
@@ -200,8 +200,8 @@ class MifareKeyCheckServiceTest {
 
     // Each stop test runs the service on a dedicated, cancellable scope on the same event loop: its
     // background coroutines (stop-frame send, bounded-wait watchdog, a batch left suspended) are not
-    // children of runBlocking, so cancelling the scope lets the test return without waiting on them.
-    @Test(timeout = 5000) fun stopWithCapsSendsFrameAndFinalizesPartialFromCancelledReply() = runBlocking {
+    // children of the test body, so cancelling the scope lets the test return without waiting on them.
+    @Test(timeout = 5000) fun stopWithCapsSendsFrameAndFinalizesPartialFromCancelledReply() = runVirtual {
         val scope = CoroutineScope(coroutineContext + Job())
         try {
             var continuation: Continuation<Pair<Boolean, JSONObject?>>? = null
@@ -226,7 +226,7 @@ class MifareKeyCheckServiceTest {
         } finally { scope.cancel() }
     }
 
-    @Test(timeout = 5000) fun stopWithCapsBoundedWaitForcesPartialWhenNoReply() = runBlocking {
+    @Test(timeout = 5000) fun stopWithCapsBoundedWaitForcesPartialWhenNoReply() = runVirtual {
         val scope = CoroutineScope(coroutineContext + Job())
         try {
             var entered = false
@@ -245,7 +245,7 @@ class MifareKeyCheckServiceTest {
         } finally { scope.cancel() }
     }
 
-    @Test(timeout = 5000) fun stopWithoutCapsOnlyStopsSequencingAndSendsNoFrame() = runBlocking {
+    @Test(timeout = 5000) fun stopWithoutCapsOnlyStopsSequencingAndSendsNoFrame() = runVirtual {
         val scope = CoroutineScope(coroutineContext + Job())
         try {
             var continuation: Continuation<Pair<Boolean, JSONObject?>>? = null
@@ -277,7 +277,7 @@ class MifareKeyCheckServiceTest {
     private fun ack(frame: JSONObject, data: JSONObject) = JSONObject().put("v", 0).put("t", Kind.ACK)
         .put("id", frame.getInt("id")).put("d", data)
 
-    @Test(timeout = 5000) fun realSessionTimeoutReleasesPendingAndStopsSequence() = runBlocking {
+    @Test(timeout = 5000) fun realSessionTimeoutReleasesPendingAndStopsSequence() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         val service = MifareKeyCheckService(this, { JsonCommandRunner { cmd, _ -> session.awaitJson(cmd, 30) } })
         service.start(keys(49)); finished(service)
@@ -287,7 +287,7 @@ class MifareKeyCheckServiceTest {
         assertEquals("No response from the device.", service.status.value.message)
     }
 
-    @Test(timeout = 5000) fun realSessionStopReleasesPendingAndIgnoresLateAck() = runBlocking {
+    @Test(timeout = 5000) fun realSessionStopReleasesPendingAndIgnoresLateAck() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         val service = MifareKeyCheckService(this, { JsonCommandRunner { cmd, timeout -> session.awaitJson(cmd, timeout) } })
         service.start(keys(49)); until { wire.frames.isNotEmpty() }
@@ -299,7 +299,7 @@ class MifareKeyCheckServiceTest {
         assertEquals(1, wire.frames.size)
     }
 
-    @Test(timeout = 5000) fun closedSessionCannotContinueOnReconnectedLink() = runBlocking {
+    @Test(timeout = 5000) fun closedSessionCannotContinueOnReconnectedLink() = runVirtual {
         val oldWire = Wire(); val oldSession = CommandSession(CompanionClient(oldWire), oldWire)
         val newWire = Wire(); val newSession = CommandSession(CompanionClient(newWire), newWire)
         var current = oldSession
@@ -322,7 +322,7 @@ class MifareKeyCheckServiceTest {
         assertFalse(newSession.hasPending)
     }
 
-    @Test(timeout = 5000) fun firmwareMissingModuleRejectionStopsAtFirstBatch() = runBlocking {
+    @Test(timeout = 5000) fun firmwareMissingModuleRejectionStopsAtFirstBatch() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         val service = MifareKeyCheckService(this, { JsonCommandRunner { cmd, timeout -> session.awaitJson(cmd, timeout) } })
         service.start(keys(49)); until { wire.frames.isNotEmpty() }

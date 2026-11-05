@@ -8,7 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AwaitReplyTest {
-    @Test fun callbackIsRegisteredBeforeImmediateResponseAndRemovedAfterCompletion() = runBlocking {
+    @Test fun callbackIsRegisteredBeforeImmediateResponseAndRemovedAfterCompletion() = runVirtual {
         val pending = mutableMapOf<Int, (Boolean, String) -> Unit>()
         val result = awaitReply(pending, 101, 100, "timeout") {
             pending.getValue(101)(true, "done")
@@ -17,7 +17,7 @@ class AwaitReplyTest {
         assertTrue(pending.isEmpty())
     }
 
-    @Test fun timeoutAndCancellationReleaseTheCallback() = runBlocking {
+    @Test fun timeoutAndCancellationReleaseTheCallback() = runVirtual {
         val pending = mutableMapOf<Int, (Boolean, String) -> Unit>()
         assertEquals(false to "timeout", awaitReply(pending, 101, 20, "timeout") {})
         assertTrue(pending.isEmpty())
@@ -27,7 +27,7 @@ class AwaitReplyTest {
         assertTrue(pending.isEmpty())
     }
 
-    @Test fun sendFailureDoesNotLeakRegisteredCallback() = runBlocking {
+    @Test fun sendFailureDoesNotLeakRegisteredCallback() = runVirtual {
         val pending = mutableMapOf<Int, (Boolean, String) -> Unit>()
         try {
             awaitReply(pending, 101, 100, "timeout") { throw IllegalStateException("closed") }

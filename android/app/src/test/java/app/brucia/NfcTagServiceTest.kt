@@ -21,7 +21,7 @@ class NfcTagServiceTest {
         settle()
     }
 
-    @Test(timeout = 5_000) fun readShowsOutputAndSavesTagWithUid() = runBlocking {
+    @Test(timeout = 5_000) fun readShowsOutputAndSavesTagWithUid() = runVirtual {
         val s = svc()
         s.read()
         assertTrue(s.busy.value)
@@ -33,7 +33,7 @@ class NfcTagServiceTest {
         assertEquals(listOf("rfid read" to 650_000L), runner.calls.toList())
     }
 
-    @Test(timeout = 5_000) fun failedOrUidlessReadShowsOutputButSavesNothing() = runBlocking {
+    @Test(timeout = 5_000) fun failedOrUidlessReadShowsOutputButSavesNothing() = runVirtual {
         val s = svc()
         s.read()
         answer(0, false, "Read failed: timeout")
@@ -46,7 +46,7 @@ class NfcTagServiceTest {
         assertTrue(saved.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun infoAndNdefShareTheLastLineAndNeverSave() = runBlocking {
+    @Test(timeout = 5_000) fun infoAndNdefShareTheLastLineAndNeverSave() = runVirtual {
         val s = svc()
         s.info()
         answer(0, true, TAG)
@@ -58,7 +58,7 @@ class NfcTagServiceTest {
         assertEquals(listOf("rfid info", "rfid ndef"), runner.cmds)
     }
 
-    @Test(timeout = 5_000) fun supersededReplyNeverOverwritesOrSaves() = runBlocking {
+    @Test(timeout = 5_000) fun supersededReplyNeverOverwritesOrSaves() = runVirtual {
         val s = svc()
         s.read()
         settle()
@@ -73,7 +73,7 @@ class NfcTagServiceTest {
         assertEquals("No tag data. Run 'rfid read' first.", s.last.value)
     }
 
-    @Test(timeout = 5_000) fun stopDropsTheLateReply() = runBlocking {
+    @Test(timeout = 5_000) fun stopDropsTheLateReply() = runVirtual {
         val s = svc()
         s.info()
         answer(0, true, "first")
@@ -87,7 +87,7 @@ class NfcTagServiceTest {
         assertTrue(saved.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun notConnectedSendsNothingAndKeepsLast() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedSendsNothingAndKeepsLast() = runVirtual {
         connected = false
         val s = svc()
         s.read(); s.info(); s.ndef()

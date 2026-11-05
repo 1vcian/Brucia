@@ -29,7 +29,7 @@ class EvilPortalServiceTest {
     )
     private fun EvilPortalService.state() = status.value to active.value
 
-    @Test(timeout = 5_000) fun notConnectedRejectsWithoutStartingOrClearingCreds() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedRejectsWithoutStartingOrClearingCreds() = runVirtual {
         connected = false
         val svc = svc()
         svc.start("MyAp")
@@ -39,7 +39,7 @@ class EvilPortalServiceTest {
         assertTrue(runner.calls.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun startWithoutTemplateSendsFourFieldsAndMapsResult() = runBlocking {
+    @Test(timeout = 5_000) fun startWithoutTemplateSendsFourFieldsAndMapsResult() = runVirtual {
         val svc = svc()
         svc.start("MyAp", channel = 20, deauth = true)
         assertEquals("Starting..." to false, svc.state())
@@ -52,7 +52,7 @@ class EvilPortalServiceTest {
         assertEquals("AP up" to true, svc.state())
     }
 
-    @Test(timeout = 5_000) fun blankSsidDefaultsAndFailedStartLeavesInactive() = runBlocking {
+    @Test(timeout = 5_000) fun blankSsidDefaultsAndFailedStartLeavesInactive() = runVirtual {
         val svc = svc()
         svc.start("   ")
         until { runner.calls.size == 1 }
@@ -62,7 +62,7 @@ class EvilPortalServiceTest {
         assertEquals("setup failed" to false, svc.state())
     }
 
-    @Test(timeout = 5_000) fun templatePushSuccessPushesThenStarts() = runBlocking {
+    @Test(timeout = 5_000) fun templatePushSuccessPushesThenStarts() = runVirtual {
         val svc = svc()
         svc.start("Portal", "<html>".toByteArray(), "login.html", channel = 6)
         assertEquals("Starting..." to false, svc.state())
@@ -78,7 +78,7 @@ class EvilPortalServiceTest {
         assertEquals("AP up" to true, svc.state())
     }
 
-    @Test(timeout = 5_000) fun templatePushFailureStartsNothing() = runBlocking {
+    @Test(timeout = 5_000) fun templatePushFailureStartsNothing() = runVirtual {
         val svc = svc()
         svc.start("Portal", "<html>".toByteArray(), "login.html")
         until { pushGates.size == 1 }
@@ -89,7 +89,7 @@ class EvilPortalServiceTest {
         assertTrue(runner.calls.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun stopSupersedesPendingStartCommand() = runBlocking {
+    @Test(timeout = 5_000) fun stopSupersedesPendingStartCommand() = runVirtual {
         val svc = svc()
         svc.start("MyAp")
         until { runner.calls.size == 1 }
@@ -105,7 +105,7 @@ class EvilPortalServiceTest {
         assertEquals("portal stopped" to false, svc.state())
     }
 
-    @Test(timeout = 5_000) fun stopWinsWhileTemplateIsPushing() = runBlocking {
+    @Test(timeout = 5_000) fun stopWinsWhileTemplateIsPushing() = runVirtual {
         val svc = svc()
         svc.start("Portal", "<html>".toByteArray(), "login.html")
         until { pushGates.size == 1 }
@@ -118,7 +118,7 @@ class EvilPortalServiceTest {
         assertEquals(listOf("evil_portal_stop"), runner.cmds)
         assertEquals("Stopped." to false, svc.state())
     }
-    @Test(timeout = 5_000) fun stopWhileDisconnectedClearsActive() = runBlocking {
+    @Test(timeout = 5_000) fun stopWhileDisconnectedClearsActive() = runVirtual {
         val runner = GateRunner().apply { auto = true to "AP up" }
         var linked = true
         val svc = EvilPortalService(this, runner, { linked }, { _, _ -> true to "" }, {})

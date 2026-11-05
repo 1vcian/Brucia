@@ -179,7 +179,7 @@ class DiagnosticsTest {
         assertTrue(s.lines()[1], s.lines()[1] == "App skipped frames: 2 malformed, 2 invalid length (resynced), 17 noise bytes")
     }
 
-    @Test fun sessionCountsTimeoutsAndUnmatchedReplies() = runBlocking {
+    @Test fun sessionCountsTimeoutsAndUnmatchedReplies() = runVirtual {
         val t = ByteQueueTransport()
         val counters = LinkCounters()
         val session = CommandSession(CompanionClient(t, counters), t)

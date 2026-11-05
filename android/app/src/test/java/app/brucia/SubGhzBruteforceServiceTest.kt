@@ -10,7 +10,7 @@ import org.junit.Test
 
 /** Reuses [GateRunner] and [until] from DeviceOperationTest. */
 class SubGhzBruteforceServiceTest {
-    @Test(timeout = 5000) fun invalidDurationsAreRejectedAndCannotOverflowTimeouts() = runBlocking {
+    @Test(timeout = 5000) fun invalidDurationsAreRejectedAndCannotOverflowTimeouts() = runVirtual {
         val svc = svc()
         for (seconds in listOf(Int.MIN_VALUE, -9, 0, 31, Int.MAX_VALUE)) {
             svc.run(2, 433920000L, 24, seconds)
@@ -34,7 +34,7 @@ class SubGhzBruteforceServiceTest {
         return status.value
     }
 
-    @Test(timeout = 5_000) fun runningTextCommandMappingAndTimeout() = runBlocking {
+    @Test(timeout = 5_000) fun runningTextCommandMappingAndTimeout() = runVirtual {
         runner.sticky = true; val svc = svc()
         svc.run(protocolIdx = 2, freqHz = 433920000L, bits = 24, secs = 10)
         assertEquals("Brute-forcing for 10s..." to true, svc.state())
@@ -50,21 +50,21 @@ class SubGhzBruteforceServiceTest {
         assertEquals(13_000L, SubGhzBruteforceService.timeoutMsFor(5))
     }
 
-    @Test(timeout = 5_000) fun callWhileBusyIsIgnored() = runBlocking {
+    @Test(timeout = 5_000) fun callWhileBusyIsIgnored() = runVirtual {
         val svc = svc() // non-sticky: the cancellable await frees on stop()
         svc.run(2, 433920000L, 24, 10); until { runner.calls.size == 1 }
         svc.run(2, 433920000L, 24, 10) // ignored while busy (the VM's `if (_subBruteActive) return`)
         delay(20); assertEquals(1, runner.calls.size); svc.stop()
     }
 
-    @Test(timeout = 5_000) fun notConnectedRejectsWithoutSending() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedRejectsWithoutSending() = runVirtual {
         connected = false
         val svc = svc(); svc.run(2, 433920000L, 24, 10)
         assertEquals("Connect the device over USB first." to false, svc.state())
         delay(20); assertTrue(runner.calls.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun stopSupersedesWaitingRun() = runBlocking {
+    @Test(timeout = 5_000) fun stopSupersedesWaitingRun() = runVirtual {
         runner.sticky = true; val svc = svc()
         svc.run(2, 433920000L, 24, 10); until { runner.calls.size == 1 }
         svc.stop(); runner.reply(0, true, "late"); delay(20)

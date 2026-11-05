@@ -10,7 +10,7 @@ import org.junit.Test
 
 /** Reuses [GateRunner] and [until] from DeviceOperationTest. */
 class JamDetectServiceTest {
-    @Test(timeout = 5000) fun invalidDurationsAreRejectedAndCannotOverflowTimeouts() = runBlocking {
+    @Test(timeout = 5000) fun invalidDurationsAreRejectedAndCannotOverflowTimeouts() = runVirtual {
         val svc = svc()
         for (seconds in listOf(Int.MIN_VALUE, -9, 0, 121, Int.MAX_VALUE)) {
             svc.run(seconds)
@@ -34,7 +34,7 @@ class JamDetectServiceTest {
         return status.value
     }
 
-    @Test(timeout = 5_000) fun runningTextResultMappingAndTimeout() = runBlocking {
+    @Test(timeout = 5_000) fun runningTextResultMappingAndTimeout() = runVirtual {
         runner.sticky = true; val svc = svc()
         svc.run(5)
         assertEquals("Listening for 5s..." to true, svc.state())
@@ -50,21 +50,21 @@ class JamDetectServiceTest {
         assertEquals(18_000L, JamDetectService.timeoutMsFor(10))
     }
 
-    @Test(timeout = 5_000) fun callWhileBusyIsIgnored() = runBlocking {
+    @Test(timeout = 5_000) fun callWhileBusyIsIgnored() = runVirtual {
         val svc = svc() // non-sticky: the cancellable await frees on stop()
         svc.run(5); until { runner.calls.size == 1 }
         svc.run(5) // ignored while busy (the VM's `if (_jamDetectActive) return`)
         delay(20); assertEquals(1, runner.calls.size); svc.stop()
     }
 
-    @Test(timeout = 5_000) fun notConnectedRejectsWithoutSending() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedRejectsWithoutSending() = runVirtual {
         connected = false
         val svc = svc(); svc.run(5)
         assertEquals("Connect the device over USB first." to false, svc.state())
         delay(20); assertTrue(runner.calls.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun stopSupersedesWaitingRun() = runBlocking {
+    @Test(timeout = 5_000) fun stopSupersedesWaitingRun() = runVirtual {
         runner.sticky = true; val svc = svc()
         svc.run(5); until { runner.calls.size == 1 }
         svc.stop(); runner.reply(0, true, "late"); delay(20)

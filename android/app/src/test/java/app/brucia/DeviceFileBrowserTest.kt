@@ -20,7 +20,7 @@ class DeviceFileBrowserTest {
         settle()
     }
 
-    @Test(timeout = 5_000) fun listParsesEntriesAndDrivesLoading() = runBlocking {
+    @Test(timeout = 5_000) fun listParsesEntriesAndDrivesLoading() = runVirtual {
         val s = svc()
         s.list("/")
         assertTrue(s.loading.value)
@@ -37,7 +37,7 @@ class DeviceFileBrowserTest {
         assertEquals(listOf("storage list /", "storage list /").map { it to 650_000L }, runner.calls.toList())
     }
 
-    @Test(timeout = 5_000) fun changingDirectoryClearsStaleEntriesAndSupersedesTheOldListing() = runBlocking {
+    @Test(timeout = 5_000) fun changingDirectoryClearsStaleEntriesAndSupersedesTheOldListing() = runVirtual {
         val s = svc()
         s.list("/")
         answer(0, true, ROOT)
@@ -54,7 +54,7 @@ class DeviceFileBrowserTest {
         assertEquals(listOf(FileEntry("cap.pcap", false, 2048)), s.entries.value)
     }
 
-    @Test(timeout = 5_000) fun removeAndMkdirRelistTheLastDirectoryEvenOnFailure() = runBlocking {
+    @Test(timeout = 5_000) fun removeAndMkdirRelistTheLastDirectoryEvenOnFailure() = runVirtual {
         val s = svc()
         s.list("/d")
         answer(0, true, "x\t1\n")
@@ -75,7 +75,7 @@ class DeviceFileBrowserTest {
         )
     }
 
-    @Test(timeout = 5_000) fun stopEndsLoadingAndPreventsTheRelist() = runBlocking {
+    @Test(timeout = 5_000) fun stopEndsLoadingAndPreventsTheRelist() = runVirtual {
         val s = svc()
         s.list("/d")
         answer(0, true, "x\t1\n")
@@ -91,7 +91,7 @@ class DeviceFileBrowserTest {
         assertEquals(3, runner.calls.size)
     }
 
-    @Test(timeout = 5_000) fun captureListingIsIndependentText() = runBlocking {
+    @Test(timeout = 5_000) fun captureListingIsIndependentText() = runVirtual {
         val s = svc()
         s.list("/d")
         s.listCaptures()
@@ -107,7 +107,7 @@ class DeviceFileBrowserTest {
         assertEquals("storage list /BrucePCAP/handshakes", runner.cmds[1])
     }
 
-    @Test(timeout = 5_000) fun notConnectedSendsNothing() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedSendsNothing() = runVirtual {
         connected = false
         val s = svc()
         s.list("/"); s.remove("/x"); s.mkdir("/y"); s.listCaptures()

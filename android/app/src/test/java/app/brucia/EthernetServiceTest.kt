@@ -17,7 +17,7 @@ class EthernetServiceTest {
     private fun statusData(link: Boolean, ip: String, out: String) =
         JSONObject().put("link", link).put("ip", ip).put("out", out)
 
-    @Test fun notConnectedRejectsLocallyAndSendsNothing() = runBlocking {
+    @Test fun notConnectedRejectsLocallyAndSendsNothing() = runVirtual {
         val s = svc(connected = false)
         s.refresh(); s.configure("dhcp"); s.dhcpStarve(); s.macFlood()
         assertEquals("Connect the device over USB first.", s.message.value)
@@ -26,7 +26,7 @@ class EthernetServiceTest {
         assertTrue(runner.calls.isEmpty() && json.calls.isEmpty())
     }
 
-    @Test fun refreshMapsStatusOnOkAndErrorOnFail() = runBlocking {
+    @Test fun refreshMapsStatusOnOkAndErrorOnFail() = runVirtual {
         val s = svc()
         s.refresh()
         assertEquals("Querying Ethernet..." to true, s.message.value to s.busy.value)
@@ -44,7 +44,7 @@ class EthernetServiceTest {
         assertEquals("No Ethernet on this device.", s.message.value)
     }
 
-    @Test fun configureBuildsRawArgsAndChainsSingleRefresh() = runBlocking {
+    @Test fun configureBuildsRawArgsAndChainsSingleRefresh() = runVirtual {
         val s = svc()
         // Empty args -> bare command; drain its chained refresh.
         s.configure("")
@@ -73,7 +73,7 @@ class EthernetServiceTest {
         assertEquals(2, json.calls.size)
     }
 
-    @Test fun configureFailureShowsErrorAndSkipsRefresh() = runBlocking {
+    @Test fun configureFailureShowsErrorAndSkipsRefresh() = runVirtual {
         val s = svc()
         s.configure("static 1.2.3.4")
         until { runner.calls.size == 1 }
@@ -84,7 +84,7 @@ class EthernetServiceTest {
         assertTrue(json.calls.isEmpty())
     }
 
-    @Test fun dhcpStarveAndMacFloodTextsCommandsAndTimeouts() = runBlocking {
+    @Test fun dhcpStarveAndMacFloodTextsCommandsAndTimeouts() = runVirtual {
         val s = svc()
         s.dhcpStarve()
         assertEquals("DHCP starvation running (10s)...", s.message.value)
@@ -103,7 +103,7 @@ class EthernetServiceTest {
         assertEquals("No Ethernet on this device.", s.message.value)
     }
 
-    @Test fun stopCancelsAndStaleReplyNeverMapsStatus() = runBlocking {
+    @Test fun stopCancelsAndStaleReplyNeverMapsStatus() = runVirtual {
         val s = svc()
         s.refresh()
         until { json.calls.size == 1 }

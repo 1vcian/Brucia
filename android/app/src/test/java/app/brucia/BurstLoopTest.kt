@@ -8,7 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /** Reuses [GateRunner] and [until] from DeviceOperationTest. Non-sticky by default so a Stop
- * (which cancels the job) frees any pending await and runBlocking does not hang. */
+ * (which cancels the job) frees any pending await and the test does not hang. */
 class BurstLoopTest {
     @Test(timeout = 5000) fun immediateFailureOnUnconfinedScopeClearsOwnershipExactlyOnce() {
         var ends = 0
@@ -47,7 +47,7 @@ class BurstLoopTest {
         runner.reply(i, ok, out)
     }
 
-    @Test(timeout = 5_000) fun burstsAreSequentialOnePerReply() = runBlocking {
+    @Test(timeout = 5_000) fun burstsAreSequentialOnePerReply() = runVirtual {
         val loop = loop()
         loop.start("run", { "burst" }, 8000)
         until { runner.calls.size == 1 }
@@ -60,7 +60,7 @@ class BurstLoopTest {
         loop.stop()
     }
 
-    @Test(timeout = 5_000) fun timeoutIsPassedToRunner() = runBlocking {
+    @Test(timeout = 5_000) fun timeoutIsPassedToRunner() = runVirtual {
         val loop = loop()
         loop.start("run", { "b" }, 4321)
         until { runner.calls.size == 1 }
@@ -68,7 +68,7 @@ class BurstLoopTest {
         loop.stop()
     }
 
-    @Test(timeout = 5_000) fun stopEndsLoopAndRestoresStoppedText() = runBlocking {
+    @Test(timeout = 5_000) fun stopEndsLoopAndRestoresStoppedText() = runVirtual {
         val loop = loop()
         loop.start("run", { "b" }, 8000, stoppedText = "Idle.")
         until { runner.calls.size == 1 }
@@ -76,7 +76,7 @@ class BurstLoopTest {
         assertEquals("Idle." to false, loop.state())
     }
 
-    @Test(timeout = 5_000) fun silentStopKeepsStatus() = runBlocking {
+    @Test(timeout = 5_000) fun silentStopKeepsStatus() = runVirtual {
         val loop = loop()
         loop.start("run", { "b" }, 8000)
         until { runner.calls.size == 1 }
@@ -84,7 +84,7 @@ class BurstLoopTest {
         assertEquals("run" to false, loop.state())
     }
 
-    @Test(timeout = 5_000) fun restartReplacesLoopAndOldJobNeverResetsNewState() = runBlocking {
+    @Test(timeout = 5_000) fun restartReplacesLoopAndOldJobNeverResetsNewState() = runVirtual {
         val loop = loop()
         loop.start("first", { "a" }, 8000)
         until { runner.calls.size == 1 }
@@ -97,7 +97,7 @@ class BurstLoopTest {
         loop.stop()
     }
 
-    @Test(timeout = 5_000) fun rejectionEndsLoopWithReplyText() = runBlocking {
+    @Test(timeout = 5_000) fun rejectionEndsLoopWithReplyText() = runVirtual {
         val loop = loop()
         loop.start("run", { "b" }, 8000)
         answer(0, false, "no module")
@@ -107,7 +107,7 @@ class BurstLoopTest {
         assertEquals(1, runner.calls.size) // did not continue past the rejection
     }
 
-    @Test(timeout = 5_000) fun blankFailureStopsInsteadOfRetryingForever() = runBlocking {
+    @Test(timeout = 5_000) fun blankFailureStopsInsteadOfRetryingForever() = runVirtual {
         val loop = loop()
         loop.start("run", { "b" }, 8000)
         answer(0, false, "")
@@ -116,7 +116,7 @@ class BurstLoopTest {
         assertEquals(1, runner.calls.size)
     }
 
-    @Test(timeout = 5_000) fun runnerExceptionEndsLoopWithMessageOrFailed() = runBlocking {
+    @Test(timeout = 5_000) fun runnerExceptionEndsLoopWithMessageOrFailed() = runVirtual {
         for ((msg, text) in listOf("boom" to "boom", null to "Failed.", "" to "Failed.")) {
             val loop = loop(CommandRunner { _, _ -> throw IllegalStateException(msg) })
             loop.start("run", { "b" }, 8000)
@@ -125,7 +125,7 @@ class BurstLoopTest {
         }
     }
 
-    @Test(timeout = 5_000) fun linkClosedEndsLoop() = runBlocking {
+    @Test(timeout = 5_000) fun linkClosedEndsLoop() = runVirtual {
         val loop = loop()
         loop.start("run", { "b" }, 8000)
         until { runner.calls.size == 1 }
@@ -135,7 +135,7 @@ class BurstLoopTest {
         assertEquals("Stopped." to false, loop.state())
     }
 
-    @Test(timeout = 5_000) fun stopAllStopsEveryLoopIncludingLaterOnes() = runBlocking {
+    @Test(timeout = 5_000) fun stopAllStopsEveryLoopIncludingLaterOnes() = runVirtual {
         val rA = GateRunner(); val rB = GateRunner()
         val a = loop(rA)
         a.start("A", { "a" }, 8000)
@@ -165,7 +165,7 @@ class BurstLoopTest {
         sawCancel.await() // the cancellation reached the in-flight burst
         until { !loop.active.value }
     }
-    @Test(timeout = 5_000) fun sharedStatusLineAndOnEndOnlyForOwnEnd() = runBlocking {
+    @Test(timeout = 5_000) fun sharedStatusLineAndOnEndOnlyForOwnEnd() = runVirtual {
         val line = kotlinx.coroutines.flow.MutableStateFlow("")
         val scan = BurstLoop(this, runner, { linkOpen }, registry, line)
         val sniff = BurstLoop(this, runner, { linkOpen }, registry, line)

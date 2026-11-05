@@ -21,7 +21,7 @@ class IrReceiveServiceTest {
         runner.reply(i, ok, out)
     }
 
-    @Test fun liteFirmwareReceivesThroughBruceCliAndStripsItsPrompt() = runBlocking {
+    @Test fun liteFirmwareReceivesThroughBruceCliAndStripsItsPrompt() = runVirtual {
         var cli = true
         val s = IrReceiveService(this, runner, { connected }, onLearned = { learned += it }, useCli = { cli }) { captured += it }
         s.receiveOnce()
@@ -47,7 +47,7 @@ class IrReceiveServiceTest {
         assertEquals(listOf("ir rx", "ir rx", "ir rx", "ir_rx"), runner.calls.map { it.first })
     }
 
-    @Test fun receiveParsesAndHoldsResult() = runBlocking {
+    @Test fun receiveParsesAndHoldsResult() = runVirtual {
         val s = svc()
         s.receiveOnce()
         assertEquals(RX_RUNNING to true, s.rxStatus.value to s.rxBusy.value)
@@ -64,7 +64,7 @@ class IrReceiveServiceTest {
         assertEquals(listOf("ir_rx" to 20_000L, "ir_rx" to 20_000L), runner.calls.toList())
     }
 
-    @Test fun firmwareOneLineSummaryIsDecodedForReceiveAndCapture() = runBlocking {
+    @Test fun firmwareOneLineSummaryIsDecodedForReceiveAndCapture() = runVirtual {
         val s = svc()
         s.receiveOnce()
         answer(0, true, "NEC addr=04 00 00 00 cmd=08 00 00 00")
@@ -78,7 +78,7 @@ class IrReceiveServiceTest {
         assertEquals(listOf(IrButton("Vol +", "", "", "", raw = true, data = "9000 4500 560 560")), captured.toList())
     }
 
-    @Test fun receiveFallbackTexts() = runBlocking {
+    @Test fun receiveFallbackTexts() = runVirtual {
         val s = svc()
         val cases = listOf(
             Triple(false, "no IR signal", "no IR signal"),
@@ -95,7 +95,7 @@ class IrReceiveServiceTest {
         }
     }
 
-    @Test fun supersededOrStoppedReceiveNeverSetsResult() = runBlocking {
+    @Test fun supersededOrStoppedReceiveNeverSetsResult() = runVirtual {
         val s = svc()
         s.receiveOnce()
         until { runner.calls.size == 1 }
@@ -112,7 +112,7 @@ class IrReceiveServiceTest {
         assertEquals("Stopped." to false, s.rxStatus.value to s.rxBusy.value)
     }
 
-    @Test fun markSavedClearsResultEvenOffline() = runBlocking {
+    @Test fun markSavedClearsResultEvenOffline() = runVirtual {
         val s = svc()
         s.receiveOnce()
         answer(0, true, NEC_BLOCK)
@@ -125,7 +125,7 @@ class IrReceiveServiceTest {
         assertEquals(1, runner.calls.size)
     }
 
-    @Test fun captureNamesKeyAndCallsBackOnce() = runBlocking {
+    @Test fun captureNamesKeyAndCallsBackOnce() = runVirtual {
         val s = svc()
         s.captureKey("  ")
         assertEquals(CAPTURE_RUNNING to true, s.captureStatus.value to s.captureBusy.value)
@@ -140,7 +140,7 @@ class IrReceiveServiceTest {
         assertEquals(listOf("ir_rx" to 20_000L, "ir_rx" to 20_000L), runner.calls.toList())
     }
 
-    @Test fun captureFailureTextsNeverCallBack() = runBlocking {
+    @Test fun captureFailureTextsNeverCallBack() = runVirtual {
         val s = svc()
         val cases = listOf(
             Triple(false, "no IR signal", "no IR signal"),
@@ -156,7 +156,7 @@ class IrReceiveServiceTest {
         assertTrue(captured.isEmpty())
     }
 
-    @Test fun supersededOrStoppedCaptureNeverCallsBack() = runBlocking {
+    @Test fun supersededOrStoppedCaptureNeverCallsBack() = runVirtual {
         val s = svc()
         s.captureKey("a")
         until { runner.calls.size == 1 }
@@ -172,7 +172,7 @@ class IrReceiveServiceTest {
         assertEquals("Stopped." to false, s.captureStatus.value to s.captureBusy.value)
     }
 
-    @Test fun receiveAndCaptureDoNotSupersedeEachOther() = runBlocking {
+    @Test fun receiveAndCaptureDoNotSupersedeEachOther() = runVirtual {
         val s = svc()
         s.receiveOnce()
         s.captureKey("k")
@@ -187,7 +187,7 @@ class IrReceiveServiceTest {
         assertTrue(captured.single().raw)
     }
 
-    @Test fun notConnectedSendsNothing() = runBlocking {
+    @Test fun notConnectedSendsNothing() = runVirtual {
         connected = false
         val s = svc()
         s.receiveOnce()
@@ -199,7 +199,7 @@ class IrReceiveServiceTest {
         assertTrue(runner.calls.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun learnParsesCliOutputIntoButtons() = runBlocking {
+    @Test(timeout = 5_000) fun learnParsesCliOutputIntoButtons() = runVirtual {
         val s = svc()
         s.learn()
         assertTrue(s.learnBusy.value)
@@ -217,7 +217,7 @@ class IrReceiveServiceTest {
         assertTrue(captured.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun learnIsIndependentAndStopDropsItsLateReply() = runBlocking {
+    @Test(timeout = 5_000) fun learnIsIndependentAndStopDropsItsLateReply() = runVirtual {
         val s = svc()
         s.learn()
         s.receiveOnce()
@@ -233,7 +233,7 @@ class IrReceiveServiceTest {
         assertEquals("Received: Power (NEC)", s.rxStatus.value)
     }
 
-    @Test(timeout = 5_000) fun learnNotConnectedSendsNothing() = runBlocking {
+    @Test(timeout = 5_000) fun learnNotConnectedSendsNothing() = runVirtual {
         connected = false
         val s = svc()
         s.learn()

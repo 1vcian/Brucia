@@ -25,6 +25,26 @@ that offloads computation to the phone. Format loosely follows
   dashboard. Checked on the API 36 emulator (gesture navigation, phone and a 1920x1200
   tablet-size window in both orientations; the Files subfolder case needs a connected
   device and was not exercised); not yet checked on a phone.
+- MITM: going Back from a request detail returns to the same place in the request list;
+  before, the list always jumped back to the top. Checked with a JVM Compose runtime test,
+  not yet on a phone.
+- Tablets and other wide windows: the home category grid adds columns as the window widens
+  (tiles of at least 160dp; 2 columns on phones in portrait as before, 4 on a 1280x800dp
+  tablet in portrait, 5 in landscape, about 4 on a phone in landscape) and the dashboard is
+  centered at up to 1040dp; tool screens and category tool lists are centered at up to
+  840dp instead of stretching across the screen (on a phone in landscape this leaves narrow
+  side margins). Phone portrait layout unchanged (screenshot tests pixel-identical).
+  Checked on the API 36 emulator at 1920x1200 / 240 dpi in both orientations; not yet on
+  a real tablet.
+- Network Scan and the MITM proxy now check local network access before they start. On
+  Android 17 for an app that targets Android 17 they would ask for the Nearby devices
+  (local network) permission with an explanation and stay disabled, with a link to the app
+  settings, when it is denied; this app still targets Android 16, where Android grants the
+  access implicitly, so no permission is declared or requested yet. Independently, if
+  Android refuses a test packet to the local network (EPERM, e.g. with the Android 16
+  developer restriction enabled), the tool shows "Local network blocked by Android" with
+  Retry instead of running a scan that can only time out. Responder is unaffected: the
+  device, not the phone, answers on the LAN.
 
 ## [0.1.5] - 2026-11-05
 

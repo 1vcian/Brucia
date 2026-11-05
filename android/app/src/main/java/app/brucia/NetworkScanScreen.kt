@@ -20,6 +20,9 @@ import androidx.compose.ui.unit.dp
 import app.brucia.netscan.NetworkScanner
 import app.brucia.netscan.ScanHost
 import app.brucia.netscan.VulnHit
+import app.brucia.net.LocalNetworkAccess
+import app.brucia.net.LocalNetworkGateCard
+import app.brucia.net.rememberLocalNetworkGate
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.core.net.toUri
@@ -33,9 +36,9 @@ import app.brucia.ui.Button
  */
 @Composable
 internal fun NetworkScanScreen() {
-    val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val lan = rememberLocalNetworkGate()
 
     val base = remember { NetworkScanner.subnet24() }
     val localIp = remember { NetworkScanner.localIpv4()?.first }
@@ -47,6 +50,61 @@ internal fun NetworkScanScreen() {
 
     DisposableEffect(Unit) { onDispose { job?.cancel() } }
 
+    NetworkScanContent(
+        base = base,
+        localIp = localIp,
+        hosts = hosts,
+        scanning = scanning,
+        progress = progress,
+        total = total,
+        lanStatus = lan.status,
+        onScan = {
+            if (base != null && job?.isActive != true) {
+                job = scope.launch {
+                    // Local network gate: permission (Android 17 + target 37) and an EPERM probe.
+                    if (!lan.checkBeforeStart(localIp)) return@launch
+                    hosts.clear(); progress = 0; scanning = true
+                    try {
+                        NetworkScanner.scan(
+                            base = base,
+                            onProgress = { d, t -> progress = d; total = t },
+                            onHost = { h -> hosts.add(h); hosts.sortBy { ipKey(it.ip) } },
+                        )
+                    } finally { scanning = false }
+                }
+            }
+        },
+        onStop = { job?.cancel(); scanning = false },
+        onRequestLan = { lan.request() },
+        onOpenLanSettings = { lan.openSettings() },
+        onRetryLan = { scope.launch { lan.checkBeforeStart(localIp) } },
+        onOpenUrl = { url ->
+            try { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { app.brucia.BruciaLog.w("NetScan", "open host url", e) }
+        },
+    )
+}
+
+/**
+ * Stateless Network Scan page (rendered by [NetworkScanScreen] and by the screenshot tests).
+ * [lanStatus] other than READY shows the local network reason card and disables Scan.
+ */
+@Composable
+internal fun NetworkScanContent(
+    base: String?,
+    localIp: String?,
+    hosts: List<ScanHost>,
+    scanning: Boolean,
+    progress: Int,
+    total: Int,
+    lanStatus: LocalNetworkAccess.Status = LocalNetworkAccess.Status.READY,
+    onScan: () -> Unit = {},
+    onStop: () -> Unit = {},
+    onRequestLan: () -> Unit = {},
+    onOpenLanSettings: () -> Unit = {},
+    onRetryLan: () -> Unit = {},
+    onOpenUrl: (String) -> Unit = {},
+) {
+    val cs = MaterialTheme.colorScheme
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -64,6 +122,10 @@ internal fun NetworkScanScreen() {
             return@Column
         }
 
+        if (!scanning) {
+            LocalNetworkGateCard(lanStatus, "Network Scan", onRequestLan, onOpenLanSettings, onRetryLan)
+        }
+
         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
             Column(Modifier.padding(14.dp)) {
                 Text("Subnet ${base}0/24   (this phone: ${localIp ?: "?"})",
@@ -71,22 +133,9 @@ internal fun NetworkScanScreen() {
                 Spacer(Modifier.height(10.dp))
                 Button(
                     modifier = Modifier.fillMaxWidth(),
+                    enabled = scanning || LocalNetworkAccess.canStart(lanStatus),
                     colors = BruciaButtonDefaults.buttonColors(containerColor = if (scanning) Color(0xFFD32F2F) else cs.primary),
-                    onClick = {
-                        if (scanning) { job?.cancel(); scanning = false }
-                        else {
-                            hosts.clear(); progress = 0; scanning = true
-                            job = scope.launch {
-                                try {
-                                    NetworkScanner.scan(
-                                        base = base,
-                                        onProgress = { d, t -> progress = d; total = t },
-                                        onHost = { h -> hosts.add(h); hosts.sortBy { ipKey(it.ip) } },
-                                    )
-                                } finally { scanning = false }
-                            }
-                        }
-                    },
+                    onClick = { if (scanning) onStop() else onScan() },
                 ) { Text(if (scanning) "Stop scan" else "Scan network") }
                 if (scanning) {
                     Spacer(Modifier.height(10.dp))
@@ -105,9 +154,7 @@ internal fun NetworkScanScreen() {
             }
         }
 
-        hosts.forEach { host -> HostCard(host) { url ->
-            try { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { app.brucia.BruciaLog.w("NetScan", "open host url", e) }
-        } }
+        hosts.forEach { host -> HostCard(host, onOpenUrl) }
         if (hosts.isNotEmpty()) Spacer(Modifier.height(8.dp))
     }
 }

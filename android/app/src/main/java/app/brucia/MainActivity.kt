@@ -29,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -123,7 +124,9 @@ import app.brucia.transport.releaseUsbPort
 import app.brucia.transport.UsbTransport
 import app.brucia.update.AppUpdater
 import app.brucia.update.EspFlasher
+import app.brucia.ui.AdaptiveLayout
 import app.brucia.ui.Amber
+import app.brucia.ui.CenteredMaxWidth
 import app.brucia.ui.BruciaTheme
 import app.brucia.audio.Dtmf
 import app.brucia.audio.Fft
@@ -1568,65 +1571,69 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
             } else {
                 val cap = capForTab(tab)
                 val caps = device?.caps
-                // Capability gating: when connected (caps known) and the module is absent, show a
-                // disabled page instead of the tool. NRF24 (tab 13) gates itself with its own
-                // message. When disconnected / caps unknown, nothing is hidden.
-                if (caps != null && tab != 13 && !capsAllow(caps, cap)) {
-                    CapabilityDisabled(capMessage(cap), CapabilityEvidence.unavailableReason(cap, device?.evidence))
-                } else when (tab) {
-                    0 -> BruciaScreen(vm, onConnect, onGoCrack = { tab = 7 })
-                    1 -> IrScreen(vm, onConnect)
-                    2 -> SubGhzScreen(vm, onConnect)
-                    3 -> NfcScreen(vm, onConnect)
-                    4 -> BadUsbScreen(vm, onConnect)
-                    5 -> BleScreen(vm, onConnect)
-                    6 -> DeviceScreen(vm, onConnect, updateLabel = updateLabel, onOpenUpdates = { tab = 12 })
-                    7 -> CrackScreen(vm)
-                    8 -> ConsoleScreen(vm, onConnect)
-                    9 -> RemoteScreen(vm, onConnect)
-                    10 -> FilesScreen(vm, onConnect)
-                    11 -> StationSnifferScreen(vm, onConnect)
-                    12 -> UpdatesScreen(vm, onFlash = onFlash)
-                    13 -> Nrf24Screen(vm, onConnect)
-                    14 -> FmScreen(vm, onConnect)
-                    15 -> WifiProbeScreen(vm, onConnect)
-                    16 -> SpamScreen(vm, onConnect)
-                    49 -> SpamScreen(vm, onConnect, filter = "ble")
-                    50 -> SpamScreen(vm, onConnect, filter = "wifi")
-                    51 -> SpamScreen(vm, onConnect, filter = "nfc")
-                    17 -> WifiMonitorScreen(vm, onConnect)
-                    18 -> MitmScreen(vm, status == "Connected")
-                    19 -> ScriptsScreen(vm, onConnect)
-                    20 -> ToolsScreen(vm, onConnect)
-                    21 -> ReportScreen(vm)
-                    22 -> LoRaScreen(vm, onConnect)
-                    23 -> EthernetScreen(vm, onConnect)
-                    24 -> UtilitiesScreen()
-                    25 -> AudioDashboardScreen(vm, onConnect)
-                    41 -> MacroScreen(vm, onConnect)
-                    42 -> RfMap3dScreen(vm, onConnect)
-                    43 -> BugSweepScreen(vm, onConnect)
-                    44 -> WidsScreen(vm, onConnect)
-                    45 -> PcapDissectScreen(vm, onConnect)
-                    46 -> RfFingerprintScreen(vm, onConnect)
-                    47 -> RfTimelineScreen(vm, onConnect)
-                    48 -> GeoSignalsScreen(vm, onConnect)
-                    27 -> SstvScreen(vm, onConnect)
-                    28 -> ToneScreen(vm, onConnect)
-                    29 -> OscilloscopeScreen(vm, onConnect)
-                    30 -> EvilPortalScreen(vm, onConnect)
-                    26 -> ChannelAnalyzerScreen(vm, onConnect)
-                    31 -> NetworkScanScreen()
-                    32 -> EspnowScreen(vm, onConnect)
-                    33 -> MacScreen(vm, onConnect)
-                    34 -> WifiJoinScreen(vm, onConnect)
-                    35 -> BrucegotchiScreen(vm, onConnect)
-                    36 -> ThemeScreen(vm, onConnect)
-                    37 -> IrRemoteScreen(vm, onConnect)
-                    38 -> KarmaScreen(vm, onConnect)
-                    39 -> BleHidScreen(vm, onConnect)
-                    40 -> ResponderScreen(vm, onConnect)
-                    else -> StationSnifferScreen(vm, onConnect)
+                // Wide windows: tool screens are centered and capped at 840dp (Material's
+                // expanded breakpoint); narrower windows keep the full width unchanged.
+                CenteredMaxWidth(AdaptiveLayout.ToolMaxWidth) {
+                    // Capability gating: when connected (caps known) and the module is absent, show a
+                    // disabled page instead of the tool. NRF24 (tab 13) gates itself with its own
+                    // message. When disconnected / caps unknown, nothing is hidden.
+                    if (caps != null && tab != 13 && !capsAllow(caps, cap)) {
+                        CapabilityDisabled(capMessage(cap), CapabilityEvidence.unavailableReason(cap, device?.evidence))
+                    } else when (tab) {
+                        0 -> BruciaScreen(vm, onConnect, onGoCrack = { tab = 7 })
+                        1 -> IrScreen(vm, onConnect)
+                        2 -> SubGhzScreen(vm, onConnect)
+                        3 -> NfcScreen(vm, onConnect)
+                        4 -> BadUsbScreen(vm, onConnect)
+                        5 -> BleScreen(vm, onConnect)
+                        6 -> DeviceScreen(vm, onConnect, updateLabel = updateLabel, onOpenUpdates = { tab = 12 })
+                        7 -> CrackScreen(vm)
+                        8 -> ConsoleScreen(vm, onConnect)
+                        9 -> RemoteScreen(vm, onConnect)
+                        10 -> FilesScreen(vm, onConnect)
+                        11 -> StationSnifferScreen(vm, onConnect)
+                        12 -> UpdatesScreen(vm, onFlash = onFlash)
+                        13 -> Nrf24Screen(vm, onConnect)
+                        14 -> FmScreen(vm, onConnect)
+                        15 -> WifiProbeScreen(vm, onConnect)
+                        16 -> SpamScreen(vm, onConnect)
+                        49 -> SpamScreen(vm, onConnect, filter = "ble")
+                        50 -> SpamScreen(vm, onConnect, filter = "wifi")
+                        51 -> SpamScreen(vm, onConnect, filter = "nfc")
+                        17 -> WifiMonitorScreen(vm, onConnect)
+                        18 -> MitmScreen(vm, status == "Connected")
+                        19 -> ScriptsScreen(vm, onConnect)
+                        20 -> ToolsScreen(vm, onConnect)
+                        21 -> ReportScreen(vm)
+                        22 -> LoRaScreen(vm, onConnect)
+                        23 -> EthernetScreen(vm, onConnect)
+                        24 -> UtilitiesScreen()
+                        25 -> AudioDashboardScreen(vm, onConnect)
+                        41 -> MacroScreen(vm, onConnect)
+                        42 -> RfMap3dScreen(vm, onConnect)
+                        43 -> BugSweepScreen(vm, onConnect)
+                        44 -> WidsScreen(vm, onConnect)
+                        45 -> PcapDissectScreen(vm, onConnect)
+                        46 -> RfFingerprintScreen(vm, onConnect)
+                        47 -> RfTimelineScreen(vm, onConnect)
+                        48 -> GeoSignalsScreen(vm, onConnect)
+                        27 -> SstvScreen(vm, onConnect)
+                        28 -> ToneScreen(vm, onConnect)
+                        29 -> OscilloscopeScreen(vm, onConnect)
+                        30 -> EvilPortalScreen(vm, onConnect)
+                        26 -> ChannelAnalyzerScreen(vm, onConnect)
+                        31 -> NetworkScanScreen()
+                        32 -> EspnowScreen(vm, onConnect)
+                        33 -> MacScreen(vm, onConnect)
+                        34 -> WifiJoinScreen(vm, onConnect)
+                        35 -> BrucegotchiScreen(vm, onConnect)
+                        36 -> ThemeScreen(vm, onConnect)
+                        37 -> IrRemoteScreen(vm, onConnect)
+                        38 -> KarmaScreen(vm, onConnect)
+                        39 -> BleHidScreen(vm, onConnect)
+                        40 -> ResponderScreen(vm, onConnect)
+                        else -> StationSnifferScreen(vm, onConnect)
+                    }
                 }
             }
         }
@@ -1867,7 +1874,7 @@ private fun CommandLogRow(e: CommandLogEntry) {
 }
 
 @Composable
-private fun HomeDashboard(
+internal fun HomeDashboard(
     category: Int,
     caps: DeviceCaps?,
     evidence: CapabilityEvidence? = null,
@@ -1893,76 +1900,86 @@ private fun HomeDashboard(
                 text = { Column(Modifier.verticalScroll(rememberScrollState())) { SupportCard() } },
             )
         }
-        Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-        ) {
-            if (!connected) {
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                    colors = CardDefaults.cardColors(containerColor = cs.primaryContainer),
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
-                        Text("Device not connected", fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
-                        Spacer(Modifier.height(4.dp))
-                        Text("Plug the device into this phone over USB - it connects automatically.",
-                            style = MaterialTheme.typography.bodySmall, color = cs.onPrimaryContainer)
-                        Spacer(Modifier.height(10.dp))
-                        Button(onClick = onConnect, modifier = Modifier.fillMaxWidth()) { Text("Connect over USB") }
-                        Spacer(Modifier.height(8.dp))
-                        Text("Don't have the board yet?", style = MaterialTheme.typography.bodySmall, color = cs.onPrimaryContainer)
-                        OutlinedButton(onClick = { openUrl(context, ALIEXPRESS_URL) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Buy the LilyGo T-Embed CC1101")
+        // Wide windows: the dashboard is centered and capped (phones in portrait are narrower).
+        CenteredMaxWidth(AdaptiveLayout.HomeMaxWidth) {
+            Column(
+                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                if (!connected) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                        colors = CardDefaults.cardColors(containerColor = cs.primaryContainer),
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                            Text("Device not connected", fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
+                            Spacer(Modifier.height(4.dp))
+                            Text("Plug the device into this phone over USB - it connects automatically.",
+                                style = MaterialTheme.typography.bodySmall, color = cs.onPrimaryContainer)
+                            Spacer(Modifier.height(10.dp))
+                            Button(onClick = onConnect, modifier = Modifier.fillMaxWidth()) { Text("Connect over USB") }
+                            Spacer(Modifier.height(8.dp))
+                            Text("Don't have the board yet?", style = MaterialTheme.typography.bodySmall, color = cs.onPrimaryContainer)
+                            OutlinedButton(onClick = { openUrl(context, ALIEXPRESS_URL) }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Buy the LilyGo T-Embed CC1101")
+                            }
                         }
                     }
                 }
-            }
-            // Search across every tool (there are ~45) - type to jump straight to one instead of
-            // hunting through categories.
-            var query by remember { mutableStateOf("") }
-            OutlinedTextField(
-                value = query, onValueChange = { query = it }, singleLine = true,
-                label = { Text("Search tools") },
-                leadingIcon = { androidx.compose.material3.Icon(Icons.Filled.Search, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            )
-            if (query.isNotBlank()) {
-                val q = query.trim()
-                val matches = app.brucia.features.BuiltinFeatures.registry.features
-                    .filter { it.title.contains(q, true) || it.description.contains(q, true) }
-                if (matches.isEmpty()) {
-                    Text("No tools match \"$q\".", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                // Search across every tool (there are ~45) - type to jump straight to one instead of
+                // hunting through categories.
+                var query by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it }, singleLine = true,
+                    label = { Text("Search tools") },
+                    leadingIcon = { androidx.compose.material3.Icon(Icons.Filled.Search, contentDescription = null) },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                )
+                if (query.isNotBlank()) {
+                    val q = query.trim()
+                    val matches = app.brucia.features.BuiltinFeatures.registry.features
+                        .filter { it.title.contains(q, true) || it.description.contains(q, true) }
+                    if (matches.isEmpty()) {
+                        Text("No tools match \"$q\".", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        matches.forEach { tool ->
+                            val available = caps == null || capsAllow(caps, tool.cap)
+                            ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen,
+                                unavailableReason = CapabilityEvidence.shortReason(tool.cap, evidence))
+                        }
+                    }
                 } else {
-                    matches.forEach { tool ->
-                        val available = caps == null || capsAllow(caps, tool.cap)
-                        ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen,
-                            unavailableReason = CapabilityEvidence.shortReason(tool.cap, evidence))
+                    Text("Categories", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+                        color = cs.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    // One cell per category, plus a trailing Support cell in the same card style, so the whole
+                    // menu reads as one uniform grid.
+                    val cells: List<@Composable (Modifier) -> Unit> = buildList {
+                        toolCategories.forEachIndexed { idx, cat ->
+                            val anyAvail = caps == null || cat.features.any { capsAllow(caps, it.cap) }
+                            // Flag the category that holds the Updates tool (tab 12) when a newer app or
+                            // firmware release is available, so the user sees it from the home grid.
+                            val catBadge = updateAvailable && cat.features.any { it.tabId == 12 }
+                            add { m -> CategoryButton(cat, anyAvail, modifier = m, badge = catBadge) { onSelectCategory(idx) } }
+                        }
+                        add { m -> GridCell(Icons.Filled.Palette, "Theme", "App + device colors & LED", connected, m) { onOpen(36) } }
+                        add { m -> GridCell(Icons.AutoMirrored.Filled.MenuBook, "Wiki", "Guides & docs", true, m) { openUrl(context, WIKI_URL) } }
+                        add { m -> GridCell(Icons.Filled.Favorite, "Support", "Sponsor / donate", true, m) { showSupport = true } }
                     }
-                }
-            } else {
-                Text("Categories", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
-                    color = cs.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
-                // One cell per category, plus a trailing Support cell in the same card style, so the whole
-                // menu reads as one uniform grid.
-                val cells: List<@Composable (Modifier) -> Unit> = buildList {
-                    toolCategories.forEachIndexed { idx, cat ->
-                        val anyAvail = caps == null || cat.features.any { capsAllow(caps, it.cap) }
-                        // Flag the category that holds the Updates tool (tab 12) when a newer app or
-                        // firmware release is available, so the user sees it from the home grid.
-                        val catBadge = updateAvailable && cat.features.any { it.tabId == 12 }
-                        add { m -> CategoryButton(cat, anyAvail, modifier = m, badge = catBadge) { onSelectCategory(idx) } }
+                    // Column count follows the grid's width: 2 on phones, more tiles of at least
+                    // 160dp on tablets / landscape (see AdaptiveLayout.homeGridColumns).
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        val columns = AdaptiveLayout.homeGridColumns(maxWidth.value)
+                        Column {
+                            cells.chunked(columns).forEach { row ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    row.forEach { cell -> cell(Modifier.weight(1f)) }
+                                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                                }
+                                Spacer(Modifier.height(12.dp))
+                            }
+                        }
                     }
-                    add { m -> GridCell(Icons.Filled.Palette, "Theme", "App + device colors & LED", connected, m) { onOpen(36) } }
-                    add { m -> GridCell(Icons.AutoMirrored.Filled.MenuBook, "Wiki", "Guides & docs", true, m) { openUrl(context, WIKI_URL) } }
-                    add { m -> GridCell(Icons.Filled.Favorite, "Support", "Sponsor / donate", true, m) { showSupport = true } }
-                }
-                cells.chunked(2).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        row.forEach { cell -> cell(Modifier.weight(1f)) }
-                        if (row.size == 1) Spacer(Modifier.weight(1f))
-                    }
-                    Spacer(Modifier.height(12.dp))
                 }
             }
         }
@@ -1971,58 +1988,60 @@ private fun HomeDashboard(
 
     // A category is open: show its tools (subcategories).
     val shown = listOf(toolCategories[category])
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-    ) {
-        // First-run path: when nothing is connected, the tools cannot do anything, so offer an
-        // obvious connect action before the cards.
-        if (!connected) {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                colors = CardDefaults.cardColors(containerColor = cs.primaryContainer),
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
-                    Text(
-                        "Device not connected",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = cs.onPrimaryContainer,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Plug the device into this phone over USB to start using the tools.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = cs.onPrimaryContainer,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Button(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
-                        Text("Connect over USB")
+    CenteredMaxWidth(AdaptiveLayout.ToolMaxWidth) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            // First-run path: when nothing is connected, the tools cannot do anything, so offer an
+            // obvious connect action before the cards.
+            if (!connected) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    colors = CardDefaults.cardColors(containerColor = cs.primaryContainer),
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                        Text(
+                            "Device not connected",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = cs.onPrimaryContainer,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Plug the device into this phone over USB to start using the tools.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onPrimaryContainer,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Button(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
+                            Text("Connect over USB")
+                        }
                     }
                 }
             }
-        }
-        shown.forEach { cat ->
-            Text(
-                cat.name,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = cs.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 6.dp),
-            )
-            cat.features.forEach { tool ->
-                // Unknown caps (disconnected) -> everything shown normally.
-                val available = caps == null || capsAllow(caps, tool.cap)
-                ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen,
-                            unavailableReason = CapabilityEvidence.shortReason(tool.cap, evidence))
+            shown.forEach { cat ->
+                Text(
+                    cat.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 6.dp),
+                )
+                cat.features.forEach { tool ->
+                    // Unknown caps (disconnected) -> everything shown normally.
+                    val available = caps == null || capsAllow(caps, tool.cap)
+                    ToolCard(tool, available, updateAvailable && tool.tabId == 12, if (tool.tabId == 12) updateLabel else "", onOpen,
+                                unavailableReason = CapabilityEvidence.shortReason(tool.cap, evidence))
+                }
+                Spacer(Modifier.height(10.dp))
             }
-            Spacer(Modifier.height(10.dp))
-        }
-        // Support card at the bottom of the dashboard (shown only on the full, unfiltered view).
-        if (category !in toolCategories.indices) {
-            SupportCard()
+            // Support card at the bottom of the dashboard (shown only on the full, unfiltered view).
+            if (category !in toolCategories.indices) {
+                SupportCard()
+            }
         }
     }
 }

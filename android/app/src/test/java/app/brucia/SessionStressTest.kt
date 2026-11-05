@@ -7,13 +7,8 @@ import app.brucia.session.CommandSession
 import app.brucia.session.StreamSubscriptions
 import app.brucia.transport.Transport
 import app.brucia.wardrive.DeviceCaps
-import kotlinx.coroutines.CancellableContinuation
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Delay
-import kotlinx.coroutines.DisposableHandle
-import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
@@ -24,57 +19,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
-import java.util.PriorityQueue
-import kotlin.coroutines.CoroutineContext
-import kotlin.coroutines.resume
 import kotlin.random.Random
-
-/**
- * Long-session regression for CommandSession, CompanionClient and StreamSubscriptions over a
- * deterministic virtual transport and a virtual clock: no sleeps, no wall-clock deadlines.
- * Software-only: this does not measure Android heap/GC, USB latency or physical device stress.
- */
-@OptIn(InternalCoroutinesApi::class)
-private class VirtualClock : CoroutineDispatcher(), Delay {
-    private class Timer(val at: Long, val seq: Long, val action: () -> Unit)
-    var now = 0L
-        private set
-    private var seq = 0L
-    private val ready = ArrayDeque<Runnable>()
-    private val timers = PriorityQueue(compareBy<Timer>({ it.at }, { it.seq }))
-    val timerCount: Int get() = timers.size
-
-    override fun dispatch(context: CoroutineContext, block: Runnable) { ready.addLast(block) }
-
-    override fun scheduleResumeAfterDelay(timeMillis: Long, continuation: CancellableContinuation<Unit>) {
-        val timer = schedule(timeMillis) { continuation.resume(Unit) }
-        continuation.invokeOnCancellation { timers.remove(timer) }
-    }
-
-    override fun invokeOnTimeout(timeMillis: Long, block: Runnable, context: CoroutineContext): DisposableHandle {
-        val timer = schedule(timeMillis) { block.run() }
-        return object : DisposableHandle { override fun dispose() { timers.remove(timer) } }
-    }
-
-    private fun schedule(ms: Long, action: () -> Unit) =
-        Timer(now + ms.coerceAtLeast(0), seq++, action).also { timers.add(it) }
-
-    fun runCurrent() { while (ready.isNotEmpty()) ready.removeFirst().run() }
-
-    fun advanceBy(ms: Long) {
-        val target = now + ms
-        runCurrent()
-        while (true) {
-            val next = timers.peek() ?: break
-            if (next.at > target) break
-            timers.poll()
-            now = next.at
-            next.action()
-            runCurrent()
-        }
-        now = target
-    }
-}
 
 /** Fake USB pipe: decodes every outbound frame, serves inbound bytes in caller-chosen chunks. */
 private class VirtualWire : Transport {
@@ -172,6 +117,11 @@ private class Reader(val client: CompanionClient, val wire: VirtualWire, val rou
     }
 }
 
+/**
+ * Long-session regression for CommandSession, CompanionClient and StreamSubscriptions over a
+ * deterministic virtual transport and a virtual clock: no sleeps, no wall-clock deadlines.
+ * Software-only: this does not measure Android heap/GC, USB latency or physical device stress.
+ */
 class SessionStressTest {
 
     @Test(timeout = 60_000)

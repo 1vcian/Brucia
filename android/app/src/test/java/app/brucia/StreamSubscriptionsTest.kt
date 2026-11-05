@@ -33,7 +33,7 @@ class StreamSubscriptionsTest {
         override fun dispatch(context: CoroutineContext, block: Runnable) { work.addLast(block) }
         fun drain() { while (work.isNotEmpty()) work.removeFirst().run() }
     }
-    private class Fixture(scope: CoroutineScope, dispatcher: CoroutineDispatcher = Dispatchers.Unconfined) {
+    private class Fixture(scope: CoroutineScope, dispatcher: CoroutineDispatcher = scope.virtualUnconfined) {
         val wire = Wire()
         var caps = DeviceCaps(wifi = true, ble = true, cc1101 = true, mic = true)
         val first = CommandSession(CompanionClient(wire), wire)
@@ -52,7 +52,7 @@ class StreamSubscriptionsTest {
         fun autoAck() { wire.reply = { ack(wire.frames.lastIndex, target = session!!) } }
     }
 
-    @Test(timeout = 5000) fun absentHardwareAndUnknownStreamsNeverWrite() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun absentHardwareAndUnknownStreamsNeverWrite() = runVirtual<Unit> {
         val f = Fixture(this)
         f.caps = DeviceCaps()
         for (stream in StreamPolicy.streams) assertFalse(f.streams.set(stream, true))
@@ -61,7 +61,7 @@ class StreamSubscriptionsTest {
         assertTrue(f.streams.cleanupStreams().isEmpty())
     }
 
-    @Test(timeout = 5000) fun synchronousAckAndExclusiveReplacementReleaseEveryRequest() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun synchronousAckAndExclusiveReplacementReleaseEveryRequest() = runVirtual<Unit> {
         val f = Fixture(this); f.autoAck()
         f.streams.set("wifi.ap", true)
         assertEquals(setOf("wifi.ap"), f.streams.activeStreams())
@@ -78,7 +78,7 @@ class StreamSubscriptionsTest {
         assertEquals(3, f.results.size)
     }
 
-    @Test(timeout = 5000) fun stopSupersedesPendingStartAndLateAckCannotReactivateIt() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun stopSupersedesPendingStartAndLateAckCannotReactivateIt() = runVirtual<Unit> {
         val f = Fixture(this)
         f.streams.set("mic.pcm", true)
         f.streams.set("mic.pcm", false)
@@ -91,7 +91,7 @@ class StreamSubscriptionsTest {
         assertEquals(2, f.results.size)
     }
 
-    @Test(timeout = 5000) fun missingAckAndRejectedStopRemainEligibleForCleanup() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun missingAckAndRejectedStopRemainEligibleForCleanup() = runVirtual<Unit> {
         val f = Fixture(this)
         f.streams.set("wifi.ap", true)
         until { !f.first.hasPending }
@@ -106,7 +106,7 @@ class StreamSubscriptionsTest {
         assertEquals(3, f.wire.frames.size)
     }
 
-    @Test(timeout = 5000) fun disconnectAndReconnectIsolateLateReplies() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun disconnectAndReconnectIsolateLateReplies() = runVirtual<Unit> {
         val f = Fixture(this)
         f.streams.set("ble.scan", true)
         assertEquals(setOf("ble.scan"), f.streams.detach())
@@ -120,7 +120,7 @@ class StreamSubscriptionsTest {
         f.streams.detach()
     }
 
-    @Test(timeout = 5000) fun queuedRequestsRecheckCapabilitiesAndSessionBeforeWriting() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun queuedRequestsRecheckCapabilitiesAndSessionBeforeWriting() = runVirtual<Unit> {
         for (changeCaps in listOf(true, false)) {
             val queue = Queue()
             val f = Fixture(this, queue)
@@ -134,7 +134,7 @@ class StreamSubscriptionsTest {
         }
     }
 
-    @Test(timeout = 5000) fun parentCancelledBeforeDispatchCannotLeaveActiveOrPendingRequests() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun parentCancelledBeforeDispatchCannotLeaveActiveOrPendingRequests() = runVirtual<Unit> {
         val parent = Job()
         val queue = Queue()
         val f = Fixture(CoroutineScope(parent), queue)
@@ -148,7 +148,7 @@ class StreamSubscriptionsTest {
         f.streams.detach()
     }
 
-    @Test(timeout = 5000) fun invalidMonitorReplacementPreservesExistingStream() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun invalidMonitorReplacementPreservesExistingStream() = runVirtual<Unit> {
         val f = Fixture(this); f.autoAck()
         f.streams.set("wifi.ap", true)
         assertFalse(f.streams.set("wifi.monitor", true, 0))
@@ -160,7 +160,7 @@ class StreamSubscriptionsTest {
         f.streams.detach()
     }
 
-    @Test(timeout = 5000) fun exclusivePeersSupersedeButIndependentStreamsKeepTheirOwnership() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun exclusivePeersSupersedeButIndependentStreamsKeepTheirOwnership() = runVirtual<Unit> {
         val f = Fixture(this)
         f.streams.set("wifi.ap", true)
         f.streams.set("ble.scan", true)
@@ -174,7 +174,7 @@ class StreamSubscriptionsTest {
         f.streams.detach()
     }
 
-    @Test(timeout = 5000) fun failedWriteAndClosedSessionTerminateWithoutLeakingWaits() = runBlocking<Unit> {
+    @Test(timeout = 5000) fun failedWriteAndClosedSessionTerminateWithoutLeakingWaits() = runVirtual<Unit> {
         val f = Fixture(this)
         f.wire.fail = true
         f.streams.set("mic.pcm", true)

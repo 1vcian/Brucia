@@ -33,7 +33,7 @@ class BleMediaServiceTest {
         assertEquals(n, runner.calls.size)
     }
 
-    @Test fun sendTextsTrimAndTimeout() = runBlocking {
+    @Test fun sendTextsTrimAndTimeout() = runVirtual {
         val svc = svc()
         svc.send("  AA:BB:CC:DD:EE:FF  ")
         assertEquals("Connecting to AA:BB:CC:DD:EE:FF..." to true, svc.state())
@@ -50,7 +50,7 @@ class BleMediaServiceTest {
         assertEquals(650_000L, BleMediaService.TIMEOUT_MS)
     }
 
-    @Test fun malformedOrDisconnectedRejectedWithoutSending() = runBlocking {
+    @Test fun malformedOrDisconnectedRejectedWithoutSending() = runVirtual {
         val svc = svc()
         for (m in listOf("", "AA:BB:CC:DD:EE", "GG:BB:CC:DD:EE:FF", "AABBCCDDEEFF", "AA:BB:CC:DD:EE:FF:00")) {
             svc.rejects(badMac) { send(m) }
@@ -58,7 +58,7 @@ class BleMediaServiceTest {
         connected = false
         svc.rejects(notConnected) { send("AA:BB:CC:DD:EE:FF") }
     }
-    @Test fun stopSupersedesWaitingSend() = runBlocking {
+    @Test fun stopSupersedesWaitingSend() = runVirtual {
         val svc = svc()
         runner.sticky = true
         svc.send("AA:BB:CC:DD:EE:FF")

@@ -16,7 +16,7 @@ class ClockServiceTest {
         return status.value
     }
 
-    @Test fun getAndSetTextsAndCommands() = runBlocking {
+    @Test fun getAndSetTextsAndCommands() = runVirtual {
         val svc = ClockService(this, runner, { true })
         val iso = "2026-10-30T12:00:00Z"
         assertEquals(iso, svc.result(true to iso) { get(); assertEquals("Reading clock..." to true, status.value to busy.value) })
@@ -29,7 +29,7 @@ class ClockServiceTest {
             "clock_set 1000000000", "clock_set 1793000000"), runner.cmds)
     }
 
-    @Test fun implausibleEpochIsNotSentAndConnectionComesFirst() = runBlocking {
+    @Test fun implausibleEpochIsNotSentAndConnectionComesFirst() = runVirtual {
         var connected = false
         val svc = ClockService(this, runner, { connected })
         svc.set(1L)

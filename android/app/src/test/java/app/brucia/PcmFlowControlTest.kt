@@ -38,11 +38,11 @@ class PcmFlowControlTest {
     private fun source(n: Int) = PcmStreamSource(PcmSource.arrayReader(ShortArray(n) { (it % 30000).toShort() }), n.toLong())
     private suspend fun done(service: PcmStreamService) = until { !service.status.value.active }
 
-    @Test(timeout = 5000) fun partialFramesResendOnlyTheRemainderAndDeliverEverySampleInOrder() = runBlocking {
+    @Test(timeout = 5000) fun partialFramesResendOnlyTheRemainderAndDeliverEverySampleInOrder() = runVirtual {
         var clock = 0L; val waits = mutableListOf<Long>()
         // Drains at half real time, so the ring fills and frames are accepted partially.
         val device = RingDevice(capacity = 1500, clock = { clock }, drainPerMs = 8)
-        val service = PcmStreamService(this, { device }, Dispatchers.Unconfined, { clock }, { waits += it; clock += it })
+        val service = PcmStreamService(this, { device }, virtualUnconfined, { clock }, { waits += it; clock += it })
         val src = source(6000)
         service.start(PcmStreamSpec(fmKHz = 100000), "prep", "Transmitting.") { src }
         done(service)
@@ -54,14 +54,14 @@ class PcmFlowControlTest {
         assertEquals(375L, service.status.value.elapsedMs) // accepted samples only: 6000 / 16 kHz
     }
 
-    @Test(timeout = 5000) fun fullRingWaitsForDrainThenResendsTheSameFrame() = runBlocking {
+    @Test(timeout = 5000) fun fullRingWaitsForDrainThenResendsTheSameFrame() = runVirtual {
         var clock = 0L; val waits = mutableListOf<Long>()
         val device = RingDevice(capacity = 8191, clock = { clock }, drainPerMs = 16)
         device.replies = mutableListOf(
             { _, n -> PcmDataReply(true, "ring full: accepted 0 of $n samples", 0, n, 0, 0) },
             { _, n -> PcmDataReply(true, "ring full: accepted 0 of $n samples", 0, n, 0, 0) },
         )
-        val service = PcmStreamService(this, { device }, Dispatchers.Unconfined, { clock }, { waits += it; clock += it })
+        val service = PcmStreamService(this, { device }, virtualUnconfined, { clock }, { waits += it; clock += it })
         service.start(PcmStreamSpec(fmKHz = 100000), "prep", "playing") { source(1024) }
         done(service)
         assertEquals(listOf(1024, 1024, 1024), device.requests)
@@ -70,9 +70,9 @@ class PcmFlowControlTest {
         assertEquals("Finished.", service.status.value.message)
     }
 
-    @Test(timeout = 5000) fun ringThatNeverDrainsFailsAfterBoundedRetriesAndStillStops() = runBlocking {
+    @Test(timeout = 5000) fun ringThatNeverDrainsFailsAfterBoundedRetriesAndStillStops() = runVirtual {
         val device = RingDevice(capacity = 0, clock = { 0L }, drainPerMs = 0)
-        val service = PcmStreamService(this, { device }, Dispatchers.Unconfined, pause = {})
+        val service = PcmStreamService(this, { device }, virtualUnconfined, pause = {})
         service.start(PcmStreamSpec(fmKHz = 100000), "prep", "playing") { source(1024) }
         done(service)
         // 64 ms drain waits for the 1024-sample remainder until 2 s pass with nothing accepted.
@@ -81,10 +81,10 @@ class PcmFlowControlTest {
         assertEquals("stop", device.events.last())
     }
 
-    @Test(timeout = 5000) fun oldFirmwareKeepsSingleSendPerFrameAndIsLabelledUnknownForFmOnly() = runBlocking {
+    @Test(timeout = 5000) fun oldFirmwareKeepsSingleSendPerFrameAndIsLabelledUnknownForFmOnly() = runVirtual {
         for (fm in listOf(true, false)) {
             val device = RingDevice(capacity = 100, clock = { 0L }, drainPerMs = 0, reports = false)
-            val service = PcmStreamService(this, { device }, Dispatchers.Unconfined, pause = {})
+            val service = PcmStreamService(this, { device }, virtualUnconfined, pause = {})
             val spec = if (fm) PcmStreamSpec(fmKHz = 100000) else PcmStreamSpec()
             service.start(spec, "prep", "playing") { source(3000) }
             done(service)
@@ -98,7 +98,7 @@ class PcmFlowControlTest {
         }
     }
 
-    @Test(timeout = 5000) fun deviceReportedLossIsSurfacedWhilePlayingAndAtTheEnd() = runBlocking {
+    @Test(timeout = 5000) fun deviceReportedLossIsSurfacedWhilePlayingAndAtTheEnd() = runVirtual {
         val device = RingDevice(capacity = 100000, clock = { 0L }, drainPerMs = 0, lost = 37)
         lateinit var service: PcmStreamService
         var midStream = ""
@@ -106,7 +106,7 @@ class PcmFlowControlTest {
             { _, n -> PcmDataReply(true, "", n, n, 5000, 37) },
             { _, n -> midStream = service.status.value.message; PcmDataReply(true, "", n, n, 5000, 37) },
         )
-        service = PcmStreamService(this, { device }, Dispatchers.Unconfined, pause = {})
+        service = PcmStreamService(this, { device }, virtualUnconfined, pause = {})
         service.start(PcmStreamSpec(fmKHz = 100000), "prep", "Transmitting.") { source(2048) }
         done(service)
         assertEquals("Transmitting. Device dropped 37 samples.", midStream)
@@ -114,7 +114,7 @@ class PcmFlowControlTest {
         assertEquals("Finished; device dropped 37 samples.", service.status.value.message)
     }
 
-    @Test(timeout = 5000) fun knownFreeSpaceDelaysTheNextFrameInsteadOfOverfilling() = runBlocking {
+    @Test(timeout = 5000) fun knownFreeSpaceDelaysTheNextFrameInsteadOfOverfilling() = runVirtual {
         val waits = mutableListOf<Long>()
         val device = RingDevice(capacity = 100000, clock = { 0L }, drainPerMs = 0)
         device.replies = mutableListOf(
@@ -122,14 +122,14 @@ class PcmFlowControlTest {
             { _, n -> PcmDataReply(true, "", n, n, 8000, 0) },
         )
         // Fixed clock: nothing is estimated to drain, so the 924-sample deficit is waited out.
-        val service = PcmStreamService(this, { device }, Dispatchers.Unconfined, { 0L }, { waits += it })
+        val service = PcmStreamService(this, { device }, virtualUnconfined, { 0L }, { waits += it })
         service.start(PcmStreamSpec(fmKHz = 100000), "prep", "playing") { source(2048) }
         done(service)
         assertEquals(listOf(64L, 57L, 128L), waits)
         assertEquals(listOf(1024, 1024), device.requests)
     }
 
-    @Test(timeout = 5000) fun impossibleCountsAreProtocolErrorsNotDelivery() = runBlocking {
+    @Test(timeout = 5000) fun impossibleCountsAreProtocolErrorsNotDelivery() = runVirtual {
         val bad = listOf<(ShortArray, Int) -> PcmDataReply>(
             { _, n -> PcmDataReply(true, "", n + 1, n, 0, 0) },
             { _, n -> PcmDataReply(true, "", -1, n, 0, 0) },
@@ -138,7 +138,7 @@ class PcmFlowControlTest {
         for (reply in bad) {
             val device = RingDevice(capacity = 100000, clock = { 0L }, drainPerMs = 0)
             device.replies = mutableListOf(reply)
-            val service = PcmStreamService(this, { device }, Dispatchers.Unconfined, pause = {})
+            val service = PcmStreamService(this, { device }, virtualUnconfined, pause = {})
             service.start(PcmStreamSpec(fmKHz = 100000), "prep", "playing") { source(1024) }
             done(service)
             assertEquals("Device reported an invalid PCM sample count.", service.status.value.message)

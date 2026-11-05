@@ -17,7 +17,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 class LifecycleRegressionTest {
-    @Test(timeout = 5000) fun cancelledScopeClearsDeviceOperationBusyBeforeAndDuringRun() = runBlocking {
+    @Test(timeout = 5000) fun cancelledScopeClearsDeviceOperationBusyBeforeAndDuringRun() = runVirtual {
         for (before in listOf(true, false)) {
             val parent = Job()
             if (before) parent.cancel()
@@ -34,7 +34,7 @@ class LifecycleRegressionTest {
         }
     }
 
-    @Test(timeout = 5000) fun obsoleteMapperCannotRunSideEffectsAfterStopOrRestart() = runBlocking {
+    @Test(timeout = 5000) fun obsoleteMapperCannotRunSideEffectsAfterStopOrRestart() = runVirtual {
         val replies = mutableListOf<Continuation<Pair<Boolean, String>>>()
         var effects = 0
         val op = DeviceOperation(this, CommandRunner { _, _ -> suspendCoroutine { replies += it } }, { true })
@@ -52,14 +52,14 @@ class LifecycleRegressionTest {
         assertEquals("new done", op.status.value)
     }
 
-    @Test(timeout = 5000) fun mapperExceptionReportsFailureAndClearsBusy() = runBlocking {
+    @Test(timeout = 5000) fun mapperExceptionReportsFailureAndClearsBusy() = runVirtual {
         val op = DeviceOperation(this, CommandRunner { _, _ -> true to "ok" }, { true })
         op.start("fixture", "running") { _, _ -> throw IllegalStateException("bad reply") }
         until { !op.busy.value }
         assertEquals("Operation failed: bad reply", op.status.value)
     }
 
-    @Test(timeout = 5000) fun ethernetLateConfigCannotLaunchRefreshAfterCleanup() = runBlocking {
+    @Test(timeout = 5000) fun ethernetLateConfigCannotLaunchRefreshAfterCleanup() = runVirtual {
         var reply: Continuation<Pair<Boolean, String>>? = null
         var refreshes = 0
         val ethernet = EthernetService(this, CommandRunner { _, _ -> suspendCoroutine { reply = it } },
@@ -73,7 +73,7 @@ class LifecycleRegressionTest {
         assertEquals("Stopped.", ethernet.message.value)
     }
 
-    @Test(timeout = 5000) fun commandGroupCancelsQueuedWritesAndAllowsNewWork() = runBlocking {
+    @Test(timeout = 5000) fun commandGroupCancelsQueuedWritesAndAllowsNewWork() = runVirtual {
         val calls = mutableListOf<String>(); val callbacks = mutableListOf<String>()
         val tasks = CommandTasks(this)
         val runner = CommandRunner { cmd, _ -> calls += cmd; true to cmd }
@@ -85,7 +85,7 @@ class LifecycleRegressionTest {
         assertEquals(listOf("new"), callbacks)
     }
 
-    @Test(timeout = 5000) fun commandGroupIgnoresNonCancellableLateCallback() = runBlocking {
+    @Test(timeout = 5000) fun commandGroupIgnoresNonCancellableLateCallback() = runVirtual {
         var reply: Continuation<Pair<Boolean, String>>? = null
         var callbacks = 0
         val tasks = CommandTasks(this)
@@ -96,7 +96,7 @@ class LifecycleRegressionTest {
         assertEquals(0, callbacks)
     }
 
-    @Test(timeout = 5000) fun bleRefreshCannotRestoreOldStatusAfterStop() = runBlocking {
+    @Test(timeout = 5000) fun bleRefreshCannotRestoreOldStatusAfterStop() = runVirtual {
         var reply: Continuation<Pair<Boolean, String>>? = null
         val hid = BleHidService(this, CommandRunner { _, _ -> suspendCoroutine { reply = it } }, { true })
         hid.refresh(); until { reply != null }; hid.stop()
@@ -106,7 +106,7 @@ class LifecycleRegressionTest {
         assertFalse(hid.busy.value)
     }
 
-    @Test(timeout = 5000) fun portalAbandonPreventsLateTemplateFromStartingOnReconnect() = runBlocking {
+    @Test(timeout = 5000) fun portalAbandonPreventsLateTemplateFromStartingOnReconnect() = runVirtual {
         var upload: Continuation<Pair<Boolean, String>>? = null
         var sends = 0
         val portal = EvilPortalService(this, CommandRunner { _, _ -> sends++; true to "ok" }, { true },
@@ -128,7 +128,7 @@ class LifecycleRegressionTest {
         override fun close() { isOpen = false }
     }
 
-    @Test(timeout = 5000) fun combinedDisconnectReleasesPendingAndResetsBackgroundState() = runBlocking {
+    @Test(timeout = 5000) fun combinedDisconnectReleasesPendingAndResetsBackgroundState() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         val runner = CommandRunner { cmd, timeout -> session.await(cmd, timeout) }
         val hid = BleHidService(this, runner, { true })

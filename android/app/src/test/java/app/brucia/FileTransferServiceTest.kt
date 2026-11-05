@@ -23,12 +23,12 @@ class FileTransferServiceTest {
         override suspend fun read(path: String): ByteArray { reads += path; return readBody() }
         override suspend fun write(path: String, bytes: ByteArray) { writes++; writeBody() }
     }
-    private fun CoroutineScope.service(link: Link) = FileTransferService(this, { link }, Dispatchers.Unconfined)
+    private fun CoroutineScope.service(link: Link) = FileTransferService(this, { link }, virtualUnconfined)
 
-    @Test(timeout = 5000) fun snapshotAtInvocationPreventsQueuedReadFromFollowingReconnect() = runBlocking {
+    @Test(timeout = 5000) fun snapshotAtInvocationPreventsQueuedReadFromFollowingReconnect() = runVirtual {
         val old = Link(); val fresh = Link()
         var current = old
-        val service = FileTransferService(this, { current }, Dispatchers.Unconfined)
+        val service = FileTransferService(this, { current }, virtualUnconfined)
         // Capture the old connection before the coroutine is scheduled, then reconnect.
         var callbacks = 0
         val queued = service.submit(work = { read("old") }) { callbacks++ }
@@ -42,7 +42,7 @@ class FileTransferServiceTest {
         assertEquals(1, callbacks)
     }
 
-    @Test(timeout = 5000) fun stopCancelsActiveAndQueuedTransfersAndAllowsNextRequest() = runBlocking {
+    @Test(timeout = 5000) fun stopCancelsActiveAndQueuedTransfersAndAllowsNextRequest() = runVirtual {
         val link = Link().apply { readBody = { awaitCancellation() } }
         val service = service(link)
         var callbacks = 0
@@ -58,7 +58,7 @@ class FileTransferServiceTest {
         assertEquals(listOf("first", "next"), link.reads); assertEquals(1, callbacks)
     }
 
-    @Test(timeout = 5000) fun cancelledNonCancellableReadCannotOpenDestinationOrCallback() = runBlocking {
+    @Test(timeout = 5000) fun cancelledNonCancellableReadCannotOpenDestinationOrCallback() = runVirtual {
         var reply: Continuation<ByteArray>? = null
         val link = Link().apply { readBody = { suspendCoroutine { reply = it } } }
         val service = service(link)
@@ -69,7 +69,7 @@ class FileTransferServiceTest {
         assertEquals(0, opens); assertEquals(0, callbacks)
     }
 
-    @Test(timeout = 5000) fun supersededBlockingWriteFinishesBeforeNewDestinationWrite() = runBlocking {
+    @Test(timeout = 5000) fun supersededBlockingWriteFinishesBeforeNewDestinationWrite() = runVirtual {
         val service = service(Link())
         val events = mutableListOf<String>()
         var oldWrite: Continuation<Unit>? = null
@@ -87,7 +87,7 @@ class FileTransferServiceTest {
         assertEquals(listOf("old open", "old write", "old close", "new write", "new callback"), events)
     }
 
-    @Test(timeout = 5000) fun stalePreparedFileIsDiscardedWithoutChangingAcceptedFile() = runBlocking {
+    @Test(timeout = 5000) fun stalePreparedFileIsDiscardedWithoutChangingAcceptedFile() = runVirtual {
         val link = Link(); val service = service(link)
         val existing = File.createTempFile("brucia-kept-", ".bin").apply { writeText("keep") }
         var staged: File? = null
@@ -105,7 +105,7 @@ class FileTransferServiceTest {
         } finally { existing.delete(); staged?.delete() }
     }
 
-    @Test(timeout = 5000) fun verifiedReadFailureNeverOpensDestination() = runBlocking {
+    @Test(timeout = 5000) fun verifiedReadFailureNeverOpensDestination() = runVirtual {
         val link = Link().apply { readBody = { throw IOException("checksum mismatch") } }
         val service = service(link)
         var opens = 0; var error = ""
@@ -113,14 +113,14 @@ class FileTransferServiceTest {
         assertEquals(0, opens); assertEquals("checksum mismatch", error)
     }
 
-    @Test(timeout = 5000) fun unavailableVerifiedFilesReportsFailureWithoutIO() = runBlocking {
+    @Test(timeout = 5000) fun unavailableVerifiedFilesReportsFailureWithoutIO() = runVirtual {
         var entered = false; var error = ""
-        val service = FileTransferService(this, { throw IOException("verified files unavailable") }, Dispatchers.Unconfined)
+        val service = FileTransferService(this, { throw IOException("verified files unavailable") }, virtualUnconfined)
         service.submit(work = { entered = true }) { error = it.exceptionOrNull()?.message.orEmpty() }.join()
         assertFalse(entered); assertEquals("verified files unavailable", error)
     }
 
-    @Test(timeout = 5000) fun callerCancellationStopsActualUploadJob() = runBlocking {
+    @Test(timeout = 5000) fun callerCancellationStopsActualUploadJob() = runVirtual {
         var closed = false
         val link = Link().apply { writeBody = { try { awaitCancellation() } finally { closed = true } } }
         val service = service(link)
@@ -130,7 +130,7 @@ class FileTransferServiceTest {
         assertTrue(caller.isCancelled)
     }
 
-    @Test(timeout = 5000) fun stopAllOrChangedConnectionAlsoEndsAwaitingCaller() = runBlocking {
+    @Test(timeout = 5000) fun stopAllOrChangedConnectionAlsoEndsAwaitingCaller() = runVirtual {
         for (changed in listOf(false, true)) {
             val link = Link()
             link.readBody = if (changed) ({ link.current = false; byteArrayOf(1) }) else ({ awaitCancellation() })
@@ -143,16 +143,16 @@ class FileTransferServiceTest {
         }
     }
 
-    @Test(timeout = 5000) fun alreadyCancelledParentDoesNotRunOrPublish() = runBlocking {
+    @Test(timeout = 5000) fun alreadyCancelledParentDoesNotRunOrPublish() = runVirtual {
         val parent = Job().apply { cancel() }
         val link = Link(); var callbacks = 0
-        val service = FileTransferService(CoroutineScope(coroutineContext + parent), { link }, Dispatchers.Unconfined)
+        val service = FileTransferService(CoroutineScope(coroutineContext + parent), { link }, virtualUnconfined)
         val job = service.submit(work = { read("fixture") }) { callbacks++ }
         job.join()
         assertTrue(job.isCancelled); assertTrue(link.reads.isEmpty()); assertEquals(0, callbacks)
     }
 
-    @Test(timeout = 5000) fun portalStopAndTransferCancellationCannotLaunchPortalAfterUpload() = runBlocking {
+    @Test(timeout = 5000) fun portalStopAndTransferCancellationCannotLaunchPortalAfterUpload() = runVirtual {
         for (portalStop in listOf(true, false)) {
             var closed = false
             val link = Link().apply { writeBody = { try { awaitCancellation() } finally { closed = true } } }

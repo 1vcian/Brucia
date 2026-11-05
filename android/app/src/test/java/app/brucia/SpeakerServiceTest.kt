@@ -42,7 +42,7 @@ class SpeakerServiceTest {
         assertEquals(n, runner.calls.size)
     }
 
-    @Test fun volumeClampsTextsAndTimeout() = runBlocking {
+    @Test fun volumeClampsTextsAndTimeout() = runVirtual {
         val svc = svc()
         assertEquals("Volume 100%", svc.result(true to "") { setVolume(150) })
         assertEquals(100, svc.volume.value)
@@ -54,7 +54,7 @@ class SpeakerServiceTest {
             "speaker_volume 40" to 10_000L, "speaker_volume 41" to 10_000L), runner.calls.toList())
     }
 
-    @Test fun volumeUpdatesWithoutConnection() = runBlocking {
+    @Test fun volumeUpdatesWithoutConnection() = runVirtual {
         connected = false
         val svc = svc()
         assertEquals(100, svc.volume.value)
@@ -62,7 +62,7 @@ class SpeakerServiceTest {
         assertEquals(42, svc.volume.value)
     }
 
-    @Test fun toneTextsRejectionsAndTimeout() = runBlocking {
+    @Test fun toneTextsRejectionsAndTimeout() = runVirtual {
         val svc = svc()
         svc.tone(440, 500)
         assertEquals("Playing 440Hz for 500ms..." to true, svc.state())
@@ -83,7 +83,7 @@ class SpeakerServiceTest {
         svc.rejects(notConnected) { tone(0, 0) }
     }
 
-    @Test fun playFileTextsAndTimeout() = runBlocking {
+    @Test fun playFileTextsAndTimeout() = runVirtual {
         val svc = svc()
         svc.playFile("  /music/a.wav ")
         assertEquals("Playing /music/a.wav..." to true, svc.state())
@@ -100,7 +100,7 @@ class SpeakerServiceTest {
         svc.rejects(notConnected) { playFile("a.wav") }
     }
 
-    @Test fun songLifecycleKeepsStatusOnSuccessAndClearsOnFailOrStop() = runBlocking {
+    @Test fun songLifecycleKeepsStatusOnSuccessAndClearsOnFailOrStop() = runVirtual {
         val svc = svc()
         assertEquals("Volume 50%", svc.result(true to "") { setVolume(50) })
         assertEquals("Volume 50%", svc.result(true to "playing") {
@@ -118,7 +118,7 @@ class SpeakerServiceTest {
         assertTrue(runner.calls.all { it.second == 10_000L })
     }
 
-    @Test fun songWhileDisconnected() = runBlocking {
+    @Test fun songWhileDisconnected() = runVirtual {
         val svc = svc()
         svc.playSong("A", "a")
         until { runner.calls.size == 1 }
@@ -131,7 +131,7 @@ class SpeakerServiceTest {
         assertEquals(1, runner.calls.size)
     }
 
-    @Test fun supersededSongStartNeverClearsNewerSong() = runBlocking {
+    @Test fun supersededSongStartNeverClearsNewerSong() = runVirtual {
         // Replies that outlive cancellation, so the superseded start still maps its result. A
         // detached scope keeps a failed assertion from waiting on those uncancellable calls.
         val conts = CopyOnWriteArrayList<Continuation<Pair<Boolean, String>>>()
@@ -153,7 +153,7 @@ class SpeakerServiceTest {
         scope.cancel()
     }
 
-    @Test fun dtmfKeepsStatusAndIsSkippedWhileDisconnected() = runBlocking {
+    @Test fun dtmfKeepsStatusAndIsSkippedWhileDisconnected() = runVirtual {
         val svc = svc()
         assertEquals("Tone failed.", svc.result(false to "") { tone(440, 100) })
         assertEquals("Tone failed.", svc.result(true to "dtmf") { dtmf('5') })
@@ -164,7 +164,7 @@ class SpeakerServiceTest {
         svc.rejects("Tone failed.") { dtmf('1') }
     }
 
-    @Test fun dtmfAndStopSongDoNotTakeOverAPendingTone() = runBlocking {
+    @Test fun dtmfAndStopSongDoNotTakeOverAPendingTone() = runVirtual {
         val svc = svc()
         svc.tone(440, 5_000)
         until { runner.calls.size == 1 }
@@ -180,7 +180,7 @@ class SpeakerServiceTest {
         assertEquals("Tone played.", svc.status.value)
     }
 
-    @Test fun stopSupersedesWaitingCommand() = runBlocking {
+    @Test fun stopSupersedesWaitingCommand() = runVirtual {
         val svc = svc()
         runner.sticky = true
         svc.tone(440, 5_000)
@@ -224,7 +224,7 @@ class SpeakerServiceTest {
         until { !busy.value }
     }
 
-    @Test(timeout = 5_000) fun asyncStartAcksAtOnceAndCompletionEventEndsIt() = runBlocking {
+    @Test(timeout = 5_000) fun asyncStartAcksAtOnceAndCompletionEventEndsIt() = runVirtual {
         val svc = asyncSvc()
         svc.started(7)
         assertEquals("Playing /a.wav" to false, svc.state())
@@ -239,7 +239,7 @@ class SpeakerServiceTest {
         assertEquals("Played /a.wav.", svc.status.value)
     }
 
-    @Test(timeout = 5_000) fun stopMidPlaySendsSpeakerStopAndReportsStopped() = runBlocking {
+    @Test(timeout = 5_000) fun stopMidPlaySendsSpeakerStopAndReportsStopped() = runVirtual {
         val svc = asyncSvc()
         svc.started(8)
         svc.stopFile()
@@ -261,7 +261,7 @@ class SpeakerServiceTest {
         assertEquals("Stopped /b.mp3." to false, svc.state())
     }
 
-    @Test(timeout = 5_000) fun stopWhilePlaybackIsStillStartingCancelsTheStart() = runBlocking {
+    @Test(timeout = 5_000) fun stopWhilePlaybackIsStillStartingCancelsTheStart() = runVirtual {
         val svc = asyncSvc()
         svc.playFile("/a.wav")
         until { json.calls.size == 1 }
@@ -276,7 +276,7 @@ class SpeakerServiceTest {
         assertEquals("" to ("Stopped." to false), svc.filePlaying.value to svc.state())
     }
 
-    @Test(timeout = 5_000) fun startErrorsAndErrorEvent() = runBlocking {
+    @Test(timeout = 5_000) fun startErrorsAndErrorEvent() = runVirtual {
         val svc = asyncSvc()
         svc.playFile("x.mp3")
         until { json.calls.size == 1 }
@@ -304,7 +304,7 @@ class SpeakerServiceTest {
         assertEquals(4, json.calls.size)
     }
 
-    @Test(timeout = 5_000) fun eventReadBeforeItsStartAckIsMapped() = runBlocking {
+    @Test(timeout = 5_000) fun eventReadBeforeItsStartAckIsMapped() = runVirtual {
         val svc = asyncSvc()
         svc.playFile("/tiny.wav")
         until { json.calls.size == 1 }
@@ -315,7 +315,7 @@ class SpeakerServiceTest {
         assertEquals("" to ("Played /tiny.wav." to false), svc.filePlaying.value to svc.state())
     }
 
-    @Test(timeout = 5_000) fun newerSpeakerCommandForgetsTheFileAndKeepsItsWait() = runBlocking {
+    @Test(timeout = 5_000) fun newerSpeakerCommandForgetsTheFileAndKeepsItsWait() = runVirtual {
         val svc = asyncSvc()
         svc.started(12)
         svc.tone(440, 500) // the device stops the file before the tone
@@ -340,7 +340,7 @@ class SpeakerServiceTest {
         assertEquals(listOf("speaker_tone 440 500", "speaker_dtmf 5 200"), runner.cmds)
     }
 
-    @Test(timeout = 5_000) fun disconnectForgetsTheFileAndIgnoresItsLateEvent() = runBlocking {
+    @Test(timeout = 5_000) fun disconnectForgetsTheFileAndIgnoresItsLateEvent() = runVirtual {
         val svc = asyncSvc()
         svc.started(21)
         connected = false
@@ -356,7 +356,7 @@ class SpeakerServiceTest {
         assertEquals(SpeakerService.LINK_CLOSED, svc.status.value)
     }
 
-    @Test(timeout = 5_000) fun oldFirmwareKeepsTheBlockingContract() = runBlocking {
+    @Test(timeout = 5_000) fun oldFirmwareKeepsTheBlockingContract() = runVirtual {
         async = false
         val svc = asyncSvc()
         assertEquals("played /a.wav", svc.result(true to "played /a.wav") { playFile("/a.wav") })

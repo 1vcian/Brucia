@@ -27,7 +27,7 @@ class SessionPcmLinkTest {
     private fun ack(frame: JSONObject, ok: Boolean = true) = JSONObject().put("t", Kind.ACK)
         .put("id", frame.getInt("id")).put("d", JSONObject().put("ok", ok).put("out", if (ok) "ok" else "rejected"))
 
-    @Test(timeout = 5000) fun speakerUsesFirmwareJsonFieldsAndExactLittleEndianPcm() = runBlocking {
+    @Test(timeout = 5000) fun speakerUsesFirmwareJsonFieldsAndExactLittleEndianPcm() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         wire.reply = { session.route(ack(it)) }
         val link = SessionPcmLink(session, PcmStreamSpec(), { true })
@@ -41,7 +41,7 @@ class SessionPcmLinkTest {
         assertFalse(session.hasPending)
     }
 
-    @Test(timeout = 5000) fun fmPreservesTextArgumentsAndFrameSize() = runBlocking {
+    @Test(timeout = 5000) fun fmPreservesTextArgumentsAndFrameSize() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         wire.reply = { session.route(ack(it)) }
         val link = SessionPcmLink(session, PcmStreamSpec(100000), { true })
@@ -52,10 +52,10 @@ class SessionPcmLinkTest {
         assertEquals("fm_audio_begin 100000 mic", wire.frames.last().getJSONObject("d").getString("cmd"))
     }
 
-    @Test(timeout = 5000) fun beginFailureOnRealWireNeverSendsPcm() = runBlocking {
+    @Test(timeout = 5000) fun beginFailureOnRealWireNeverSendsPcm() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         wire.reply = { session.route(ack(it, it.getJSONObject("d").getString("cmd") != "spkr_pcm_begin")) }
-        val service = PcmStreamService(this, { SessionPcmLink(session, it, { true }) }, Dispatchers.Unconfined)
+        val service = PcmStreamService(this, { SessionPcmLink(session, it, { true }) }, virtualUnconfined)
         service.start(PcmStreamSpec(), "prepare", "play") { PcmStreamSource(PcmSource.arrayReader(ShortArray(16))) }
         until { !service.status.value.active }
         assertEquals(listOf("spkr_pcm_begin", "spkr_pcm_stop"), wire.frames.map { it.getJSONObject("d").getString("cmd") })
@@ -63,7 +63,7 @@ class SessionPcmLinkTest {
         assertFalse(session.hasPending)
     }
 
-    @Test(timeout = 5000) fun structuredWaitTimeoutAndCancellationReleasePendingRequests() = runBlocking {
+    @Test(timeout = 5000) fun structuredWaitTimeoutAndCancellationReleasePendingRequests() = runVirtual {
         for (cancel in listOf(false, true)) {
             val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
             val link = SessionPcmLink(session, PcmStreamSpec(), { true }, timeoutMs = 30)
@@ -75,7 +75,7 @@ class SessionPcmLinkTest {
         }
     }
 
-    @Test(timeout = 5000) fun oldOrClosedLinksAndOversizeFramesCannotWrite() = runBlocking {
+    @Test(timeout = 5000) fun oldOrClosedLinksAndOversizeFramesCannotWrite() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         var current = true
         val link = SessionPcmLink(session, PcmStreamSpec(), { current })
@@ -87,7 +87,7 @@ class SessionPcmLinkTest {
         assertTrue(wire.frames.isEmpty())
     }
 
-    @Test(timeout = 5000) fun fmDataRepliesExposeAcceptedCountsOrUnknownForOldFirmware() = runBlocking {
+    @Test(timeout = 5000) fun fmDataRepliesExposeAcceptedCountsOrUnknownForOldFirmware() = runVirtual {
         val wire = Wire(); val session = CommandSession(CompanionClient(wire), wire)
         var d = JSONObject()
         wire.reply = { session.route(JSONObject().put("t", Kind.ACK).put("id", it.getInt("id")).put("d", d)) }

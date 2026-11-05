@@ -13,7 +13,7 @@ import org.junit.Test
  * (its status collector and fire-and-forget stop are long-lived) cancelled when the test ends.
  */
 class LongOperationTest {
-    private fun scoped(body: suspend CoroutineScope.(CoroutineScope) -> Unit) = runBlocking {
+    private fun scoped(body: suspend CoroutineScope.(CoroutineScope) -> Unit) = runVirtual {
         val s = CoroutineScope(coroutineContext + Job())
         try { body(s) } finally { s.cancel() }
     }

@@ -14,7 +14,7 @@ import org.junit.Test
  * each service lives in a detached scope cancelled when the test ends.
  */
 class HeadlessWifiOpsTest {
-    private fun scoped(body: suspend CoroutineScope.(CoroutineScope) -> Unit) = runBlocking {
+    private fun scoped(body: suspend CoroutineScope.(CoroutineScope) -> Unit) = runVirtual {
         val s = CoroutineScope(coroutineContext + Job())
         try { body(s) } finally { s.cancel() }
     }

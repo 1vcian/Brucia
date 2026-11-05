@@ -16,7 +16,7 @@ class EspNowServiceTest {
         return status.value
     }
 
-    @Test fun textsCommandAndTimeout() = runBlocking {
+    @Test fun textsCommandAndTimeout() = runVirtual {
         val svc = EspNowService(this, runner, { true })
         assertEquals("Broadcast sent.", svc.result(true to "") {
             send("  hello there \n"); assertEquals("Broadcasting..." to true, status.value to busy.value)
@@ -28,7 +28,7 @@ class EspNowServiceTest {
             runner.calls.toList())
     }
 
-    @Test fun localRejectionsAreNotSent() = runBlocking {
+    @Test fun localRejectionsAreNotSent() = runVirtual {
         var connected = false
         val svc = EspNowService(this, runner, { connected })
         svc.send("hi")

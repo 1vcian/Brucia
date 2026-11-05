@@ -56,12 +56,13 @@ class CaptureWorkflowTest {
         return JSONObject().put("desc", d)
     }
     private fun service(scope: CoroutineScope, link: Link?, loaded: MutableList<CapturedTarget>) =
-        CaptureWorkflow(scope, { link }, { loaded.add(it) }, parse = { _, _ -> target() to null })
+        CaptureWorkflow(scope, { link }, { loaded.add(it) }, parse = { _, _ -> target() to null },
+            compute = scope.virtualUnconfined)
     private suspend fun finished(service: CaptureWorkflow) {
         withTimeout(2000) { while (service.status.value.active) delay(5) }
     }
 
-    @Test(timeout = 5000) fun importsOnlyChangedMatchingFileIncludingSameSizeOverwrite() = runBlocking {
+    @Test(timeout = 5000) fun importsOnlyChangedMatchingFileIncludingSameSizeOverwrite() = runVirtual {
         val link = Link().apply { before = listOf(entry()); after = before }
         val loaded = mutableListOf<CapturedTarget>(); val s = service(this, link, loaded)
         s.start(address, 6, "fixture", 20, false); finished(s)
@@ -70,7 +71,7 @@ class CaptureWorkflowTest {
         assertEquals(listOf("wifi_deauth $address 6 5", "wifi_handshake $address 6 20 fixture"), link.sent.map { it.first })
         assertEquals(listOf(15_000L, 40_000L), link.sent.map { it.second })
     }
-    @Test(timeout = 5000) fun rejectsUnchangedOldFileAndOtherBssid() = runBlocking {
+    @Test(timeout = 5000) fun rejectsUnchangedOldFileAndOtherBssid() = runVirtual {
         for (foreign in listOf(false, true)) {
             val link = Link().apply {
                 before = listOf(entry()); after = if (foreign) listOf(entry("HS_FFFFFFFFFFFF_fixture.pcap")) else before
@@ -82,27 +83,27 @@ class CaptureWorkflowTest {
             assertTrue(link.reads.none { "FFFFFFFFFFFF" in it })
         }
     }
-    @Test(timeout = 5000) fun commandFailureStopsBeforeNextCommandOrPull() = runBlocking {
+    @Test(timeout = 5000) fun commandFailureStopsBeforeNextCommandOrPull() = runVirtual {
         val link = Link().apply { failure = "device error"; after = listOf(entry()) }
         val loaded = mutableListOf<CapturedTarget>(); val s = service(this, link, loaded)
         s.start(address, 6, "fixture", 20, false); finished(s)
         assertEquals("device error", s.status.value.message)
         assertEquals(1, link.sent.size); assertEquals(1, link.listings); assertTrue(link.reads.isEmpty())
     }
-    @Test(timeout = 5000) fun rejectsMultipleChangedMatchesInsteadOfSortingNames() = runBlocking {
+    @Test(timeout = 5000) fun rejectsMultipleChangedMatchesInsteadOfSortingNames() = runVirtual {
         val link = Link().apply { after = listOf(entry(), entry("HS_${mac}_zzz.pcap")) }
         val loaded = mutableListOf<CapturedTarget>(); val s = service(this, link, loaded)
         s.start(address, 6, "fixture", 20, false); finished(s)
         assertTrue(s.status.value.message.contains("Multiple changed")); assertTrue(loaded.isEmpty())
     }
-    @Test(timeout = 5000) fun pmkidUsesOnlyItsOwnFileAndNoExtraDeauthCommand() = runBlocking {
+    @Test(timeout = 5000) fun pmkidUsesOnlyItsOwnFileAndNoExtraDeauthCommand() = runVirtual {
         val link = Link().apply { after = listOf(entry(), entry("PMKID_$mac.pcap")) }
         val loaded = mutableListOf<CapturedTarget>(); val s = service(this, link, loaded)
         s.start(address, 6, "fixture", 15, true); finished(s)
         assertEquals(listOf("wifi_pmkid $address 6 15"), link.sent.map { it.first })
         assertEquals("${CaptureWorkflow.DIRECTORY}/PMKID_$mac.pcap", loaded.single().path)
     }
-    @Test(timeout = 5000) fun stoppedOrSupersededReadCannotImportOrOverwriteNewState() = runBlocking {
+    @Test(timeout = 5000) fun stoppedOrSupersededReadCannotImportOrOverwriteNewState() = runVirtual {
         for (restart in listOf(false, true)) {
             var gate: Continuation<ByteArray>? = null
             val link = Link().apply { after = listOf(entry()); read = { suspendCoroutine { gate = it } } }
@@ -122,27 +123,28 @@ class CaptureWorkflowTest {
             assertEquals(if (restart) 1 else 0, loaded.size)
         }
     }
-    @Test(timeout = 5000) fun rejectsCaptureContentForOtherApEvenWithMatchingFilename() = runBlocking {
+    @Test(timeout = 5000) fun rejectsCaptureContentForOtherApEvenWithMatchingFilename() = runVirtual {
         val link = Link().apply { after = listOf(entry()) }
-        val s = CaptureWorkflow(this, { link }, { fail("Wrong target imported") }, parse = { _, _ -> target().copy(apMac = ByteArray(6)) to null })
+        val s = CaptureWorkflow(this, { link }, { fail("Wrong target imported") }, parse = { _, _ -> target().copy(apMac = ByteArray(6)) to null },
+            compute = virtualUnconfined)
         s.start(address, 6, "fixture", 20, false); finished(s)
         assertEquals("failed", s.status.value.step)
     }
-    @Test(timeout = 5000) fun failedPmkidCaptureNeverListsOrReadsItsOldOutput() = runBlocking {
+    @Test(timeout = 5000) fun failedPmkidCaptureNeverListsOrReadsItsOldOutput() = runVirtual {
         val link = Link().apply { failure = "capture failed"; after = listOf(entry("PMKID_$mac.pcap")) }
         val loaded = mutableListOf<CapturedTarget>(); val s = service(this, link, loaded)
         s.start(address, 6, "fixture", 15, true); finished(s)
         assertEquals("capture failed", s.status.value.message)
         assertEquals(1, link.listings); assertTrue(link.reads.isEmpty()); assertTrue(loaded.isEmpty())
     }
-    @Test(timeout = 5000) fun failedVerifiedReadNeverImports() = runBlocking {
+    @Test(timeout = 5000) fun failedVerifiedReadNeverImports() = runVirtual {
         val link = Link().apply { after = listOf(entry()); read = { throw java.io.IOException("CRC mismatch") } }
         val loaded = mutableListOf<CapturedTarget>(); val s = service(this, link, loaded)
         s.start(address, 6, "fixture", 20, false); finished(s)
         assertEquals("CRC mismatch", s.status.value.message); assertTrue(loaded.isEmpty())
     }
 
-    @Test(timeout = 5000) fun failedBaselineListingSendsNoCaptureCommands() = runBlocking {
+    @Test(timeout = 5000) fun failedBaselineListingSendsNoCaptureCommands() = runVirtual {
         val link = Link().apply { listError = "Storage unavailable" }
         val loaded = mutableListOf<CapturedTarget>(); val s = service(this, link, loaded)
         s.start(address, 6, "fixture", 20, false); finished(s)
@@ -150,7 +152,7 @@ class CaptureWorkflowTest {
         assertTrue(link.sent.isEmpty()); assertTrue(loaded.isEmpty())
     }
 
-    @Test(timeout = 5000) fun missingLinkAndInvalidParametersDoNotSend() = runBlocking {
+    @Test(timeout = 5000) fun missingLinkAndInvalidParametersDoNotSend() = runVirtual {
         val loaded = mutableListOf<CapturedTarget>(); val link = Link()
         val s = service(this, link, loaded)
         s.start("bad", 6, "fixture", 20, false)
@@ -158,7 +160,8 @@ class CaptureWorkflowTest {
         val offline = service(this, null, loaded)
         offline.start(address, 6, "fixture", 20, false)
         assertEquals("failed", offline.status.value.step)
-        val blocked = CaptureWorkflow(this, { link }, { fail("Unexpected import") }, blockedReason = { "Update firmware" })
+        val blocked = CaptureWorkflow(this, { link }, { fail("Unexpected import") }, blockedReason = { "Update firmware" },
+            compute = virtualUnconfined)
         blocked.start(address, 6, "fixture", 20, false)
         assertEquals("Update firmware", blocked.status.value.message)
         assertTrue(link.sent.isEmpty())
@@ -166,7 +169,7 @@ class CaptureWorkflowTest {
 
     // --- features.capture_descriptor path ------------------------------------------------------
 
-    @Test(timeout = 5000) fun descriptorImportsExactPathAndVerifiesWithoutListingDiff() = runBlocking {
+    @Test(timeout = 5000) fun descriptorImportsExactPathAndVerifiesWithoutListingDiff() = runVirtual {
         val path = "${CaptureWorkflow.DIRECTORY}/$name"
         val bytes = byteArrayOf(1, 2, 3, 4, 5)
         val link = Link().apply {
@@ -183,7 +186,7 @@ class CaptureWorkflowTest {
         assertEquals("wifi_handshake $address 6 20 fixture", link.sent.last().first)
     }
 
-    @Test(timeout = 5000) fun descriptorImportsAppendedFileVerifyingTheWholeAccumulatedFile() = runBlocking {
+    @Test(timeout = 5000) fun descriptorImportsAppendedFileVerifyingTheWholeAccumulatedFile() = runVirtual {
         // The file pre-existed and this run appended to it: size/crc cover the whole file, which the app
         // reads and verifies in full. A matching whole-file fingerprint still imports.
         val path = "${CaptureWorkflow.DIRECTORY}/$name"
@@ -200,7 +203,7 @@ class CaptureWorkflowTest {
         assertTrue(whole.contentEquals(loaded.single().bytes))
     }
 
-    @Test(timeout = 5000) fun descriptorRejectsSizeOrCrcMismatchAndNeverImports() = runBlocking {
+    @Test(timeout = 5000) fun descriptorRejectsSizeOrCrcMismatchAndNeverImports() = runVirtual {
         for (bad in listOf("size", "crc")) {
             val path = "${CaptureWorkflow.DIRECTORY}/$name"
             val bytes = byteArrayOf(9, 9, 9)
@@ -218,7 +221,7 @@ class CaptureWorkflowTest {
         }
     }
 
-    @Test(timeout = 5000) fun descriptorStoppedOrPartialCaptureFailsWithReasonAndNoRead() = runBlocking {
+    @Test(timeout = 5000) fun descriptorStoppedOrPartialCaptureFailsWithReasonAndNoRead() = runVirtual {
         // Includes not_written: the device detected a handshake but wrote no new file (stale file only).
         for ((ok, complete, stop) in listOf(Triple(false, false, "timeout"), Triple(true, false, "aborted"),
                                             Triple(true, false, "not_written"))) {
@@ -234,7 +237,7 @@ class CaptureWorkflowTest {
         }
     }
 
-    @Test(timeout = 5000) fun descriptorMissingOrWrongVersionFailsClosedNoListingFallback() = runBlocking {
+    @Test(timeout = 5000) fun descriptorMissingOrWrongVersionFailsClosedNoListingFallback() = runVirtual {
         for (data in listOf(null, JSONObject().put("ok", true), desc("${CaptureWorkflow.DIRECTORY}/$name", 1, 0, v = 2))) {
             val link = Link().apply { descriptor = true; captureData = data; read = { byteArrayOf(1) } }
             val loaded = mutableListOf<CapturedTarget>(); val s = service(this, link, loaded)
@@ -245,7 +248,7 @@ class CaptureWorkflowTest {
         }
     }
 
-    @Test(timeout = 5000) fun descriptorRejectsPathForOtherTargetOrTraversal() = runBlocking {
+    @Test(timeout = 5000) fun descriptorRejectsPathForOtherTargetOrTraversal() = runVirtual {
         for (path in listOf("${CaptureWorkflow.DIRECTORY}/HS_FFFFFFFFFFFF_x.pcap",
                             "${CaptureWorkflow.DIRECTORY}/PMKID_$mac.pcap",       // wrong kind for handshake
                             "${CaptureWorkflow.DIRECTORY}/notes.txt")) {
@@ -260,17 +263,18 @@ class CaptureWorkflowTest {
         }
     }
 
-    @Test(timeout = 5000) fun descriptorRejectsVerifiedBytesForOtherAp() = runBlocking {
+    @Test(timeout = 5000) fun descriptorRejectsVerifiedBytesForOtherAp() = runVirtual {
         val path = "${CaptureWorkflow.DIRECTORY}/$name"
         val bytes = byteArrayOf(4, 5, 6)
         val link = Link().apply { descriptor = true; captureData = desc(path, bytes.size, crc32(bytes)); read = { bytes } }
         val loaded = mutableListOf<CapturedTarget>()
-        val s = CaptureWorkflow(this, { link }, { loaded.add(it) }, parse = { _, _ -> target().copy(apMac = ByteArray(6)) to null })
+        val s = CaptureWorkflow(this, { link }, { loaded.add(it) }, parse = { _, _ -> target().copy(apMac = ByteArray(6)) to null },
+            compute = virtualUnconfined)
         s.start(address, 6, "fixture", 20, false); finished(s)
         assertEquals("failed", s.status.value.step); assertTrue(loaded.isEmpty())
     }
 
-    @Test(timeout = 5000) fun descriptorPmkidImportsOwnFileWithNoDeauth() = runBlocking {
+    @Test(timeout = 5000) fun descriptorPmkidImportsOwnFileWithNoDeauth() = runVirtual {
         val path = "${CaptureWorkflow.DIRECTORY}/PMKID_$mac.pcap"
         val bytes = byteArrayOf(7, 7)
         val link = Link().apply {
@@ -278,7 +282,8 @@ class CaptureWorkflowTest {
             read = { bytes }
         }
         val loaded = mutableListOf<CapturedTarget>()
-        val s = CaptureWorkflow(this, { link }, { loaded.add(it) }, parse = { _, _ -> null to PmkidTarget(ByteArray(16), byteArrayOf(0,17,34,51,68,85), ByteArray(6), "fixture") })
+        val s = CaptureWorkflow(this, { link }, { loaded.add(it) }, parse = { _, _ -> null to PmkidTarget(ByteArray(16), byteArrayOf(0,17,34,51,68,85), ByteArray(6), "fixture") },
+            compute = virtualUnconfined)
         s.start(address, 6, "fixture", 15, true); finished(s)
         assertEquals("ready", s.status.value.step)
         assertEquals(path, loaded.single().path)

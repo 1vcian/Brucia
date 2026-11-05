@@ -19,7 +19,7 @@ class NfcToolsServiceTest {
         until { !busy() }
     }
 
-    @Test(timeout = 5_000) fun pushNdefTextsAndCommand() = runBlocking {
+    @Test(timeout = 5_000) fun pushNdefTextsAndCommand() = runVirtual {
         val s = svc()
         s.pushNdef("url", "  https://x  ")
         assertEquals("Pushing NDEF (url) - tap a device..." to true, s.ndefStatus.value to s.ndefBusy.value)
@@ -39,7 +39,7 @@ class NfcToolsServiceTest {
         )
     }
 
-    @Test(timeout = 5_000) fun pushNdefBlankPayloadRejectedLocally() = runBlocking {
+    @Test(timeout = 5_000) fun pushNdefBlankPayloadRejectedLocally() = runVirtual {
         val s = svc()
         s.pushNdef("url", "   ")
         assertEquals("Enter a payload first." to false, s.ndefStatus.value to s.ndefBusy.value)
@@ -47,7 +47,7 @@ class NfcToolsServiceTest {
         assertTrue(runner.calls.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun readEmvTextsAndCommand() = runBlocking {
+    @Test(timeout = 5_000) fun readEmvTextsAndCommand() = runVirtual {
         val s = svc()
         s.readEmv()
         assertEquals("Reading card - hold it on the reader..." to true, s.emvStatus.value to s.emvBusy.value)
@@ -62,7 +62,7 @@ class NfcToolsServiceTest {
         assertEquals(List(3) { "nfc_emv_read" to NfcToolsService.UNBOUNDED_TIMEOUT_MS }, runner.calls.toList())
     }
 
-    @Test(timeout = 5_000) fun writeUidNormalizesTextsAndCommand() = runBlocking {
+    @Test(timeout = 5_000) fun writeUidNormalizesTextsAndCommand() = runVirtual {
         val s = svc()
         s.writeUid(" de ad be ef ")
         assertEquals("Writing UID deadbeef..." to true, s.uidStatus.value to s.uidBusy.value)
@@ -77,7 +77,7 @@ class NfcToolsServiceTest {
         )
     }
 
-    @Test(timeout = 5_000) fun writeUidBlankRejectedLocally() = runBlocking {
+    @Test(timeout = 5_000) fun writeUidBlankRejectedLocally() = runVirtual {
         val s = svc()
         s.writeUid("   ")
         assertEquals("Enter a hex UID first." to false, s.uidStatus.value to s.uidBusy.value)
@@ -85,7 +85,7 @@ class NfcToolsServiceTest {
         assertTrue(runner.calls.isEmpty())
     }
 
-    @Test(timeout = 5_000) fun advancedTilesLabelsCommandsAndTimeouts() = runBlocking {
+    @Test(timeout = 5_000) fun advancedTilesLabelsCommandsAndTimeouts() = runVirtual {
         val s = svc()
         data class Case(val go: () -> Unit, val cmd: String, val label: String, val timeout: Long)
         val cases = listOf(
@@ -104,7 +104,7 @@ class NfcToolsServiceTest {
         assertEquals(cases.map { it.cmd to it.timeout }, runner.calls.toList())
     }
 
-    @Test(timeout = 5_000) fun srixDefaultDoneTextAndRfidFailText() = runBlocking {
+    @Test(timeout = 5_000) fun srixDefaultDoneTextAndRfidFailText() = runVirtual {
         val s = svc()
         s.srixRead()
         finish(0, true, "") { s.advBusy.value }
@@ -114,7 +114,7 @@ class NfcToolsServiceTest {
         assertEquals("125kHz read failed.", s.advStatus.value)
     }
 
-    @Test(timeout = 5_000) fun advancedTilesSupersedeEachOther() = runBlocking {
+    @Test(timeout = 5_000) fun advancedTilesSupersedeEachOther() = runVirtual {
         val s = svc()
         s.nested()
         until { runner.calls.size == 1 }
@@ -128,7 +128,7 @@ class NfcToolsServiceTest {
         assertEquals("keys", s.advStatus.value)
     }
 
-    @Test(timeout = 5_000) fun fourLinesAreIndependent() = runBlocking {
+    @Test(timeout = 5_000) fun fourLinesAreIndependent() = runVirtual {
         val s = svc()
         s.pushNdef("url", "x")
         s.readEmv()
@@ -147,12 +147,12 @@ class NfcToolsServiceTest {
         assertEquals("Reading card - hold it on the reader...", s.emvStatus.value)
         assertEquals("Writing UID ab...", s.uidStatus.value)
         assertEquals("Nested attack running...", s.advStatus.value)
-        // Release the sticky gates so runBlocking's children can finish.
+        // Release the sticky gates so the test body's children can finish.
         for (i in 1..3) runner.reply(i, true, "")
         until { !s.emvBusy.value && !s.uidBusy.value && !s.advBusy.value }
     }
 
-    @Test(timeout = 5_000) fun stopAllCancelsEveryLine() = runBlocking {
+    @Test(timeout = 5_000) fun stopAllCancelsEveryLine() = runVirtual {
         val s = svc()
         s.pushNdef("url", "x"); s.readEmv(); s.writeUid("ab"); s.nested()
         until { runner.calls.size == 4 }
@@ -167,7 +167,7 @@ class NfcToolsServiceTest {
         assertEquals("Stopped.", s.advStatus.value)
     }
 
-    @Test(timeout = 5_000) fun notConnectedSendsNothingOnEveryEntry() = runBlocking {
+    @Test(timeout = 5_000) fun notConnectedSendsNothingOnEveryEntry() = runVirtual {
         connected = false
         val s = svc()
         val connect = "Connect the device over USB first."
