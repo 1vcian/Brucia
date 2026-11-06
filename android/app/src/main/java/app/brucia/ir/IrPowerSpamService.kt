@@ -24,6 +24,9 @@ class IrPowerSpamService(
 ) {
     private val op = DeviceOperation(scope, runner, isConnected, TIMEOUT_MS)
     private val stops = CommandTasks(scope)
+    private val lock = Any()
+    /** True from [requestStop] until its stop frame has been written; blocks a restart (F32). */
+    private var stopInFlight = false
     val status: StateFlow<String> = op.status
 
     /** True while a spam window is running. */
@@ -34,7 +37,9 @@ class IrPowerSpamService(
      * [DEFAULT_SECS] and above [MAX_SECS] is clamped, mirroring the firmware's own bound.
      */
     fun run(secs: Int = DEFAULT_SECS) {
-        if (op.busy.value) return
+        // Refuse while running, or while a previous stop is still unresolved: otherwise that stop
+        // could be written during this new window and interrupt it (F32).
+        synchronized(lock) { if (op.busy.value || stopInFlight) return }
         val s = if (secs < 1) DEFAULT_SECS else secs.coerceAtMost(MAX_SECS)
         op.start("ir_power_spam $s", "Blasting power codes (${s}s, Stop to end)...", timeoutMs = timeoutMsFor(s)) { ok, out ->
             out.ifBlank { if (ok) "IR power spam done." else "IR power spam failed." }
@@ -47,11 +52,20 @@ class IrPowerSpamService(
      * nothing is sent.
      */
     fun requestStop() {
-        if (op.busy.value && isConnected()) stops.run(stopRunner, STOP_CMD, STOP_TIMEOUT_MS)
+        synchronized(lock) {
+            if (!op.busy.value || !isConnected() || stopInFlight) return
+            stopInFlight = true
+        }
+        // Resolved (fence lifted) once the stop frame is written: the stop runner returns after the write.
+        stops.run(stopRunner, STOP_CMD, STOP_TIMEOUT_MS) { _, _ -> synchronized(lock) { stopInFlight = false } }
     }
 
-    /** Local stop (disconnect, or after [requestStop]): cancel the wait and drop the late ACK. */
-    fun stop() = op.stop()
+    /** Local stop (disconnect, or after [requestStop]): cancel the wait and any unsent stop, drop late replies. */
+    fun stop() {
+        synchronized(lock) { stopInFlight = false }
+        stops.cancel()
+        op.stop()
+    }
 
     companion object {
         const val DEFAULT_SECS = 30

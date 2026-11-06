@@ -7,6 +7,21 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Follow-up hardening of the 0.1.7 stop/IR work (host-tested; transmit paths still need a device
+  check):
+  - IR power spam / jam detect / LoRa receive: a Stop can no longer land on the *next* run - a
+    restart waits until the previous stop has actually been sent (and teardown drops an unsent stop).
+  - Global Stop: if a blocking operation is still running after the settle window, the other
+    services' stops are no longer fired blindly (they would be swallowed by it); the app reports it
+    and freezes local loops immediately instead.
+  - IR power spam: a malformed duration (e.g. "abc", "30x", "-5", too large) is rejected instead of
+    silently starting the default window.
+  - Remote: entering Remote now waits for the device to confirm it left companion mode and for any
+    IR/LoRa/jam/NRF24 window to end first; if the device does not confirm, Remote aborts visibly
+    instead of switching to raw mode against a device still in companion mode.
+  - Audio: FM audio now releases an async melody (song/RTTTL) and DTMF too, in both directions, so
+    FM, speaker and microphone never fight over the I2S pins (fixes a gap in the 0.1.7 FM owner fix).
+
 - New IR power spam (authorized use only): `ir_power_spam` blasts the power-off codes for TVs,
   projectors, audio and more - both regions (NA + EU) and the universal parsed + raw tables - and
   repeats the whole set until you Stop, so it covers all device types rather than one region's TVs.

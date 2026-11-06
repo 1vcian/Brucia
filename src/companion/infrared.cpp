@@ -48,13 +48,27 @@ static void runIrTvbgone(const String &argsIn, uint32_t id) {
 // Usage: ir_power_spam [secs]  (secs clamped 1..120, default 30)
 static void runIrPowerSpam(const String &argsIn, uint32_t id) {
 #ifdef COMPANION_HAS_IR
+    // Parse before any driver work (F33): an absent argument uses the default, but a malformed one
+    // (nonnumeric, trailing junk, negative, out of range) is refused - toInt() would have silently
+    // mapped "abc"/"-5" to the default and taken a numeric prefix of "30x".
+    String a = argsIn;
+    a.trim();
+    int secs = 30; // documented no-argument default
+    if (a.length() > 0) {
+        bool numeric = true;
+        for (unsigned int i = 0; i < a.length(); i++)
+            if (a[i] < '0' || a[i] > '9') { numeric = false; break; }
+        long v = numeric ? a.toInt() : -1;
+        if (!numeric || v < 1 || v > 120) {
+            sendErr(id, 400, "usage: ir_power_spam [secs 1..120]");
+            return;
+        }
+        secs = (int)v;
+    }
     if (!irTxPinReady()) { // no pin menu in companion mode (nobody at the device)
         companionAckMsg(id, false, "IR TX pin not configured");
         return;
     }
-    int secs = argsIn.toInt();
-    if (secs < 1) secs = 30;
-    if (secs > 120) secs = 120;
     bool stopped = false;
     // The whole set repeats, so it would otherwise ignore the app's Stop until <secs> ended: poll it.
     uint16_t sent = runIrPowerSpamHeadless(

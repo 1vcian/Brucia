@@ -784,10 +784,28 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             RemoteHandover.Step("De Bruijn sweep", { deBruijnTx.active.value }) {
                 deBruijnTx.stop("De Bruijn sweep stopped: Remote control took over the device; no further bursts will be sent, but a burst already sent may still be transmitting.")
             },
-            RemoteHandover.Step("burst loops", { burstLoops.anyActive }) {
+            RemoteHandover.Step("burst loops", { burstLoops.anyActive || nrf24Loops.any { it.draining.value } }) {
                 withContext(Dispatchers.Main) { stopAllBurstLoops(silent = false) }
+                // Let an NRF24 window's stopped burst drain on the device before companion_exit (F34).
+                awaitWhileBounded { nrf24Loops.any { it.draining.value } }
+            },
+            // Polled-window services: send the stop and wait for the device to leave the window, so
+            // companion_exit reaches a device at the framed loop, not mid-blast (F34).
+            RemoteHandover.Step("IR power spam", { irPowerSpam.busy.value }) {
+                irPowerSpam.requestStop(); awaitWhileBounded { irPowerSpam.busy.value }
+            },
+            RemoteHandover.Step("LoRa receive", { lora.receiving.value }) {
+                lora.requestStopReceive(); awaitWhileBounded { lora.receiving.value }
+            },
+            RemoteHandover.Step("jam detect", { jamDetector.busy.value }) {
+                jamDetector.requestStop(); awaitWhileBounded { jamDetector.busy.value }
             },
         ))
+    }
+
+    /** Poll until [cond] is false or [timeoutMs] elapses (handover: wait for a window to end). */
+    private suspend fun awaitWhileBounded(timeoutMs: Long = 8_000L, cond: () -> Boolean) {
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { while (cond()) kotlinx.coroutines.delay(20) }
     }
 
     /** Start remote control. Drives the device's normal UI over raw CLI + screen mirror. */
@@ -808,8 +826,22 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             // the screen is black, and the app-lock would still be on. Ask it to leave first, then
             // (after it returns to the normal UI and resumes the serial task) start the mirror. On
             // stopRemote we re-enter companion mode, which re-applies the lock.
+            // Ask the device to leave companion mode and WAIT for its ACK while the framed reader is
+            // still up (companion_exit ACKs before it leaves). Only on a confirmed exit do we take the
+            // link for the raw mirror; a missing/failed exit aborts Remote visibly instead of leaving
+            // the app in raw mode talking to a device still in companion mode (F34). The gate stays
+            // off until here so this await's own preflight is not refused.
+            val exit = session?.await("companion_exit", 4_000L) ?: (false to "not connected")
+            if (!exit.first) {
+                app.brucia.BruciaLog.w("Remote", "companion_exit not confirmed: ${exit.second}")
+                withContext(Dispatchers.Main) {
+                    _remoteRunning.value = false
+                    _console.value = (_console.value +
+                        "Remote not started: the device did not confirm leaving companion mode (${exit.second.ifBlank { "no reply" }}). Try again.").takeLast(500)
+                }
+                return@launch
+            }
             remoteOwnsLink = true
-            try { client?.cmd("companion_exit") } catch (e: Exception) { app.brucia.BruciaLog.d("Remote", "companion_exit send: ${e.message}") }
             readJob?.cancel(); pingJob?.cancel() // remote is exclusive with the companion loop
             val rc = app.brucia.remote.RemoteController(t)
             remote = rc
@@ -2616,13 +2648,23 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      * keep their real ACK/result in the command log.
      */
     fun stopAllRunning() {
+        // Freeze local command producers immediately (F26): these never reach the device as stops
+        // that a still-polling blocking operation could swallow, so they must not wait for, or be
+        // withheld by, the device-stop phase below.
         dictionaryTest.cancel()
         stopTimeline()
         stopDtmfDecode()
         stopPhoneMic()
         pauseRecording()
         stopRfCapture()
-        stopAllSequence.run(viewModelScope) {
+        macroRunner.stop()
+        stopAllBurstLoops(silent = false)
+        stopAllSequence.run(viewModelScope, onTimeout = {
+            // A blocking operation is still active after the settle window: do not blast the other
+            // services' stops (they would be consumed by that operation). Report it instead.
+            _console.value = (_console.value +
+                "Stop: device still busy; some device stops were not sent. Retry Stop, or disconnect.").takeLast(500)
+        }) {
             deviceLifecycle.stopAll()
             // Use the normal SUB ownership path: stale pending starts cannot re-enable a stream.
             subscriptions.stopAll()

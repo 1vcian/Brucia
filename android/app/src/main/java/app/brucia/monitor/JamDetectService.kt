@@ -20,6 +20,9 @@ class JamDetectService(
 ) {
     private val op = DeviceOperation(scope, runner, isConnected)
     private val stops = CommandTasks(scope)
+    private val lock = Any()
+    /** True from [requestStop] until its stop frame is written; blocks a restart (F32). */
+    private var stopInFlight = false
     val status: StateFlow<String> = op.status
 
     /** True while a window is running (the VM's jamDetectActive). */
@@ -27,7 +30,7 @@ class JamDetectService(
 
     /** Listen for [secs] seconds; ignored if one is already running. */
     fun run(secs: Int) {
-        if (op.busy.value) return
+        synchronized(lock) { if (op.busy.value || stopInFlight) return } // F32: no restart while a stop is unresolved
         op.start("jam_detect $secs", "Listening for ${secs}s...", timeoutMs = timeoutMsFor(secs),
             precheck = { if (secs !in 1..120) "Duration must be 1–120 seconds." else null }) { ok, out ->
             out.ifBlank { if (ok) "Done." else "Failed." }
@@ -41,11 +44,19 @@ class JamDetectService(
      * Nothing runs or no link: nothing is sent.
      */
     fun requestStop() {
-        if (op.busy.value && isConnected()) stops.run(stopRunner, STOP_CMD, STOP_TIMEOUT_MS)
+        synchronized(lock) {
+            if (!op.busy.value || !isConnected() || stopInFlight) return
+            stopInFlight = true
+        }
+        stops.run(stopRunner, STOP_CMD, STOP_TIMEOUT_MS) { _, _ -> synchronized(lock) { stopInFlight = false } }
     }
 
-    /** Stop waiting for the current reply (local only: disconnect, or after [requestStop]). */
-    fun stop() = op.stop()
+    /** Stop waiting (local only: disconnect, or after [requestStop]); cancel any unsent stop. */
+    fun stop() {
+        synchronized(lock) { stopInFlight = false }
+        stops.cancel()
+        op.stop()
+    }
 
     companion object {
         const val STOP_CMD = "jam_detect_stop"

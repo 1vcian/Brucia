@@ -68,6 +68,29 @@ For each supported benign operation, run start -> rotate -> leave -> start -> di
 -> reconnect, followed by a known-good read. Retain versions, fixture, expected/observed
 effect, errors, timing and PASS/FAIL/BLOCKED/NOT RUN separately.
 
+### Follow-up regressions — 2026-11-06
+
+Review of integration `1db4b4d8` / release `33494d91`: the initial fixes are present,
+but the following gaps remain. These checks use fake transports/output drivers first;
+none was marked physically accepted by this review.
+
+| Item | Required regression / acceptance |
+|---|---|
+| F26: Stop all timeout | Keep a blocking operation active after a failed/delayed stop or missing ACK, advance beyond 8 s. Remaining service stops must not be dispatched as if the device were idle; preserve a visible unknown/failure state. Freeze local macro/burst producers immediately. Test successful settlement, timeout and disconnect separately. |
+| F32: delayed IR Stop | Start A, hold its stop before the write, let A complete, request B, then release the old sender. No old stop may affect B. Repeat with two Stop taps, teardown and a replacement session; retain the no-new-burst guarantee without claiming instantaneous physical cessation. |
+| F33: invalid explicit duration | Stub IR initialization/output. Test nonnumeric input, trailing junk, negative and overflow; expect a visible error and zero driver calls. Test omitted argument separately for the documented default. |
+| F34: Remote handover | Keep IR or a receive-only NRF24 window draining, then request Remote. Delay/reject `companion_exit`: no raw mirror starts before a successful handover; framed reader remains available for the terminal result. Timeout must recover visibly, and stop frames must not be gated away prematurely. |
+| F21/A3: all audio owners | Simulate async song -> FM and FM -> song/RTTTL/DTMF, plus existing tone/file/PCM/mic cases. Old output must be released before the new one acquires I2S. Then repeat on an equipped board; no FM hardware is certified by a build. |
+
+**Status 2026-11-06 (fixed in the follow-up commit):** F26, F32, F33, F34 and F21/A3 are
+resolved in software with host/source regressions (see backlog and TESTS.md). Still owed on
+hardware: F32/F34 full-VM behaviour, the IR active-transmission + stop-latency check, and the FM
+owner on an Si4713 board. The rows above remain as the on-device acceptance to perform.
+
+IR UI acceptance must distinguish “request sent” from device success, describe its
+bounded window, and avoid claiming all devices/tables were covered without evidence.
+An idle-stop ACK neither exercises an active transmission nor measures stop latency.
+
 ## Functional acceptance priorities — 2026-11-05
 
 This pass follows two owner reports: De Bruijn reboots the T-Embed, and the

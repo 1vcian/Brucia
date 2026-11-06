@@ -75,14 +75,15 @@ class StopAllSequenceTest {
         assertEquals(1, rest)
     }
 
-    @Test(timeout = 5_000) fun restRunsAfterTheBoundWhenTheOperationIgnoresItsStop() = runVirtual {
-        var rest = 0
+    @Test(timeout = 5_000) fun restNotRunWhenTheOperationIgnoresItsStopPastTheBound() = runVirtual {
+        // F26: an op still active at the bound (e.g. firmware that ignores the stop) must NOT trigger
+        // the unrelated service stops, or they would be consumed by that still-polling operation.
+        var rest = 0; var timedOut = 0
         val seq = StopAllSequence(listOf(StopAllSequence.Blocking("old-fw", { true }) {}), settleMs = 1_000)
-        seq.run(this) { rest++ }
-        delay(999)
+        seq.run(this, onTimeout = { timedOut++ }) { rest++ }
+        delay(1_100)
         assertEquals(0, rest)
-        delay(50)
-        assertEquals(1, rest)
+        assertEquals(1, timedOut)
     }
 
     @Test(timeout = 5_000) fun cancelDropsThePendingRest() = runVirtual {
@@ -146,5 +147,26 @@ class StopAllSequenceTest {
         // F27 keeps the result honest: the portal is not reported off.
         assertTrue(portal.active.value)
         assertTrue(portal.status.value.startsWith(EvilPortalService.STOP_FAILED))
+    }
+
+    /** F26: if a blocking op is still active at the timeout, rest is NOT run and onTimeout fires. */
+    @Test(timeout = 5_000) fun timeoutWithStillActiveSkipsRestAndReports() = runVirtual {
+        var rest = 0; var timedOut = 0
+        val seq = StopAllSequence(listOf(StopAllSequence.Blocking("stuck", { true }) {}), settleMs = 1_000)
+        val job = seq.run(this, onTimeout = { timedOut++ }) { rest++ }
+        assertNotNull(job)
+        delay(1_100)
+        assertEquals(0, rest)       // unrelated stops never dispatched into the active op
+        assertEquals(1, timedOut)
+    }
+
+    /** F26: if the op settles before the timeout, rest runs and onTimeout does not. */
+    @Test(timeout = 5_000) fun settleBeforeTimeoutRunsRestNotOnTimeout() = runVirtual {
+        var active = true; var rest = 0; var timedOut = 0
+        val seq = StopAllSequence(listOf(StopAllSequence.Blocking("op", { active }) {}), settleMs = 5_000)
+        val job = seq.run(this, onTimeout = { timedOut++ }) { rest++ }
+        delay(100); active = false
+        job!!.join()
+        assertEquals(1, rest); assertEquals(0, timedOut)
     }
 }

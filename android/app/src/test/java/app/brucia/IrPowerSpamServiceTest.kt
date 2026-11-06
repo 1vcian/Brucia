@@ -68,4 +68,36 @@ class IrPowerSpamServiceTest {
         settle()
         assertTrue(runner.calls.isEmpty())
     }
+
+    /** F32: a restart is refused until the previous stop's frame is actually written. */
+    @Test fun restartRefusedWhileStopUnresolvedThenAllowed() = runVirtual {
+        val stopGate = CompletableDeferred<Unit>()
+        val stopRunner = app.brucia.session.CommandRunner { _, _ -> stopGate.await(); true to "" }
+        val s = IrPowerSpamService(this, runner, { connected }, stopRunner = stopRunner)
+        s.run(60); until { runner.calls.size == 1 }
+        s.requestStop()                               // fence up; the stop write is gated
+        runner.reply(0, true, "IR power spam sent 10 codes (stopped)") // device ends A -> busy clears
+        until { !s.busy.value }
+        s.run(30)                                     // refused: prior stop not yet written
+        settle()
+        assertEquals(1, runner.calls.size)
+        stopGate.complete(Unit)                       // stop frame written -> fence lifts
+        settle()
+        s.run(30); until { runner.calls.size == 2 }
+        assertEquals("ir_power_spam 30", runner.cmds[1])
+        s.stop()
+    }
+
+    /** F32: a local stop cancels an unsent stop so it can never reach a later window. */
+    @Test fun stopCancelsPendingStopAndClearsTheFence() = runVirtual {
+        val stopGate = CompletableDeferred<Unit>()
+        val stopRunner = app.brucia.session.CommandRunner { _, _ -> stopGate.await(); true to "" }
+        val s = IrPowerSpamService(this, runner, { connected }, stopRunner = stopRunner)
+        s.run(60); until { runner.calls.size == 1 }
+        s.requestStop()          // fence up, stop gated
+        s.stop()                 // teardown cancels the pending stop and lifts the fence
+        settle()
+        s.run(30); until { runner.calls.size == 2 } // allowed again at once
+        s.stop()
+    }
 }

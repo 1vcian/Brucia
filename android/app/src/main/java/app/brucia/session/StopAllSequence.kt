@@ -29,10 +29,13 @@ class StopAllSequence(
 
     /**
      * Run the global Stop. With no blocking operation active, [rest] runs at once and null is
-     * returned. Otherwise their stops are requested now and [rest] runs later in [scope]; a
-     * repeated call while that wait is pending does nothing more.
+     * returned. Otherwise their stops are requested now and [rest] runs later in [scope], but only
+     * once every blocking operation has actually ended within [settleMs]; if one is still active at
+     * the timeout, [rest] is NOT run (its stops would be consumed by the still-polling operation
+     * instead of reaching their service) and [onTimeout] fires so the caller can surface an
+     * unknown/failure state (F26). A repeated call while the wait is pending does nothing more.
      */
-    @Synchronized fun run(scope: CoroutineScope, rest: () -> Unit): Job? {
+    @Synchronized fun run(scope: CoroutineScope, onTimeout: () -> Unit = {}, rest: () -> Unit): Job? {
         if (pending?.isActive == true) return pending
         val active = blocking.filter { it.active() }
         if (active.isEmpty()) { rest(); return null }
@@ -40,8 +43,9 @@ class StopAllSequence(
             try { it.requestStop() } catch (e: Exception) { onError(it.name, e) }
         }
         return scope.launch {
-            withTimeoutOrNull(settleMs) { while (blocking.any { it.active() }) delay(pollMs) }
-            rest()
+            val settled = withTimeoutOrNull(settleMs) { while (blocking.any { it.active() }) delay(pollMs); true }
+            if (settled == true) rest()
+            else try { onTimeout() } catch (e: Exception) { onError("timeout", e) }
         }.also { pending = it }
     }
 

@@ -39,6 +39,8 @@ class LoraService(
 
     private val lock = Any()
     private var recvToken = 0L
+    /** True from a receive-stop until its stop frame is written; blocks a new receive (F32). */
+    private var stopInFlight = false
 
     init {
         scope.coroutineContext[Job]?.invokeOnCompletion {
@@ -79,6 +81,7 @@ class LoraService(
      * exactly once (owning request only).
      */
     fun receive(seconds: Int = 20) = synchronized(lock) {
+        if (stopInFlight) return@synchronized // a prior receive-stop is still unwritten (F32)
         val t = ++recvToken
         _receiving.value = isConnected() && scope.isActive && seconds in 1..120
         op.startJson(json, "lora_recv $seconds", "Listening for LoRa packets (${seconds}s)...",
@@ -102,8 +105,7 @@ class LoraService(
      * without the poll still ends at its bounded window.
      */
     fun stopReceive() {
-        val wasReceiving = synchronized(lock) { _receiving.value }
-        if (wasReceiving && isConnected()) stops.run(stopRunner, STOP_CMD, STOP_TIMEOUT_MS)
+        sendReceiveStop()
         stop()
     }
 
@@ -112,9 +114,15 @@ class LoraService(
      * only when the device's lora_recv reply proves the listen window ended (then other
      * services' stops cannot be taken for this one). No receive, no link: nothing is sent.
      */
-    fun requestStopReceive() {
-        val wasReceiving = synchronized(lock) { _receiving.value }
-        if (wasReceiving && isConnected()) stops.run(stopRunner, STOP_CMD, STOP_TIMEOUT_MS)
+    fun requestStopReceive() = sendReceiveStop()
+
+    /** Send the polled receive-stop once, fencing a new receive until the frame is written (F32). */
+    private fun sendReceiveStop() {
+        synchronized(lock) {
+            if (!_receiving.value || !isConnected() || stopInFlight) return
+            stopInFlight = true
+        }
+        stops.run(stopRunner, STOP_CMD, STOP_TIMEOUT_MS) { _, _ -> synchronized(lock) { stopInFlight = false } }
     }
 
     /** Hard stop: cancel any in-flight command and clear the receive indicator. */
@@ -122,6 +130,8 @@ class LoraService(
         ++recvToken
         _receiving.value = false
         op.stop()
+        // stopInFlight is left to clear when the sent stop's write completes (directStop is a no-op
+        // once the link is gone), so a user stopReceive() does not cancel the stop it just sent.
     }
 
     companion object {

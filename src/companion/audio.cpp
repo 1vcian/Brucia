@@ -663,7 +663,10 @@ void speakerPlayRelease(const char *reason) {
 
 void speakerOutputRelease(const char *reason) {
 #if defined(HAS_NS4168_SPKR)
-    speakerFileAbort(reason);
+    if (spkFileActive) speakerFileAbort(reason);
+    // An async speaker_song/rtttl runs on the player task without setting spkFileActive, so
+    // speakerFileAbort() alone would leave it playing when FM claims the I2S pins (F21/A3).
+    else if (isAudioPlaybackTaskActive()) stopAudioPlayback();
     if (spkrPcmActive) {
         audio_pcm_end();
         spkrPcmActive = false;
@@ -804,6 +807,7 @@ bool dispatchAudioCommand(const CommandRequest &request) {
 #if defined(HAS_NS4168_SPKR)
             String rt = cmdStr.substring(14);
             speakerFileAbort("superseded");
+            fmAudioRelease(false); // FM audio TX drives the same I2S pins
             int prevSound = bruceConfig.soundEnabled;
             int prevVol = bruceConfig.soundVolume;
             bruceConfig.soundEnabled = 1;
@@ -824,6 +828,7 @@ bool dispatchAudioCommand(const CommandRequest &request) {
 #if defined(HAS_NS4168_SPKR)
             String rt = cmdStr.substring(13);
             speakerFileAbort("superseded"); // the player replaces the file with the song
+            fmAudioRelease(false); // FM audio TX drives the same I2S pins
             bruceConfig.soundEnabled = 1; // ensure audible; user volume kept
             bool okm = playAudioRTTTLString(rt, PLAYBACK_ASYNC);
             companionAckMsg(id, okm, okm ? "playing" : "song failed");
@@ -874,6 +879,7 @@ bool dispatchAudioCommand(const CommandRequest &request) {
                 break;
             }
             speakerFileAbort("superseded");
+            fmAudioRelease(false); // FM audio TX drives the same I2S pins
             int prevSound = bruceConfig.soundEnabled;
             int prevVol = bruceConfig.soundVolume;
             bruceConfig.soundEnabled = 1;

@@ -4,6 +4,62 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Integration and IR follow-up review — 2026-11-06
+
+Reviewed the F25-F31 changes and new IR service. During the review another session
+created integration commit `1db4b4d8` and release commit `33494d91` (0.1.7). The
+service sources used by the probes remained byte-identical across that boundary.
+This review did not modify production code, use hardware, flash, commit or publish.
+
+Fresh checks:
+
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **305 PASS**, 49.110 s.
+- `cd android && ./gradlew --offline :app:testDebugUnitTest --rerun`:
+  **BUILD SUCCESSFUL**, 27 s, test task actually executed (the preceding run was
+  UP-TO-DATE). Compilation tasks reused their outputs. This is not a fresh firmware,
+  lint or device run; the 1105 count below is the implementation report's count.
+- `python3 .codex_tmp/integration-followup-20261106/probe.py`: real Kotlin services
+  with simulated runners, source hashes and output retained in `result.json`.
+  **F32 reproduced:** a delayed stop for IR run A is delivered during run B after A
+  naturally completes and B is admitted. **F26 reproduced:** `StopAllSequence` calls
+  the remaining stops after its timeout although the blocking predicate is still
+  true (40 ms injected bound, same branch as the production 8 s; no firmware run).
+- `c++ -std=c++17 .codex_tmp/integration-followup-20261106/audio_owner.cpp -o /tmp/brucia-audio-owner-review && /tmp/brucia-audio-owner-review`:
+  **F21/A3 reproduced:** actual `speakerOutputRelease` and `speakerFileAbort` bodies,
+  stubbed audio hardware; an async song remains active with `spkFileActive=false`.
+  This demonstrates incomplete cleanup, not a physical I2S collision on a board.
+
+Additional CODE findings: F33 malformed explicit IR duration starts the default
+window; F34 Remote entry does not await IR/other blocking completion or a successful
+`companion_exit`; FM song/RTTTL/DTMF paths omit the release used by tone/file/PCM.
+F27-F31's basic fixes are present; phone/Compose acceptance remains pending.
+F26 and FM ownership must not remain fully DONE. New regression criteria are in
+the backlog and [checklist](docs/APP_CONTROLS_CHECKLIST.md#follow-up-regressions--2026-11-06).
+
+IR output has not been exercised by this review or by the recorded passive
+`idle_stops` check. The UI text “until you Stop” does not describe its default
+30-second window. Table enumeration is not proof of complete coverage within a
+bounded window or of receiver compatibility; Stop is polled between codes, not
+inside an individual send. Keep those limits visible rather than claiming immediate
+cessation or universal device coverage.
+
+## Follow-up fixes F26/F32/F33/F34 + FM owner (A3) — 2026-11-06
+
+Second review of integration `1db4b4d8` / release 0.1.7 found five real gaps; all fixed here.
+
+- `./gradlew :app:testDebugUnitTest`: **1111 tests, 0 failures**. New/changed: `IrPowerSpamServiceTest`
+  (restart fenced until the stop is written; teardown cancels an unsent stop), `StopAllSequenceTest`
+  (timeout withholds the device stops and fires `onTimeout`; the old "runs after the bound" case is
+  inverted), `RemoteLinkGateTest` (handover IR/LoRa/jam steps + `companion_exit` awaited before the
+  gate/reader).
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **305 tests PASS**. `test_radio_guards.py`
+  checks the IR strict parse (reject before pin/driver, range, nonnumeric) and the FM owner for
+  song/RTTTL/DTMF plus the async-song stop in `speakerOutputRelease`.
+- Firmware: `pio run -e lilygo-t-embed-cc1101 -e m5stack-cardputer` SUCCESS; T-Embed flashed.
+- Limits: F32/F34/F26 are host/source level (the full VM and the firmware poll are not executed on
+  device); the IR blast and FM owner still need an on-device check (transmit / no Si4713 here). The
+  earlier passive device results (busy SUB-409, idle stops) still hold.
+
 ## IR power spam (new feature) — 2026-11-06
 
 User-requested: `ir_power_spam [secs]` blasts every power table (NA + EU + universal parsed + raw),
@@ -22,7 +78,7 @@ polling `companionPollStop`), app `IrPowerSpamService` + IR actions card.
   does not send it. A human must confirm on permitted hardware that it switches displays off and
   that Stop ends it promptly.
 
-## Backlog A2-A5 + stop follow-ups — 2026-11-06## Backlog A2-A5 + stop follow-ups — 2026-11-06
+## Backlog A2-A5 + stop follow-ups — 2026-11-06
 
 Scope: uncommitted tree above `354a32db`; app and firmware (NRF24 loops and Bruce NRF24 module
 abort hooks, audio owner, `companionPollStop` SUB reply, ARPScanner lock order). No device
@@ -42,8 +98,9 @@ command, flash, RF output, commit or release.
   all **PASS**. `heap` fell on the first run (one-time Wi-Fi allocation from `jam_detect` setup);
   two repeat runs held free heap flat (68823 -> 68823), so no leak. Not exercised on device:
   NRF24 Stop timing (no NRF24 module fitted), FM owner (no Si4713), the ARP key-wait path.
-- Limits: firmware checks are static or against `tools/mock_device.py`; NRF24 stop timing, FM- Limits: firmware checks are static or against `tools/mock_device.py`; NRF24 stop timing, FM
-  ownership (no Si4713 here), the SUB 409 and the ARP key wait are not run on a device (backlog C8).
+- Remaining hardware limits: NRF24 stop timing, FM ownership (no Si4713 here), and
+  the ARP key wait were not exercised. The implementation report immediately above
+  records SUB 409 on the T-Embed; the earlier claim that it was only simulated is superseded.
 
 ## F25-F31 software fixes — 2026-11-06
 

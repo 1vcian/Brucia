@@ -214,6 +214,13 @@ class FirmwareGuards(unittest.TestCase):
         spam = body_of(ir, r"static void runIrPowerSpam\(")
         self.assertIn("companionPollStop()", spam, "ir_power_spam does not poll the app stop")
         self.assertIn("(stopped)", spam)
+        # F33: a malformed explicit duration is refused before the pin check / driver work.
+        reject = spam.find('sendErr(id, 400, "usage: ir_power_spam')
+        self.assertGreater(reject, 0, "ir_power_spam does not reject a malformed duration")
+        self.assertLess(reject, spam.find("irTxPinReady()"), "duration parsed after the pin check")
+        self.assertLess(reject, spam.find("runIrPowerSpamHeadless("), "duration parsed after driver work")
+        self.assertIn("v < 1 || v > 120", spam, "ir_power_spam range check missing")
+        self.assertIn("numeric = false", spam, "ir_power_spam does not reject nonnumeric input")
 
     def test_nrf24_windows_poll_stop(self):
         """Backlog A2: every nrf24_* window ends on the app's stop, not only at its end."""
@@ -248,6 +255,21 @@ class FirmwareGuards(unittest.TestCase):
                         "mic_record vs FM mic source")
         comp = strip_comments(read("src/companion/companion.cpp"))
         self.assertEqual(2, comp.count("if (on) fmAudioRelease(true);"), "mic.spectrum / mic.pcm ON vs FM mic source")
+        # A3: every speaker entry (including async song/rtttl/dtmf) releases FM first.
+        disp = body_of(audio, r"bool dispatchAudioCommand\(")
+        # Each handler releases FM before it acquires the speaker; check up to that acquire call
+        # (not the first break, which for dtmf is an early error-branch return).
+        for verb, acquire in (("speaker_rtttl ", "playAudioRTTTLString("),
+                              ("speaker_song ", "playAudioRTTTLString("),
+                              ("speaker_dtmf ", "playDtmf(")):
+            start = disp.find('startsWith("%s")' % verb)
+            self.assertGreater(start, 0, f"{verb.strip()} handler not found")
+            blk = disp[start:disp.find(acquire, start)]
+            self.assertIn("fmAudioRelease(false);", blk, f"{verb.strip()} does not release FM audio before acquiring")
+        # A3: speakerOutputRelease stops an async song (not tracked by spkFileActive).
+        rel = body_of(audio, r"void speakerOutputRelease\(const char \*reason\)")
+        self.assertIn("isAudioPlaybackTaskActive()", rel, "speakerOutputRelease ignores an async song")
+        self.assertIn("stopAudioPlayback()", rel)
 
     def test_companion_idle_exit_measured_after_handling(self):
         src = strip_comments(read("src/companion/companion.cpp"))
