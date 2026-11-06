@@ -70,6 +70,21 @@ effect, errors, timing and PASS/FAIL/BLOCKED/NOT RUN separately.
 
 ### Follow-up regressions — 2026-11-06
 
+Commit `d2e24911` closes the original Stop-all timeout branch and adds the awaited
+Remote exit. Independent review still requires these two regression cases:
+
+- **F32 LoRa teardown:** hold the coroutine dispatcher before the stop sender runs;
+  request stop, disconnect, select a replacement session, then resume. No old stop
+  reaches the replacement; a new receive is not permanently fenced. Repeat with
+  explicit Stop receive separately, which must still send its intended stop.
+- **F34 Remote failure cleanup:** reject or lose companion_exit ACK, retry several
+  times, then Stop/disconnect. Assert one watchdog for a successful Remote session
+  and none after a failed attempt or teardown; no old job can re-arm a later mirror.
+
+Both host regressions now exist and pass (2026-11-07: `LoraServiceTest` held-link cases,
+`RemoteRunTest`). The d2e24911 firmware was reflashed successfully (hash verified); the
+phone cases above remain NOT RUN and gate hardware acceptance.
+
 Review of integration `1db4b4d8` / release `33494d91`: the initial fixes are present,
 but the following gaps remain. These checks use fake transports/output drivers first;
 none was marked physically accepted by this review.

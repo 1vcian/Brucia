@@ -65,4 +65,16 @@ class RemoteLinkGateTest {
         assertTrue("failed exit is handled", abort in 0 until start.indexOf("remoteOwnsLink = true"))
         assertTrue("abort clears running", start.substring(abort, start.indexOf("remoteOwnsLink = true")).contains("_remoteRunning.value = false"))
     }
+
+    /** F34: the watchdog is RemoteRun's child (behaviour in RemoteRunTest), never a separate job. */
+    @Test fun watchdogIsOwnedByTheRemoteAttempt() {
+        assertTrue("no separately launched watchdog", !vm.contains("remoteWatchdogJob"))
+        val start = vm.substringAfter("fun startRemote() {").substringBefore("\n    // Transport writes go")
+        assertTrue(start.contains("remoteRun.start(enter = {") && start.contains("}, watchdog = {"))
+        assertTrue("failed exit aborts the attempt", start.contains("return@start false"))
+        val stopRemote = vm.substringAfter("fun stopRemote() {").substringBefore("\n    }\n")
+        val disconnect = vm.substringAfter("private fun disconnectLink(").substringBefore("\n    }\n")
+        assertTrue(stopRemote.contains("remoteRun.stop()") && disconnect.contains("remoteRun.stop()"))
+        assertTrue("LoRa teardown cancels its queued stop (F32)", vm.contains("Entry(\"lora\", { lora.stop() }, { lora.abandon() })"))
+    }
 }

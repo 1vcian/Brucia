@@ -18,6 +18,7 @@ import app.brucia.files.FileTransferService
 import app.brucia.files.DeviceFileBrowser
 import app.brucia.files.SessionFileLink
 import app.brucia.remote.RemoteHandover
+import app.brucia.remote.RemoteRun
 import app.brucia.utils.FileRetention
 import java.io.IOException
 import kotlinx.coroutines.sync.Mutex
@@ -747,8 +748,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Remote control (drive the real Bruce UI: nav + screen mirror over raw serial) ---
     @Volatile private var remote: app.brucia.remote.RemoteController? = null
-    private var remoteJob: Job? = null
-    private var remoteWatchdogJob: Job? = null
+    // One Remote attempt: the mirror watchdog lives under it and only after a confirmed exit (F34).
+    private val remoteRun = RemoteRun(viewModelScope, Dispatchers.IO)
     private val _remoteFrame = MutableStateFlow(0L)
     val remoteFrame: StateFlow<Long> = _remoteFrame.asStateFlow()
     // Whether the remote session is up (startRemote .. stopRemote). Held here, not in the screen,
@@ -815,7 +816,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         _remoteRunning.value = true
         val now = System.currentTimeMillis()
         lastRemoteByteAt = now; lastRemoteFrameAt = now
-        remoteJob = viewModelScope.launch(Dispatchers.IO) {
+        remoteRun.start(enter = {
             // While the framed link still reads replies: end what would otherwise hang (and send
             // its stop frames) before the device is asked to leave companion mode.
             val stopped = remoteHandover.stopRunning()
@@ -839,7 +840,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     _console.value = (_console.value +
                         "Remote not started: the device did not confirm leaving companion mode (${exit.second.ifBlank { "no reply" }}). Try again.").takeLast(500)
                 }
-                return@launch
+                return@start false
             }
             remoteOwnsLink = true
             readJob?.cancel(); pingJob?.cancel() // remote is exclusive with the companion loop
@@ -848,26 +849,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             kotlinx.coroutines.delay(900) // let the device return to its normal UI + resume the CLI task
             lastRemoteByteAt = System.currentTimeMillis(); lastRemoteFrameAt = lastRemoteByteAt
             rc.startMirror()
-            val buf = ByteArray(4096)
-            while (isActive) {
-                if (transport?.isOpen != true) break
-                val n = try { t.read(buf, 200) } catch (_: Exception) { break }
-                if (n > 0) {
-                    lastRemoteByteAt = System.currentTimeMillis()
-                    val before = rc.frame
-                    rc.onBytes(buf, n)
-                    if (rc.frame != before) { lastRemoteFrameAt = System.currentTimeMillis(); _remoteFrame.value = rc.frame }
-                }
-            }
-        }
-        // Auto-resume the mirror after a device reboot. On reboot the firmware's async-serial
-        // state resets to off (startAsyncSerial is idempotent) while the USB-CDC link survives,
-        // so nav keeps working but the screen stream dies silently. Detect the tell-tale: raw
-        // bytes still arriving (the boot log / CLI chatter) but no decoded TFT frames for a
-        // while -> re-send "display start" to re-arm. On a genuinely idle/static screen no bytes
-        // arrive either, so this never fires spuriously.
-        remoteWatchdogJob = viewModelScope.launch(Dispatchers.IO) {
-            while (isActive) {
+            true
+        }, watchdog = {
+            // Auto-resume the mirror after a device reboot. On reboot the firmware's async-serial
+            // state resets to off (startAsyncSerial is idempotent) while the USB-CDC link survives,
+            // so nav keeps working but the screen stream dies silently. Detect the tell-tale: raw
+            // bytes still arriving (the boot log / CLI chatter) but no decoded TFT frames for a
+            // while -> re-send "display start" to re-arm. On a genuinely idle/static screen no bytes
+            // arrive either, so this never fires spuriously.
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 kotlinx.coroutines.delay(1000)
                 if (transport?.isOpen != true) continue
                 val t2 = System.currentTimeMillis()
@@ -878,7 +868,20 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     lastRemoteFrameAt = t2          // debounce: don't re-arm again for 2.5s
                 }
             }
-        }
+        }, mirror = {
+            val rc = remote ?: return@start
+            val buf = ByteArray(4096)
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                if (transport?.isOpen != true) break
+                val n = try { t.read(buf, 200) } catch (_: Exception) { break }
+                if (n > 0) {
+                    lastRemoteByteAt = System.currentTimeMillis()
+                    val before = rc.frame
+                    rc.onBytes(buf, n)
+                    if (rc.frame != before) { lastRemoteFrameAt = System.currentTimeMillis(); _remoteFrame.value = rc.frame }
+                }
+            }
+        })
     }
 
     // Transport writes go on an IO dispatcher so a stalled USB endpoint never blocks the UI.
@@ -886,8 +889,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     fun remoteCli(line: String) { val r = remote ?: return; viewModelScope.launch(Dispatchers.IO) { r.cli(line) } }
     fun stopRemote() {
         remote?.stopMirror()
-        remoteWatchdogJob?.cancel(); remoteWatchdogJob = null
-        remoteJob?.cancel(); remoteJob = null
+        remoteRun.stop()
         remote = null
         _remoteRunning.value = false
         remoteOwnsLink = false
@@ -3038,8 +3040,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         stopAllSequence.cancel()
         deviceLifecycle.disconnect()
         // Remote mode owns independent readers; never let them consume a replacement transport.
-        remoteWatchdogJob?.cancel(); remoteWatchdogJob = null
-        remoteJob?.cancel(); remoteJob = null
+        remoteRun.stop()
         remote = null
         _remoteRunning.value = false
         remoteOwnsLink = false
@@ -3469,7 +3470,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             Entry("subghz", { subBrute.stop() }),
             Entry("debruijn-tx", { deBruijnTx.stop() }),
             Entry("jam-detect", { jamDetector.stop() }),
-            Entry("lora", { lora.stop() }),
+            Entry("lora", { lora.stop() }, { lora.abandon() }),
             Entry("ethernet", { ethernet.stop() }),
             Entry("nfc", { nfcTools.stopAll() }),
             Entry("ir-receive", { irRx.stopReceive(); irRx.stopCapture(); irRx.stopLearn() }),

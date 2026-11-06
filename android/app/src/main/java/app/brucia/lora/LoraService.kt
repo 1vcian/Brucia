@@ -130,8 +130,19 @@ class LoraService(
         ++recvToken
         _receiving.value = false
         op.stop()
-        // stopInFlight is left to clear when the sent stop's write completes (directStop is a no-op
-        // once the link is gone), so a user stopReceive() does not cancel the stop it just sent.
+        // stopInFlight is left to clear when the sent stop's write completes, so a user
+        // stopReceive() does not cancel the stop it just sent. Link teardown uses [abandon].
+    }
+
+    /**
+     * Link teardown (disconnect): like [stop], but also cancel a receive-stop not yet written and
+     * lift its fence. The stop runner resolves the link when its coroutine runs, so a queued stop
+     * left alive could otherwise be written to a replacement device's session (F32).
+     */
+    fun abandon() {
+        synchronized(lock) { stopInFlight = false }
+        stops.cancel()
+        stop()
     }
 
     companion object {

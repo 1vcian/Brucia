@@ -197,4 +197,61 @@ class LoraServiceTest {
         assertTrue(packets.isEmpty())
         assertFalse(s.receiving.value)
     }
+
+    /**
+     * F32 teardown: models the VM stop runner, which resolves the session only when its coroutine
+     * runs. The gate holds that start; meanwhile the link is torn down and replaced by B.
+     */
+    private class HeldLinkStops {
+        val gate = CompletableDeferred<Unit>()
+        @Volatile var link = "A"
+        val written = CopyOnWriteArrayList<Pair<String, String>>()
+        val runner = app.brucia.session.CommandRunner { cmd, _ -> gate.await(); written += link to cmd; true to "" }
+    }
+
+    @Test(timeout = 5000) fun disconnectCancelsQueuedReceiveStopSoItNeverReachesTheReplacementLink() = runVirtual {
+        val held = HeldLinkStops()
+        val s = LoraService(this, runner, json, { true }, stopRunner = held.runner) { packets += it }
+        s.receive(60); until { json.calls.size == 1 }
+        s.requestStopReceive()   // Stop all / Remote hand-over: stop queued, not yet written
+        s.abandon()              // disconnect
+        held.link = "B"          // replacement session selected
+        held.gate.complete(Unit) // the held sender would run now
+        settle()
+        assertTrue("old stop reached ${held.written}", held.written.isEmpty())
+        // The fence is lifted: a receive on the new link is not permanently refused.
+        s.receive(20); until { json.calls.size == 2 }
+        assertTrue(s.receiving.value)
+        s.abandon()
+        json.reply(0, true, null); json.reply(1, true, null)
+    }
+
+    @Test(timeout = 5000) fun explicitStopReceiveStillWritesItsStopToTheSameLink() = runVirtual {
+        val held = HeldLinkStops()
+        val s = LoraService(this, runner, json, { true }, stopRunner = held.runner) { packets += it }
+        s.receive(60); until { json.calls.size == 1 }
+        s.stopReceive()          // user Stop receive: local cancel must not drop the device stop
+        assertFalse(s.receiving.value)
+        held.gate.complete(Unit)
+        until { held.written.isNotEmpty() }
+        assertEquals(listOf("A" to LoraService.STOP_CMD), held.written)
+        s.receive(20); until { json.calls.size == 2 } // fence cleared once written
+        s.abandon()
+        json.reply(0, true, null); json.reply(1, true, null)
+    }
+
+    @Test(timeout = 5000) fun pendingStopFencesRestartUntilWrittenOrAbandoned() = runVirtual {
+        val held = HeldLinkStops()
+        val s = LoraService(this, runner, json, { true }, stopRunner = held.runner) { packets += it }
+        s.receive(60); until { json.calls.size == 1 }
+        s.stopReceive()
+        s.receive(20); settle()
+        assertEquals("restart refused while the stop is unwritten", 1, json.calls.size)
+        s.abandon()
+        s.receive(20); until { json.calls.size == 2 }
+        s.abandon()
+        held.gate.complete(Unit); settle()
+        assertTrue(held.written.isEmpty())
+        json.reply(0, true, null); json.reply(1, true, null)
+    }
 }
