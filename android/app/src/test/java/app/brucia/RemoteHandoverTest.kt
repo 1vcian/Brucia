@@ -12,6 +12,8 @@ import app.brucia.protocol.Kind
 import app.brucia.remote.RemoteHandover
 import app.brucia.session.CommandRunner
 import app.brucia.session.CommandSession
+import app.brucia.subghz.DeBruijnTx
+import app.brucia.subghz.DeBruijnTxService
 import app.brucia.transport.Transport
 import kotlinx.coroutines.sync.Mutex
 import org.json.JSONObject
@@ -49,11 +51,15 @@ class RemoteHandoverTest {
         val link = SessionFileLink(session, DeviceFileReader(), Mutex(), { true }, writeTimeoutMs = 60_000,
             transactionalUploads = true, commitTimeoutMs = 60_000)
         val transfers = FileTransferService(scope, { link }, scope.virtualUnconfined)
+        val deBruijn = DeBruijnTxService(scope, runner, { true })
         var uploadResult: Result<Unit>? = null
         val handover = RemoteHandover(listOf(
             RemoteHandover.Step("macro", { macros.running.value }) { macros.stop("Macro stopped: Remote control took over the device.") },
             RemoteHandover.Step("script", { script.busy.value }) { script.stopForHandover(RemoteHandover.REASON) },
             RemoteHandover.Step("file transfer", { transfers.active }) { transfers.cancelAllAndJoin() },
+            RemoteHandover.Step("De Bruijn sweep", { deBruijn.active.value }) {
+                deBruijn.stop("De Bruijn sweep stopped: Remote control took over the device; no further bursts will be sent, but a burst already sent may still be transmitting.")
+            },
         ))
 
         init {
@@ -93,6 +99,31 @@ class RemoteHandoverTest {
         assertEquals(RemoteHandover.REASON, f.script.output.value)
         assertTrue(f.macros.status.value.contains("Remote control took over"))
         assertNull(f.uploadResult) // cancelled: never reported as saved
+    }
+
+    @Test(timeout = 5_000) fun inFlightDeBruijnSweepIsStoppedBeforeCompanionExitAndSendsNoMoreBursts() = runVirtual {
+        val f = Fixture(this)
+        // A real multi-burst sweep; the device never ACKs subghz_tx_raw, so the first burst stays in
+        // flight (dispatched, awaiting its ACK) exactly when Remote takes over.
+        val plan = DeBruijnTx.plan(4, 2000, 433_920_000L, 1, 380) as DeBruijnTx.Plan.Ready
+        assertTrue("fixture needs a multi-burst sweep", plan.commands.size >= 2)
+        f.deBruijn.start(plan, "433.92 MHz")
+        until { f.wire.cmds.any { it.startsWith("subghz_tx_raw") } }
+        assertTrue(f.deBruijn.active.value)
+        val burstsBefore = f.wire.cmds.count { it.startsWith("subghz_tx_raw") }
+
+        val stopped = f.handover.stopRunning()
+        f.client.cmd("companion_exit")
+
+        // The hand-over owns the De Bruijn sweep now, not only burst loops/macros/scripts.
+        assertEquals(listOf("De Bruijn sweep"), stopped)
+        assertFalse(f.deBruijn.active.value)
+        // No further burst went out after the hand-over, and companion_exit is last on the wire.
+        val cmds = f.wire.cmds
+        assertEquals(burstsBefore, cmds.count { it.startsWith("subghz_tx_raw") })
+        assertEquals(cmds.size - 1, cmds.indexOf("companion_exit"))
+        // Honest status: later bursts cancelled, the in-flight one is not claimed stopped on-device.
+        assertTrue(f.deBruijn.status.value, f.deBruijn.status.value.contains("may still be transmitting"))
     }
 
     @Test(timeout = 5_000) fun nothingRunningSendsNothing() = runVirtual {

@@ -13,23 +13,23 @@ class GeoReplayServiceTest {
 
     @Test fun successIsReportedOnlyAfterTheDeviceAcks() = runVirtual {
         val svc = GeoReplayService(this, runner, { true })
-        svc.replay("Gate", "rf tx 433920000 0xABC 24")
+        svc.replay("Gate", "rf tx ABC 433920000 350 10")
         settle()
         assertEquals("Replaying \"Gate\"...", svc.status.value)
         runner.reply(0, true, "")
         until { !svc.busy.value }
         assertEquals("Replayed \"Gate\".", svc.status.value)
-        assertEquals(listOf("rf tx 433920000 0xABC 24"), runner.cmds)
+        assertEquals(listOf("rf tx ABC 433920000 350 10"), runner.cmds)
     }
 
     @Test fun deviceRejectionIsShownAsAFailure() = runVirtual {
         val svc = GeoReplayService(this, runner, { true })
         runner.auto = false to "CC1101 not found"
-        svc.replay("Gate", "rf tx 433920000 0xABC 24")
+        svc.replay("Gate", "rf tx ABC 433920000 350 10")
         until { !svc.busy.value }
         assertEquals("Replay of \"Gate\" failed: CC1101 not found", svc.status.value)
         runner.auto = false to ""
-        svc.replay("Gate", "rf tx 433920000 0xABC 24")
+        svc.replay("Gate", "rf tx ABC 433920000 350 10")
         until { !svc.busy.value }
         assertEquals("Replay of \"Gate\" failed: no response", svc.status.value)
     }

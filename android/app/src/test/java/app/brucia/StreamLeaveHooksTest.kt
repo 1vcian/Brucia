@@ -68,7 +68,9 @@ class StreamLeaveHooksTest {
         // Screen file to a stop call its LeaveEffect must contain.
         val expected = mapOf(
             "MainActivity.kt" to listOf("vm.setSubghz(false)", "vm.setBleScan(false)", "vm.stopStationSniff()", "vm.stopMonitor()",
-                "vm.stopBleSpam()", "vm.stopBeaconSpam()"),
+                "vm.stopBleSpam()", "vm.stopBeaconSpam()", "vm.stopRemote()"),
+            "ChannelAnalyzerScreen.kt" to listOf("vm.setWardriving(false)"),
+            "EvilPortalScreen.kt" to listOf("vm.setWardriving(false)"),
             "AudioScreens.kt" to listOf("vm.stopMicPcm()", "vm.pauseRecording()"),
             "BugSweepScreen.kt" to listOf("stopSweep()"),
             "RfTimelineScreen.kt" to listOf("vm.setBleScan(false)"),

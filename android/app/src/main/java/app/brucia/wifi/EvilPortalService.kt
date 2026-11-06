@@ -85,7 +85,9 @@ class EvilPortalService(
 
     /**
      * Stop the portal: supersede any pending start (command or push) and report the device ACK.
-     * Without a link nothing can be sent, but [active] still clears (stop-all runs on teardown).
+     * Only an ACK clears [active]; a rejected or unanswered stop keeps it, since the portal may
+     * still be serving. Without a link nothing can be sent, but [active] still clears (stop-all
+     * runs on teardown and the link loss already ended local ownership).
      */
     fun stop() {
         synchronized(lock) {
@@ -96,7 +98,8 @@ class EvilPortalService(
                 op.show(DeviceOperation.NOT_CONNECTED)
                 return
             }
-            op.start("evil_portal_stop", null) { _, out ->
+            op.start("evil_portal_stop", null) { ok, out ->
+                if (!ok) return@start "$STOP_FAILED${out.ifBlank { "no reply" }}"
                 setActive(token, false)
                 out.ifBlank { "Stopped." }
             }
@@ -132,5 +135,7 @@ class EvilPortalService(
 
     companion object {
         const val TIMEOUT_MS = 650_000L
+        /** Prefix of a failed stop: [active] stays set until a later stop is acknowledged. */
+        const val STOP_FAILED = "Stop failed, portal may still be running: "
     }
 }

@@ -93,7 +93,8 @@ internal fun GeoSignalsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
 
         // Saved signals you can pin to the current spot.
-        val pinnable = savedRf + savedIr
+        // RF items saved before the replay check whose `rf tx` sends another frame are not pinnable.
+        val pinnable = savedRf.filter { app.brucia.device.CliParse.rfPayloadReplayable(it.payload, it.subtitle) } + savedIr
         Text("Saved signals - pin to here", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         if (pinnable.isEmpty()) {
             Text("No saved RF/IR signals yet. Capture and save one in the RF or IR tool first.",

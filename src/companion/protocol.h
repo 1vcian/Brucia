@@ -27,6 +27,14 @@ enum CompanionKind : uint8_t {
 
 void resetFrameReader();
 bool readFrame(String &payload, uint32_t timeoutMs);
+// True once a frame could not be written in full: the TX stream is desynced and the link must be
+// dropped so the app reconnects onto a clean session. Cleared by companionClearTxLink().
+bool companionTxLinkBroken();
+void companionClearTxLink();
+// Bound (true) or restore (false) the CDC driver's per-write tx timeout so one blocking Serial.write
+// cannot add ~2 s to the per-frame wait. No-op on the classic-ESP32 UART path. Call true on entering
+// companion mode, false on leaving.
+void companionApplyTxTimeout(bool bounded);
 void beginEnvelope(JsonDocument &out, uint8_t kind, uint32_t id);
 void sendEnvelope(JsonDocument &out);
 void sendAck(uint32_t id, bool ok);

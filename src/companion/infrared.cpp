@@ -43,6 +43,30 @@ static void runIrTvbgone(const String &argsIn, uint32_t id) {
 #endif
 }
 
+// Brucia: IR power spam. AUTHORIZED USE ONLY - blasts every power table (both regions + universal),
+// repeating until <secs> elapses or the app's stop is polled, so it covers all device types.
+// Usage: ir_power_spam [secs]  (secs clamped 1..120, default 30)
+static void runIrPowerSpam(const String &argsIn, uint32_t id) {
+#ifdef COMPANION_HAS_IR
+    if (!irTxPinReady()) { // no pin menu in companion mode (nobody at the device)
+        companionAckMsg(id, false, "IR TX pin not configured");
+        return;
+    }
+    int secs = argsIn.toInt();
+    if (secs < 1) secs = 30;
+    if (secs > 120) secs = 120;
+    bool stopped = false;
+    // The whole set repeats, so it would otherwise ignore the app's Stop until <secs> ended: poll it.
+    uint16_t sent = runIrPowerSpamHeadless(
+        (uint32_t)secs * 1000, [&stopped]() { return stopped = stopped || companionPollStop(); });
+    String out = sent ? "IR power spam sent " + String(sent) + " codes" : String("IR power spam sent 0 codes");
+    if (stopped) out += " (stopped)";
+    companionAckMsg(id, sent > 0, out.c_str());
+#else
+    companionAckMsg(id, false, "no IR");
+#endif
+}
+
 // Brucia: learn/receive one IR code. Waits up to ~10s for a button press on the IR receiver,
 // decodes it via the same path the `ir rx` CLI uses (IrRead::loop_headless), and returns the
 // decoded form.  Usage: ir_rx
@@ -134,6 +158,20 @@ bool dispatchInfraredCommand(const CommandRequest &request) {
             break;
         }
 
+        // Idle stop guard: ir_power_spam polls the link while it runs, so a stop reaching an idle
+        // device (the spam already ended) must not start a new window via the startsWith below.
+        if (cmdStr == "ir_power_spam_stop") {
+            companionAckMsg(id, true, "not running");
+            break;
+        }
+
+        // Brucia IR: power spam - all power tables, repeating, abortable. AUTHORIZED USE ONLY.
+        //   ir_power_spam [secs]
+        if (cmdStr == "ir_power_spam" || cmdStr.startsWith("ir_power_spam ")) {
+            runIrPowerSpam(cmdStr.length() > 13 ? cmdStr.substring(14) : String(""), id);
+            break;
+        }
+
         // Brucia IR: learn/receive one IR code (~10s window).
         //   ir_rx
         if (cmdStr == "ir_rx") {
@@ -183,12 +221,13 @@ bool dispatchInfraredCommand(const CommandRequest &request) {
 // own IR menus and `ir` CLI are unchanged; CAPS keeps caps.ir and reports features.ir_cmds:false.
 bool dispatchInfraredCommand(const CommandRequest &request) {
     const String &cmdStr = request.command;
-    if (cmdStr == "ir_jammer_stop") { // same idle answer as the full build; never a start
+    if (cmdStr == "ir_jammer_stop" || cmdStr == "ir_power_spam_stop") { // idle answer; never a start
         companionAckMsg(request.id, true, "not running");
         return true;
     }
     if (cmdStr == "ir_rx" || cmdStr == "ir_tvbgone" || cmdStr.startsWith("ir_tvbgone ") ||
-        cmdStr.startsWith("ir_tx_raw ") || cmdStr == "ir_jammer" || cmdStr.startsWith("ir_jammer ")) {
+        cmdStr.startsWith("ir_tx_raw ") || cmdStr == "ir_jammer" || cmdStr.startsWith("ir_jammer ") ||
+        cmdStr == "ir_power_spam" || cmdStr.startsWith("ir_power_spam ")) {
         sendErr(request.id, 501, "ir companion commands not available in this (lite) build");
         return true;
     }

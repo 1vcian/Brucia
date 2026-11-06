@@ -118,6 +118,8 @@ COMMAND_RULES = (
     ("storage remove", re.compile(r"^storage remove (\S+)$"), lambda m: SCRATCH_RE.match(m.group(1))),
     ("jam_detect", re.compile(r"^jam_detect ([1-9]|[12]\d|30)$"), None),
     ("stop", re.compile(r"^stop$"), None),
+    # Idle-stop guards: on an idle device they only answer "not running" (never start anything).
+    ("idle stop", re.compile(r"^(nrf24_stop|jam_detect_stop|ir_power_spam_stop)$"), None),
     ("script_run", re.compile(r"^script_run (.*)$", re.S), lambda m: m.group(1) in SCRIPT_SOURCES),
     ("script_stop", re.compile(r"^script_stop$"), None),
 )
@@ -337,7 +339,7 @@ EVIDENCE_PROBES = ("present", "absent", "busy")
 BUILD_VALUE_RE = re.compile(r"^[A-Za-z0-9._+:-]{1,64}$")
 DIAG_RESET_NAMES = {"unknown", "poweron", "ext", "sw", "panic", "int_wdt", "task_wdt", "wdt", "deepsleep",
                     "brownout", "sdio", "usb", "jtag", "efuse", "pwr_glitch", "cpu_lockup", "other"}
-DIAG_LINK_KEYS = ["sessions", "rx_frames", "tx_frames", "rx_zero_len", "rx_oversize", "rx_alloc_fail",
+DIAG_LINK_KEYS = ["sessions", "rx_frames", "tx_frames", "tx_torn", "rx_zero_len", "rx_oversize", "rx_alloc_fail",
                   "rx_stale", "rx_bad_json", "busy_409", "err"]
 DIAG_ERR_KEYS = ["400", "404", "409", "413", "4xx", "5xx", "other"]
 REJECT_KEYS = ("rx_zero_len", "rx_oversize", "rx_alloc_fail", "rx_stale")
@@ -603,6 +605,7 @@ CHECKS = (
     ("streams", "Receive-only stream on/off, no events after OFF", True),
     ("busy", "Busy handling during receive-only jam_detect (opt-in)", False),
     ("script_stop", "script_stop ends a running script_run; the next script_run runs (opt-in)", False),
+    ("idle_stops", "Idle nrf24_stop / jam_detect_stop / ir_power_spam_stop answer \"not running\" (opt-in)", False),
     ("soak", "Long-session soak: heap, link counters, latency, reboots (--soak)", False),
     ("heap", "Heap not trending down across repeated diag", True),
     ("diag_counters", "diag link counters match the runner's traffic", True),
@@ -718,15 +721,43 @@ class Runner:
         r.reason = "; ".join(problems) if problems else ok_reason
 
     # -- run -------------------------------------------------------------------------------
+    def _enter_companion(self):
+        """Get a CAPS reply, entering companion mode if the board is sitting at its normal CLI.
+
+        Opening the ESP32-S3 USB-Serial-JTAG port can reset the chip (RTS), which reboots it OUT of
+        companion to the home UI. Mirror the app's auto-nudge: try a framed HELLO; if no CAPS, send the
+        raw `companion` CLI line (not a framed command) and retry, draining the boot/menu text between
+        tries. Returns the CAPS frame or None."""
+        self.link.drain(2.5)  # absorb the boot log if the port-open reset the board
+        for _ in range(8):
+            try:
+                self.link.send(HELLO, {"app": "hw_acceptance", "appVersion": str(RUNNER_VERSION)})
+                caps = self.link.wait(lambda f: f.get("t") == CAPS, 1.5)
+            except LinkError:
+                # At Bruce's CLI the board echoes our frame as "COMMAND:" (sync() raises). That just
+                # means it is not in companion yet: nudge it and retry rather than failing the run.
+                caps = None
+            if caps is not None:
+                return caps
+            try:  # raw mode-entry nudge, exactly as the app's read loop sends it
+                self.link.port.write(b"companion\r\n")
+                flush = getattr(self.link.port, "flush", None)
+                if flush:
+                    flush()
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(1.2)
+            self.link.drain(0.6)
+        return None
+
     def run(self):
         dropped = self.link.drain()
-        mid = self.link.send(HELLO, {"app": "hw_acceptance", "appVersion": str(RUNNER_VERSION)})
-        caps = self.link.wait(lambda f: f.get("t") == CAPS, self.o.timeout)
-        self.hello_evidence = {"stale_bytes_dropped": dropped, "hello_id": mid,
+        caps = self._enter_companion()
+        self.hello_evidence = {"stale_bytes_dropped": dropped,
                                "caps_id": caps.get("id") if caps else None,
                                "noise_bytes_before_caps": self.link.noise_bytes}
         if caps is None:
-            raise LinkError(f"no CAPS within {self.o.timeout}s; is the device in companion mode?")
+            raise LinkError(f"no CAPS after a companion nudge; is the board connected and running Brucia?")
         self.caps = caps.get("d") if isinstance(caps.get("d"), dict) else {}
         self.rx_max, self.rx_max_source = device_rx_max(self.caps)
         self.link.rx_max = self.rx_max
@@ -749,6 +780,7 @@ class Runner:
         self._run("fs_upload", self.check_fs_upload)
         self._run("streams", self.check_streams)
         self._run("busy", self.check_busy)
+        self._run("idle_stops", self.check_idle_stops)
         self._run("script_stop", self.check_script_stop)
         self._run("soak", self.check_soak)
         self._run("heap", self.check_heap)
@@ -1214,6 +1246,14 @@ class Runner:
         steps["diag_while_busy"] = busy.get("d") if busy else None
         if not (busy and busy.get("t") == ERR and (busy.get("d") or {}).get("code") == 409):
             problems.append(f"CMD while busy was not ERR 409: {steps['diag_while_busy']}")
+        # A SUB awaits an ACK too: firmware before 2026-11-06 dropped it unanswered.
+        sm = self.link.send(SUB, {"stream": "wifi.probe", "on": True})
+        sub = self.link.reply(sm, self.o.timeout)
+        steps["sub_while_busy"] = sub.get("d") if sub else None
+        if not (sub and sub.get("t") == ERR and (sub.get("d") or {}).get("code") == 409):
+            problems.append(f"SUB while busy was not ERR 409: {steps['sub_while_busy']}")
+            if sub and sub.get("t") == ACK:  # accepted anyway: do not leave the stream on
+                self.link.send(SUB, {"stream": "wifi.probe", "on": False})
         ts = time.time()
         self.link.send(CMD, {"cmd": "stop"})
         end = self.link.reply(self.busy_mid, self.o.timeout + 3)
@@ -1227,7 +1267,19 @@ class Runner:
             if steps["stop_to_ack_s"] >= secs:
                 problems.append("stop did not end the operation early")
         r.evidence = steps
-        self.verdict(r, problems, f"PONG and ERR 409 while busy; stop ended it in {steps['stop_to_ack_s']} s")
+        self.verdict(r, problems, f"PONG, CMD and SUB ERR 409 while busy; stop ended it in {steps['stop_to_ack_s']} s")
+
+    def check_idle_stops(self, r):
+        problems, steps = [], {}
+        for cmd in ("nrf24_stop", "jam_detect_stop", "ir_power_spam_stop"):
+            mid = self.link.send(CMD, {"cmd": cmd})
+            rep = self.link.reply(mid, self.o.timeout)
+            d = (rep or {}).get("d") or {}
+            steps[cmd] = d if rep else None
+            if not (rep and rep.get("t") == ACK and d.get("ok") is True and d.get("out") == "not running"):
+                problems.append(f"{cmd}: {steps[cmd]}")
+        r.evidence = steps
+        self.verdict(r, problems, "all idle stops answered ok \"not running\"")
 
     def check_script_stop(self, r):
         """script_run of SCRIPT_LONG, PING while it runs, script_stop after --script-stop-after s: the
@@ -1563,6 +1615,10 @@ class Runner:
             self._soak_finding(s, "counters", f"rx_frames +{drx}, runner sent {exp_rx} frames")
         if dtx != exp_tx:
             self._soak_finding(s, "counters", f"tx_frames +{dtx}, runner received {exp_tx} frames")
+        if al["tx_torn"] != pl["tx_torn"]:
+            self._soak_finding(s, "tx_torn",
+                               f"tx_torn +{al['tx_torn'] - pl['tx_torn']}: a frame was abandoned mid-write "
+                               f"(TX stream desync; the firmware dropped the link to resync)")
         rejects = {k: al[k] - pl[k] for k in REJECT_KEYS + ("rx_bad_json",) if al[k] != pl[k]}
         row["rejects_delta"] = sum(rejects.values())
         if rejects:
@@ -1777,7 +1833,11 @@ def dry_run_plan(opts):
             plan += [("streams", SUB, {"stream": s, "on": True}), ("streams", SUB, {"stream": s, "on": False})]
     if "busy" in sel:
         plan += [("busy", CMD, {"cmd": f"jam_detect {opts.busy_secs}"}), ("busy", PING, {}),
-                 ("busy", CMD, {"cmd": "diag"}), ("busy", CMD, {"cmd": "stop"})]
+                 ("busy", CMD, {"cmd": "diag"}), ("busy", SUB, {"stream": "wifi.probe", "on": True}),
+                 ("busy", CMD, {"cmd": "stop"})]
+    if "idle_stops" in sel:
+        plan += [("idle_stops", CMD, {"cmd": "nrf24_stop"}), ("idle_stops", CMD, {"cmd": "jam_detect_stop"}),
+                 ("idle_stops", CMD, {"cmd": "ir_power_spam_stop"})]
     if "script_stop" in sel:
         plan += [("script_stop", CMD, {"cmd": f"script_run {SCRIPT_LONG}"}),
                  ("script_stop", None, f"... {opts.script_stop_after} s after script_run:"),
@@ -2053,6 +2113,11 @@ def run(argv, port_factory=None, log=print):
         port_factory = lambda: serial.Serial(opts.port, opts.baud, timeout=0.02, write_timeout=2)  # noqa: E731
     started = utc_now()
     port = port_factory()
+    try:  # do not hold the S3 in reset via the control lines after open
+        port.rts = False
+        port.dtr = False
+    except Exception:  # noqa: BLE001 - not all port objects expose these
+        pass
     link = Link(port)
     runner = Runner(link, opts, log)
     fatal, cleanup, code = None, None, 0

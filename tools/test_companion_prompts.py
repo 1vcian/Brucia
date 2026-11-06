@@ -394,7 +394,11 @@ class CompanionPrompts(unittest.TestCase):
         returns = [m.start() for m in re.finditer(r"\breturn\b", locked)]
         self.assertEqual(len(returns), 3)
         for pos in returns:
-            self.assertTrue(locked[:pos].rstrip().endswith("UNLOCK_TCPIP_CORE();"), locked[max(0, pos - 120):pos])
+            branch = locked[locked.rfind("if (", 0, pos):pos]
+            self.assertIn("UNLOCK_TCPIP_CORE();", branch, branch)
+            # A key wait (displayError(..., true)) on the standalone path comes after the release.
+            wait = branch.find("displayError(")
+            self.assertTrue(wait < 0 or wait > branch.index("UNLOCK_TCPIP_CORE();"), branch)
         # `settings` with no arguments printed the JSON straight to Serial (the frame stream).
         settings = body_of(strip_code((ROOT / CLI_DIR / "settings_commands.cpp").read_text()), "uint32_t settingsCallback(")
         self.assertLess(settings.index("if (g_companionActive)"), settings.index("serializeJsonPretty(jsonDoc, Serial)"))

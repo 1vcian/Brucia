@@ -14,12 +14,38 @@ import java.util.concurrent.atomic.AtomicInteger
  * a frame (a module debug line, an IDF log) is skipped: the decoder resyncs on the next 4-byte
  * length in range followed by that prefix (proto/PROTOCOL.md "Resynchronisation").
  */
-class CompanionClient(private val transport: Transport, val counters: LinkCounters = LinkCounters()) {
+class CompanionClient(
+    private val transport: Transport,
+    val counters: LinkCounters = LinkCounters(),
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
+) {
 
     private val chunk = ByteArray(4096)
     private var buffer = ByteArray(0)
     /** True while skipping noise; one noise run is counted once however it arrives. */
     private var resyncing = false
+    /**
+     * Set when the decoder sees Bruce's serial CLI echo ("COMMAND:") in the stream: the device is no
+     * longer in companion mode (e.g. it dropped the framed link and returned to its menu, with USB
+     * still open), so no framed reply can arrive. The read loop reads it with [takeCliLeftCompanion]
+     * to fail pending commands at once instead of waiting out their timeout.
+     */
+    @Volatile private var cliLeftCompanion = false
+    /**
+     * Rolling match length against [CLI_BANNER], advanced ONLY over bytes that are not part of a
+     * successfully-decoded frame (noise skipped while resyncing, the bytes of a frame that failed to
+     * parse, and the bytes of a stalled partial frame). Never fed a valid frame's payload, so a literal
+     * "COMMAND:" inside valid JSON is not a false alarm. Persists across reads so a banner split across
+     * packets or preceded by noise is still matched.
+     */
+    private var cliMatch = 0
+    /**
+     * Monotonic ms of the last byte read into [buffer]. A parked (header seen, payload incomplete) frame
+     * is abandoned only after FRAME_STALL_MS of INACTIVITY (no new bytes) - NOT after a total duration -
+     * so a large valid frame that keeps advancing, however slowly, still completes. Mirrors the
+     * firmware's `rxLastByte` stale rule in readFrame (src/companion/protocol.cpp).
+     */
+    private var lastByteAt = 0L
 
     /**
      * Largest payload [send] writes. The protocol maximum until CAPS reports `rx_max`
@@ -36,6 +62,22 @@ class CompanionClient(private val transport: Transport, val counters: LinkCounte
 
         /** Every device payload starts with these bytes: beginEnvelope() writes "v" first. */
         val ENVELOPE_PREFIX = "{\"v\":".toByteArray(Charsets.US_ASCII)
+
+        /** Bruce's serial CLI prints this when it echoes a line we sent: the device is not in companion. */
+        val CLI_BANNER = "COMMAND:".toByteArray(Charsets.US_ASCII)
+
+        /** A parked partial frame older than this is treated as a desynced/truncated frame and discarded. */
+        const val FRAME_STALL_MS = 2000L
+    }
+
+    /**
+     * True once since the last call if the decoder saw the CLI echo ("COMMAND:"), i.e. the device left
+     * companion mode while the transport stayed open. Reading it clears the flag.
+     */
+    fun takeCliLeftCompanion(): Boolean {
+        val v = cliLeftCompanion
+        cliLeftCompanion = false
+        return v
     }
 
     /**
@@ -123,29 +165,68 @@ class CompanionClient(private val transport: Transport, val counters: LinkCounte
             val remaining = (deadline - System.nanoTime() + 999_999L) / 1_000_000L
             if (remaining <= 0) return extractFrame()
             val n = transport.read(chunk, remaining.coerceIn(1, timeoutMs.toLong()).toInt())
-            if (n > 0) buffer += chunk.copyOf(n)
+            if (n > 0) { buffer += chunk.copyOf(n); lastByteAt = nowMs() } // progress resets the stall timer
         }
     }
 
     private fun extractFrame(): JSONObject? {
         while (sync()) {
             val len = lengthAt(0)
-            if (buffer.size < 4 + len) return null
-            val payload = buffer.copyOfRange(4, 4 + len)
+            if (buffer.size < 4 + len) {
+                // Parked: a valid header, but the payload has not all arrived. A truncated frame (the
+                // device stopped mid-send and left companion) parks here, and the CLI echo that follows is
+                // swallowed as "payload" - so detection must not depend only on resync. Abandon the frame
+                // only after FRAME_STALL_MS of INACTIVITY (no new bytes), not a total duration, so a valid
+                // frame that is still advancing is never discarded. On abandon, scan the buffered bytes for
+                // the CLI banner and resync. (A frame that DOES complete, even with swallowed CLI bytes, is
+                // checked below: its invalid-JSON payload is caught on the parse-failure path.)
+                if (nowMs() - lastByteAt > FRAME_STALL_MS) {
+                    scanCli(buffer, 0, buffer.size)
+                    counters.noteNoise(buffer.size)
+                    buffer = ByteArray(0)
+                    resyncing = false
+                    continue
+                }
+                return null
+            }
+            val consumed = buffer.copyOfRange(0, 4 + len)
             buffer = buffer.copyOfRange(4 + len, buffer.size)
             resyncing = false
             try {
-                val message = JSONObject(String(payload, Charsets.UTF_8))
+                val message = JSONObject(String(consumed, 4, len, Charsets.UTF_8))
                 counters.noteFrameReceived()
+                cliMatch = 0 // a valid frame boundary: any partial banner match before it was coincidental
                 return message
             } catch (_: Exception) {
                 // The header and envelope prefix were valid, so the next boundary is known.
                 // Drain any complete buffered frames before waiting for more transport data.
-                // Skipped, but counted: Diagnostics shows how many were lost.
+                // Skipped, but counted: Diagnostics shows how many were lost. These bytes were NOT a
+                // real frame, so scan them for the CLI banner (a truncated frame + CLI echo lands here).
                 counters.noteMalformedFrame()
+                scanCli(consumed, 0, consumed.size)
             }
         }
         return null
+    }
+
+    /**
+     * Advance [cliMatch] over bytes[from, to) looking for [CLI_BANNER]; set [cliLeftCompanion] on a full
+     * match. "COMMAND:" has no self-overlapping prefix, so a plain restart (to 1 when the byte is the
+     * banner's first char, else 0) is exact. Called only for non-frame bytes, so valid payloads cannot
+     * trip it, and it keeps state across calls so a fragmented or noise-prefixed banner still matches.
+     */
+    private fun scanCli(bytes: ByteArray, from: Int, to: Int) {
+        var i = from
+        while (i < to) {
+            val b = bytes[i]
+            cliMatch = when {
+                b == CLI_BANNER[cliMatch] -> cliMatch + 1
+                b == CLI_BANNER[0] -> 1
+                else -> 0
+            }
+            if (cliMatch == CLI_BANNER.size) { cliLeftCompanion = true; cliMatch = 0 }
+            i++
+        }
     }
 
     private fun lengthAt(i: Int): Int = (buffer[i].toInt() and 0xFF) or
@@ -187,6 +268,8 @@ class CompanionClient(private val transport: Transport, val counters: LinkCounte
             val drop = if (next > 0) next else buffer.size - (need - 1)
             if (drop <= 0) return false // a frame start may straddle the end: wait for more
             counters.noteNoise(drop)
+            // These skipped bytes are not a frame: scan them for the CLI banner (device left companion).
+            scanCli(buffer, 0, drop)
             buffer = buffer.copyOfRange(drop, buffer.size)
         }
         return false

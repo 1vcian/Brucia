@@ -11,7 +11,7 @@ import app.brucia.wardrive.DeviceFeatures
 object CommandCapabilities {
     private val stops = setOf("fm_stop", "fm_audio_stop", "speaker_stop", "spkr_pcm_stop",
         "ble_hid_end", "evil_portal_stop", "wifi_disconnect", "responder_stop", "karma_stop", "brucegotchi_stop",
-        "script_stop")
+        "script_stop", "nrf24_stop", "ir_power_spam_stop")
 
     fun required(command: String): Set<String> {
         val words = command.trim().split(Regex("\\s+"), limit = 4)
@@ -42,7 +42,7 @@ object CommandCapabilities {
         val verb = command.trim().split(Regex("\\s+"), limit = 2).firstOrNull().orEmpty()
         return when {
             verb == "mifare_keycheck" -> DeviceFeatures.MIFARE_KEYCHECK
-            verb in setOf("ir_rx", "ir_tvbgone", "ir_tx_raw", "ir_jammer") -> DeviceFeatures.IR_CMDS
+            verb in setOf("ir_rx", "ir_tvbgone", "ir_tx_raw", "ir_jammer", "ir_power_spam") -> DeviceFeatures.IR_CMDS
             verb.startsWith("ble_gatt_") -> DeviceFeatures.BLE_GATT
             else -> null
         }

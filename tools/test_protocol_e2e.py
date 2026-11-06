@@ -89,7 +89,7 @@ def evidence_valid(ev):
 DIAG_U32 = 0xFFFFFFFF
 DIAG_RESET_NAMES = {"unknown", "poweron", "ext", "sw", "panic", "int_wdt", "task_wdt", "wdt", "deepsleep",
                     "brownout", "sdio", "usb", "jtag", "efuse", "pwr_glitch", "cpu_lockup", "other"}
-DIAG_LINK_KEYS = ["sessions", "rx_frames", "tx_frames", "rx_zero_len", "rx_oversize", "rx_alloc_fail",
+DIAG_LINK_KEYS = ["sessions", "rx_frames", "tx_frames", "tx_torn", "rx_zero_len", "rx_oversize", "rx_alloc_fail",
                   "rx_stale", "rx_bad_json", "busy_409", "err"]
 DIAG_ERR_KEYS = ["400", "404", "409", "413", "4xx", "5xx", "other"]
 

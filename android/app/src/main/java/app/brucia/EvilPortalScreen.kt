@@ -1,5 +1,6 @@
 package app.brucia
 
+import app.brucia.session.StreamClaim
 import app.brucia.ui.rememberRetained
 import app.brucia.ui.LeaveEffect
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -98,8 +99,10 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var customHtml by rememberSaveable { mutableStateOf(DEFAULT_CUSTOM_PORTAL) }
     var previewHtml by remember { mutableStateOf(false) }
     var tplName by rememberSaveable { mutableStateOf("") }
-    // Stop a target scan when leaving the screen (not on a rotation: LeaveEffect).
-    LeaveEffect { if (vm.wardriving.value) vm.setWardriving(false) }
+    // The target scan is this screen's only if it started it: hiding the list or leaving (not a
+    // rotation: LeaveEffect) never stops a Wardrive scan that was already running.
+    val targetScan = rememberRetained { StreamClaim() }
+    LeaveEffect { targetScan.release(vm.streamMayRun("wifi.ap")) { vm.setWardriving(false) } }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -219,8 +222,8 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     enabled = !active, modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         showTargets = !showTargets
-                        if (showTargets && aps.isEmpty()) vm.setWardriving(true)
-                        else if (!showTargets && scanning) vm.setWardriving(false)
+                        if (showTargets && aps.isEmpty()) targetScan.acquire(vm.wardriving.value) { vm.setWardriving(true) }
+                        else if (!showTargets) targetScan.release(vm.streamMayRun("wifi.ap")) { vm.setWardriving(false) }
                     },
                 ) { Text(if (showTargets) "Hide networks" else "Clone a nearby network (target)") }
                 if (showTargets) {
@@ -230,7 +233,8 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         Row(verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth().clickable(enabled = !active) {
                                 ssid = ap.ssid; channel = ap.channel.toString(); deauth = true
-                                showTargets = false; if (scanning) vm.setWardriving(false)
+                                showTargets = false
+                                targetScan.release(vm.streamMayRun("wifi.ap")) { vm.setWardriving(false) }
                             }.padding(vertical = 8.dp)) {
                             Column(Modifier.weight(1f)) {
                                 Text(ap.ssid, color = cs.onSurface)
@@ -247,7 +251,9 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     onClick = {
                         if (active) vm.stopEvilPortal()
                         else {
+                            // The portal needs the radio: an explicit start ends any scan, ours or not.
                             if (scanning) vm.setWardriving(false)
+                            targetScan.release(false) {}
                             if (templateIdx == customIdx) {
                                 vm.startEvilPortal(ssid.trim(), customHtml.toByteArray(), "evil_portal.html",
                                     channel = channel.toIntOrNull() ?: 1, deauth = deauth)

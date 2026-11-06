@@ -189,6 +189,14 @@ static void runFmAudioBegin(const String &argsIn, uint32_t id) {
         return;
     }
     if (fmAudioActive) fmAudioStopInternal();
+    // Single I2S owner: the TX below reuses the speaker pins, and a mic source the mic.
+    speakerOutputRelease("superseded");
+#if defined(COMPANION_HAS_MIC)
+    if (mic) {
+        micStop();
+        micPcmStop();
+    }
+#endif
     if (!fm_tx_digital_begin((uint16_t)(khz / 10), FM_AUDIO_TX_RATE)) {
         companionAckMsg(id, false, "no FM module");
         return;
@@ -455,6 +463,7 @@ static void runSpeakerTone(const String &args, uint32_t id) {
     if (ms <= 0) ms = 200;      // sensible default
     if (ms > 10000) ms = 10000; // clamp to 10s (playTone blocks for the duration)
     speakerFileAbort("superseded"); // playTone opens its own I2S output
+    fmAudioRelease(false);          // FM audio TX drives the same pins
     // playTone() is a no-op when sound is globally muted, and its output gain scales with
     // soundVolume - a saved volume of 0 (or very low) produces NO audible output even with
     // sound enabled. For an explicit, phone-requested tone, force both enabled AND an audible
@@ -545,6 +554,7 @@ static void runSpeakerPlay(const String &args, uint32_t id) {
         audio_pcm_end();
         spkrPcmActive = false;
     }
+    fmAudioRelease(false); // FM audio TX drives the same pins
 #if defined(COMPANION_HAS_MIC)
     micPcmStop();
 #endif
@@ -585,6 +595,7 @@ static void runSpeakerPlay(const String &args, uint32_t id) {
 static void runSpkrPcmBegin(uint32_t sr, uint32_t id) {
     if (sr == 0) sr = 16000;
     speakerFileAbort("superseded"); // a speaker_play file would contend for the I2S output
+    fmAudioRelease(false);          // FM audio TX drives the same pins
     // Mic and speaker are half-duplex: if a mic.pcm capture is live, stop it so the onboard
     // audio peripherals do not contend while we play back.
 #if defined(COMPANION_HAS_MIC)
@@ -647,6 +658,26 @@ void speakerPlayRelease(const char *reason) {
     speakerFileAbort(reason);
 #else
     (void)reason;
+#endif
+}
+
+void speakerOutputRelease(const char *reason) {
+#if defined(HAS_NS4168_SPKR)
+    speakerFileAbort(reason);
+    if (spkrPcmActive) {
+        audio_pcm_end();
+        spkrPcmActive = false;
+    }
+#else
+    (void)reason;
+#endif
+}
+
+void fmAudioRelease(bool onlyMicSource) {
+#if defined(COMPANION_HAS_FM_AUDIO)
+    if (fmAudioActive && (!onlyMicSource || fmAudioMic)) fmAudioStopInternal();
+#else
+    (void)onlyMicSource;
 #endif
 }
 
@@ -916,6 +947,7 @@ bool dispatchAudioCommand(const CommandRequest &request) {
         if (cmdStr == "mic_record" || cmdStr.startsWith("mic_record ")) {
 #if defined(COMPANION_HAS_MIC)
             speakerPlayRelease("superseded"); // mic and speaker share the I2S peripherals
+            fmAudioRelease(true);             // an FM mic source reads the same mic
             runMicRecord(cmdStr.length() > 11 ? cmdStr.substring(11) : String(""), id);
 #else
             companionAckMsg(id, false, "no microphone on this board");

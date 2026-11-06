@@ -70,4 +70,28 @@ class JamDetectServiceTest {
         svc.stop(); runner.reply(0, true, "late"); delay(20)
         assertEquals("Stopped." to false, svc.state())
     }
+
+    /** Stop all: the device gets its polled stop and the window ends with the device's reply. */
+    @Test(timeout = 5_000) fun requestStopSendsDeviceStopAndKeepsWaitingForTheReply() = runVirtual {
+        runner.sticky = true
+        val stopsSent = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val svc = JamDetectService(this, runner, { connected }, stopRunner = { cmd, _ -> stopsSent += cmd; true to "" })
+        svc.requestStop() // idle: nothing sent
+        settle()
+        assertTrue(stopsSent.isEmpty())
+        svc.run(120)
+        until { runner.calls.size == 1 }
+        svc.requestStop()
+        until { stopsSent.isNotEmpty() }
+        assertEquals(listOf(JamDetectService.STOP_CMD), stopsSent)
+        assertTrue(svc.busy.value) // still owned until the device answers
+        runner.reply(0, true, "deauth=0 total=4")
+        until { !svc.busy.value }
+        assertEquals("deauth=0 total=4", svc.status.value)
+        connected = false
+        svc.run(5) // rejected, and a disconnected requestStop sends nothing
+        svc.requestStop()
+        settle()
+        assertEquals(1, stopsSent.size)
+    }
 }

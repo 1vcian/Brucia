@@ -27,6 +27,8 @@ object ReportBuilder {
         sb.append("## Summary\n\n")
         sb.append("- Wi-Fi access points: ").append(aps.size).append('\n')
         sb.append("- BLE devices: ").append(bleCount).append('\n')
+        // DT01 (decided 2026-11-06, authorized): the recovered key is shown in plaintext - this is an
+        // authorized-security-assessment report and the operator needs the actual key; do not mask.
         sb.append("- WPA crack result: ").append(crackResult ?: "n/a").append("\n\n")
 
         if (aps.isNotEmpty()) {

@@ -66,7 +66,9 @@ inline const char *diagRxRejectKey(uint8_t kind) {
 struct DiagLinkCounters {
     uint32_t sessions;  // companion mode entries
     uint32_t rxFrames;  // complete frames read by the decoder (valid length, before JSON parsing)
-    uint32_t txFrames;  // frames written (every kind)
+    uint32_t txFrames;  // frames written whole (every kind); a torn frame is NOT counted here
+    uint32_t txTorn;    // frames abandoned mid-write (host stopped accepting bytes): the TX stream
+                        // desynced, so the link was dropped for a clean reconnect (see protocol.cpp)
     uint32_t busy409;   // ERR 409 "device busy" replies from companionPollStop (also in err["409"])
     uint32_t rxRejected[DIAG_RX_REJECT_KINDS];
     uint32_t err[DIAG_ERR_BUCKETS];
@@ -85,6 +87,7 @@ inline DiagLinkCounters &diagLink() {
 inline void diagNoteSession() {}
 inline void diagNoteRxFrame() {}
 inline void diagNoteTxFrame() {}
+inline void diagNoteTxTorn() {}
 inline void diagNoteBusy() {}
 inline void diagNoteRxReject(DiagRxReject) {}
 inline void diagNoteErr(uint32_t) {}
@@ -92,6 +95,7 @@ inline void diagNoteErr(uint32_t) {}
 inline void diagNoteSession() { diagInc(diagLink().sessions); }
 inline void diagNoteRxFrame() { diagInc(diagLink().rxFrames); }
 inline void diagNoteTxFrame() { diagInc(diagLink().txFrames); }
+inline void diagNoteTxTorn() { diagInc(diagLink().txTorn); }
 inline void diagNoteBusy() { diagInc(diagLink().busy409); }
 inline void diagNoteRxReject(DiagRxReject kind) {
     if (kind < DIAG_RX_REJECT_KINDS) diagInc(diagLink().rxRejected[kind]);
@@ -117,6 +121,7 @@ template <class Sink> void diagWriteLink(const DiagLinkCounters &c, Sink &sink) 
     sink.field("sessions", c.sessions);
     sink.field("rx_frames", c.rxFrames);
     sink.field("tx_frames", c.txFrames);
+    sink.field("tx_torn", c.txTorn);
     for (uint8_t k = 0; k < DIAG_RX_REJECT_KINDS; k++) sink.field(diagRxRejectKey(k), c.rxRejected[k]);
     sink.field("busy_409", c.busy409);
     for (uint8_t b = 0; b < DIAG_ERR_BUCKETS; b++) sink.errField(diagErrBucketKey(b), c.err[b]);

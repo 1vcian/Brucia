@@ -48,6 +48,25 @@ class LocalFilesCleanupTest {
         try { ExportFiles.write(blocker, "brucia_report_", "md", "x"); fail() } catch (_: IOException) { }
     }
 
+    /** F31: named exports (wardrive, NDEF, hc22000, RF, stations, probes, pcap) share the guarded contract. */
+    @Test fun namedExportFailuresAreIOExceptionsAndLeaveNoPartialFile() {
+        val blocker = File(tempDir(), "not-a-dir").also { it.writeText("x") }
+        try { ExportFiles.writeNamed(blocker, "brucia_1.csv", "a,b"); fail() } catch (_: IOException) { } // unavailable dir / open fails
+        val dir = tempDir()
+        try {
+            ExportFiles.writeNamed(dir, "brucia_monitor_1.pcap") { it.write(byteArrayOf(1, 2, 3)); throw IOException("ENOSPC") }
+            fail()
+        } catch (e: IOException) { assertEquals("ENOSPC", e.message) } // write fails part-way
+        assertFalse(File(dir, "brucia_monitor_1.pcap").exists())
+        try {
+            ExportFiles.writeNamed(dir, "brucia_2.kml") { throw IllegalStateException("build failed") }
+            fail()
+        } catch (e: IOException) { assertEquals("build failed", e.message) } // non-IO failure still recoverable
+        assertFalse(File(dir, "brucia_2.kml").exists())
+        val ok = ExportFiles.writeNamed(File(dir, "sub"), "brucia_ndef.txt", "D1")
+        assertEquals("D1", ok.readText())
+    }
+
     @Test fun staleUpdateDownloadsAreRemovedFreshOnesKept() {
         val now = 10_000_000_000L
         val dir = tempDir()

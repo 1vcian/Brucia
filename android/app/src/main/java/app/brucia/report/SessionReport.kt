@@ -98,6 +98,8 @@ object SessionReport {
 
         val handshakeLines = buildList {
             d.handshakeInfo?.let { add("Captured/loaded: ${mdCell(it)}") }
+            // DT01 (decided 2026-11-06, authorized): the recovered key is printed in plaintext; this is
+            // an authorized-assessment report and the operator needs the actual key. Not masked.
             d.crackResult?.let { add("Crack result: $it") }
         }
         if (handshakeLines.isNotEmpty()) {

@@ -39,6 +39,12 @@ class DeBruijnTxService(
     private val lock = Any()
     private var generation = 0L
     private var job: Job? = null
+    // True only while a `subghz_tx_raw` burst has been dispatched to the device and we are awaiting
+    // its ACK: that burst is already on air and we cannot recall it. Guarded by [lock]. [stop] reads
+    // it to tell "no further bursts will be sent" (always guaranteed) apart from "a burst already
+    // sent is stopped" (never guaranteed) so the status never claims the sweep is halted on-device
+    // when only the queue of later bursts was cancelled.
+    private var burstInFlight = false
 
     /**
      * Start streaming [plan] (its frequency shown as [freqLabel], e.g. "433.92 MHz"). Supersedes any
@@ -62,7 +68,12 @@ class DeBruijnTxService(
                     for (cmd in plan.commands) {
                         currentCoroutineContext().ensureActive()
                         if (!isActive) break
-                        val (ok, out) = runner.run(cmd, timeoutMs)
+                        synchronized(lock) { if (owned(gen)) burstInFlight = true }
+                        val (ok, out) = try {
+                            runner.run(cmd, timeoutMs)
+                        } finally {
+                            synchronized(lock) { if (owned(gen)) burstInFlight = false }
+                        }
                         currentCoroutineContext().ensureActive()
                         if (owned(gen).not()) return@launch
                         if (!ok) { failure = out.ifBlank { "no response" }; break }
@@ -90,12 +101,19 @@ class DeBruijnTxService(
         }
     }
 
-    /** Halt a running sweep (user Stop / disconnect); its late reply is ignored and nothing more is sent. */
-    fun stop(text: String = STOPPED) {
+    /**
+     * Halt a running sweep (user Stop / disconnect / Remote hand-over): no further burst is sent and
+     * a late reply is ignored. We can always guarantee the *remaining* bursts are cancelled, but a
+     * burst already dispatched to the device ([burstInFlight]) is on air and cannot be recalled, so
+     * with no caller [text] the status says so honestly instead of claiming the sweep stopped. A
+     * caller that already phrases the caveat (the Remote hand-over) passes its own [text].
+     */
+    fun stop(text: String? = null) {
         synchronized(lock) {
             val wasActive = _active.value
+            val inFlight = burstInFlight
             val gen = supersede()
-            if (wasActive) publish(gen, text, active = false)
+            if (wasActive) publish(gen, text ?: if (inFlight) STOPPED_IN_FLIGHT else STOPPED, active = false)
         }
     }
 
@@ -113,6 +131,7 @@ class DeBruijnTxService(
         ++generation
         job?.cancel()
         job = null
+        burstInFlight = false
         return generation
     }
 
@@ -129,6 +148,9 @@ class DeBruijnTxService(
     companion object {
         const val NOT_CONNECTED = "Connect the device over USB first."
         const val STOPPED = "De Bruijn sweep stopped."
+        /** Stopped while a burst was already on air: later bursts cancelled, that one cannot be recalled. */
+        const val STOPPED_IN_FLIGHT =
+            "De Bruijn sweep stopped; no further bursts will be sent, but the burst already sent may still be transmitting on the device."
         /** Slack added to a burst's on-air time for radio bring-up/teardown and the ACK round-trip. */
         const val PER_BURST_HEADROOM_MS = 6_000L
     }

@@ -126,4 +126,32 @@ class BleHidServiceTest {
         assertFalse(svc.busy.value)
         assertEquals("Stopped.", svc.status.value) // terminal state; late reply ignored
     }
+
+    /** F27: a rejected or unanswered end must not claim "off"; a retried, acknowledged end does. */
+    @Test fun failedEndKeepsAdvertisingUnprovenUntilAck() = runVirtual {
+        val svc = svc()
+        assertEquals("advertising", svc.result(true to "") { begin() })
+        val rejected = svc.result(false to "ERR busy") { end() }
+        assertEquals(BleHidService.STOP_FAILED + "ERR busy", rejected)
+        assertNotEquals("off", rejected)
+        val lost = svc.result(false to "") { end() } // runner timeout/exception arrives as (false, msg)
+        assertEquals(BleHidService.STOP_FAILED + "no reply", lost)
+        assertEquals("off", svc.result(true to "") { end() })
+        assertEquals(listOf("ble_hid_begin", "ble_hid_end", "ble_hid_end", "ble_hid_end"), runner.cmds)
+    }
+
+    /** F27: a late failure from a superseded end never overwrites a newer acknowledged end. */
+    @Test fun lateFailedEndIgnoredAfterNewerAck() = runVirtual {
+        val svc = svc()
+        runner.sticky = true
+        svc.end()
+        until { runner.calls.size == 1 }
+        svc.end()
+        until { runner.calls.size == 2 }
+        runner.reply(1, true, "")
+        until { svc.status.value == "off" }
+        runner.reply(0, false, "timeout")
+        delay(20)
+        assertEquals("off", svc.status.value)
+    }
 }

@@ -18,6 +18,7 @@ Distributed under Creative Commons 2.5 -- Attribution & Share Alike
 #include "core/mykeyboard.h"
 #include "core/sd_functions.h"
 #include "core/settings.h"
+#include <functional>
 #include "core/utils.h"
 #include "ir_utils.h"
 #include <freertos/FreeRTOS.h>
@@ -321,12 +322,13 @@ void StartTvBGone() {
 // the number of codes transmitted.
 
 static uint16_t sendParsedCodeBatchHeadless(
-    const IrCode *const *codes, uint8_t count, IRsend &irsend, uint32_t deadline
+    const IrCode *const *codes, uint8_t count, IRsend &irsend, uint32_t deadline,
+    std::function<bool()> shouldAbort = nullptr
 ) {
     uint16_t rawData[300];
     uint16_t sent = 0;
     for (uint8_t i = 0; i < count; i++) {
-        if ((int32_t)(millis() - deadline) >= 0 || check(EscPress)) break;
+        if ((int32_t)(millis() - deadline) >= 0 || check(EscPress) || (shouldAbort && shouldAbort())) break;
         lock_ir_tx();
         powerCode = codes[i];
 
@@ -351,12 +353,13 @@ static uint16_t sendParsedCodeBatchHeadless(
 }
 
 static uint16_t sendRawCodeBatchHeadless(
-    const RawIrCode *const *codes, uint8_t count, IRsend &irsend, uint32_t deadline
+    const RawIrCode *const *codes, uint8_t count, IRsend &irsend, uint32_t deadline,
+    std::function<bool()> shouldAbort = nullptr
 ) {
     uint16_t rawData[300];
     uint16_t sent = 0;
     for (uint8_t i = 0; i < count; i++) {
-        if ((int32_t)(millis() - deadline) >= 0 || check(EscPress)) break;
+        if ((int32_t)(millis() - deadline) >= 0 || check(EscPress) || (shouldAbort && shouldAbort())) break;
         lock_ir_tx();
         rawPowerCode = codes[i];
 
@@ -398,6 +401,43 @@ uint16_t runTvBGoneHeadless(bool useEU, uint32_t maxMs) {
 
     sent += sendParsedCodeBatchHeadless(UniversalParsedCodes, num_UniversalParsedCodes, irsend, deadline);
     sent += sendRawCodeBatchHeadless(UniversalRawCodes, num_UniversalRawCodes, irsend, deadline);
+
+    digitalWrite(bruceConfigPins.irTx, LED_OFF);
+#ifdef USE_BOOST
+    PPM.disableOTG();
+#endif
+    return sent;
+}
+
+// Brucia: IR power spam. AUTHORIZED USE ONLY. Blasts EVERY power table at once - both regions
+// (NA + EU) plus the universal parsed and raw codes - and REPEATS the whole set until maxMs or a
+// stop, so it covers all device types rather than one region's TVs. [shouldAbort] (the companion
+// stop poll; may be empty) and check(EscPress) end it between codes; maxMs bounds it either way.
+// Returns the total codes transmitted.
+uint16_t runIrPowerSpamHeadless(uint32_t maxMs, std::function<bool()> shouldAbort) {
+    if (!init_ir_tx_mutex()) return 0;
+
+#ifdef USE_BOOST
+    PPM.enableOTG();
+#endif
+    checkIrTxPin();
+    IRsend irsend(bruceConfigPins.irTx);
+    irsend.begin();
+    setup_ir_pin(bruceConfigPins.irTx, OUTPUT);
+
+    const uint32_t deadline = millis() + maxMs;
+    uint16_t sent = 0;
+    auto done = [&]() { return (int32_t)(millis() - deadline) >= 0 || check(EscPress) || (shouldAbort && shouldAbort()); };
+
+    while (!done()) {
+        sent += sendParsedCodeBatchHeadless(NApowerCodes, num_NAcodes, irsend, deadline, shouldAbort);
+        if (done()) break;
+        sent += sendParsedCodeBatchHeadless(EUpowerCodes, num_EUcodes, irsend, deadline, shouldAbort);
+        if (done()) break;
+        sent += sendParsedCodeBatchHeadless(UniversalParsedCodes, num_UniversalParsedCodes, irsend, deadline, shouldAbort);
+        if (done()) break;
+        sent += sendRawCodeBatchHeadless(UniversalRawCodes, num_UniversalRawCodes, irsend, deadline, shouldAbort);
+    }
 
     digitalWrite(bruceConfigPins.irTx, LED_OFF);
 #ifdef USE_BOOST

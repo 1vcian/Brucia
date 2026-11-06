@@ -42,11 +42,18 @@ class BleHidService(
         }
     }
 
-    /** Stop advertising; supersedes a pending [begin] so the reply is "off", never "Starting...". */
+    /**
+     * Stop advertising; supersedes a pending [begin] so the reply is never "Starting...". Only an
+     * ACK reports "off": a rejected or unanswered end leaves advertising unproven, so the status
+     * says the stop failed instead of claiming the keyboard is off.
+     */
     fun end() {
         if (!isConnected()) return
         val gen = synchronized(lifeLock) { ++life }
-        op.start("ble_hid_end", null) { _, _ -> set(gen, "off"); null }
+        op.start("ble_hid_end", null) { ok, out ->
+            set(gen, if (ok) "off" else "$STOP_FAILED${out.ifBlank { "no reply" }}")
+            null
+        }
     }
 
     /** Query advertise state (alongside): ok sets [status], failure keeps it. */
@@ -93,5 +100,7 @@ class BleHidService(
         // end all return at once, no blocking wait), so the default bounded wait is enough.
         const val TIMEOUT_MS = 10_000L
         const val NOT_CONNECTED = "Connect the device over USB first."
+        /** Prefix of a failed end: advertising state unknown until a later ACK or status query. */
+        const val STOP_FAILED = "Stop failed, may still be advertising: "
     }
 }

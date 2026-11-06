@@ -227,6 +227,7 @@ void drawCompanionScreen(bool connected, bool wifi, bool ble, bool subghz) {
 //   - MSG_PING  -> PONG (same payload as the main loop, incl. battery), so keepalives stay alive.
 //   - MSG_CMD that is not stop/*_stop -> ERR 409 "device busy", so the app's await fails fast and
 //     clearly (CommandSession surfaces it as a command failure) instead of hanging.
+//   - MSG_SUB -> ERR 409 "device busy" too (it awaits an ACK; it used to be dropped unanswered).
 //   - anything else (e.g. a stray ACK) -> consumed and ignored, as before.
 // Only stop/*_stop returns true.
 bool companionPollStop() {
@@ -242,6 +243,13 @@ bool companionPollStop() {
     uint32_t id = a["id"] | 0;
     if (t == MSG_PING) {
         sendPong(id);
+        return false;
+    }
+    if (t == MSG_SUB) {
+        // A SUB awaits its ACK like a CMD: dropping it left the app's subscription waiting for its
+        // timeout. It cannot start or stop a stream mid-op, so it is refused the same way.
+        diagNoteBusy();
+        sendErr(id, 409, "device busy");
         return false;
     }
     if (t != MSG_CMD) return false;
@@ -272,6 +280,8 @@ static void runCompanionUSB(bool headless) {
     if (serialcmdsTaskHandle) vTaskSuspend(serialcmdsTaskHandle);
     while (Serial.available()) Serial.read(); // drain stale bytes
     resetFrameReader();
+    companionClearTxLink(); // a prior session may have torn a frame; start this one frame-aligned
+    companionApplyTxTimeout(true); // bound each Serial.write's driver block for the duration of the link
     diagNoteSession();
     muteNonSerialOutput(true); // stdout flushed through the old writer before the link turns framed
     companionClaimSerialDevice(true); // CLI console (serialDevice): no input, no output from here
@@ -299,6 +309,11 @@ static void runCompanionUSB(bool headless) {
     while (true) {
         serviceCompanionStorage();
         if (leaveForRemote) break;
+        // A frame was torn mid-write (host stopped draining the port): the TX stream is desynced and
+        // cannot be resynced in place, so leave companion mode. The teardown below drains and releases
+        // the link; the app sees the drop and reconnects onto a fresh, frame-aligned session. The
+        // tx_torn diag counter (persisted across sessions) records why.
+        if (companionTxLinkBroken()) break;
         if (!helloSeen) {
             if (check(EscPress)) break; // not locked yet: a single ESC leaves
         } else {
@@ -488,6 +503,7 @@ static void runCompanionUSB(bool headless) {
                         } else if (strcmp(stream, "mic.spectrum") == 0) {
 #ifdef COMPANION_HAS_MIC
                             if (on) speakerPlayRelease("superseded"); // mic shares the I2S peripherals
+                            if (on) fmAudioRelease(true); // an FM mic source reads the same mic
                             if (on) micStart();
                             else micStop();
                             sendAck(id, true);
@@ -497,6 +513,7 @@ static void runCompanionUSB(bool headless) {
                         } else if (strcmp(stream, "mic.pcm") == 0) {
 #ifdef COMPANION_HAS_MIC
                             if (on) speakerPlayRelease("superseded"); // mic shares the I2S peripherals
+                            if (on) fmAudioRelease(true); // an FM mic source reads the same mic
                             if (on) micPcmStart();
                             else micPcmStop();
                             sendAck(id, true);
@@ -608,6 +625,7 @@ static void runCompanionUSB(bool headless) {
     stopCompanionNetwork();
     stopCompanionBluetoothControls();
     companionRestoreOutputs(); // leaving companion mode: screen/LED back on
+    companionApplyTxTimeout(false); // restore the core default tx timeout for the normal console
     muteNonSerialOutput(false); // before clearing the flag, so buffered stdout is dropped, not sent
     companionClaimSerialDevice(false); // Bruce's console device back (USBserial, or BLE API's)
     g_companionActive = false;  // Serial is a normal console again

@@ -62,6 +62,17 @@ class SessionReportTest {
         assertFalse(md.contains("## NRF24"))
     }
 
+    @Test fun recoveredWifiKeyIsShownInPlaintext() {
+        // DT01 (authorized decision): a recovered key is kept unmasked in the report. This test pins
+        // that decision so a future change that masks it is caught deliberately.
+        val d = sample().copy(crackResult = "hunter2-correcthorse")
+        val md = SessionReport.markdown(d, vendorOf)
+        assertTrue(md.contains("## Handshakes / PMKID"))
+        assertTrue("key not shown verbatim", md.contains("Crack result: hunter2-correcthorse"))
+        assertFalse("key must not be masked", md.contains("****"))
+        assertTrue(SessionReport.insights(d, vendorOf).any { it.contains("A Wi-Fi key was recovered") })
+    }
+
     @Test fun insightsAreHeuristicAndCoverKeyAngles() {
         val ins = SessionReport.insights(sample(), vendorOf)
         assertTrue(ins.any { it.contains("1 open, 0 WEP, 1 WPA2, 1 WPA3") })

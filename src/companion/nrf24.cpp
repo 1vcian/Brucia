@@ -56,8 +56,15 @@ static void runNrf24Scan(int secs, uint32_t id) {
     static const int NRF_CH = 80;
     uint8_t level[NRF_CH] = {0};
     uint32_t endT = millis() + (uint32_t)secs * 1000;
+    bool stopped = false;
     while ((int32_t)(millis() - endT) < 0) {
         if (check(EscPress)) break;
+        // The app's Stop sends `nrf24_stop`/`stop`; without this poll it only took effect at the
+        // end of the window. Once per sweep (~80 short dwells) keeps the stop prompt.
+        if (companionPollStop()) {
+            stopped = true;
+            break;
+        }
         for (int ch = 0; ch < NRF_CH; ch++) {
             NRFradio.setChannel(ch);
             NRFradio.startListening();
@@ -78,7 +85,7 @@ static void runNrf24Scan(int secs, uint32_t id) {
     }
     NRFradio.stopListening();
     NRFradio.powerDown();
-    companionAckMsg(id, true, "nrf24 scan done");
+    companionAckMsg(id, true, stopped ? "nrf24 scan done (stopped)" : "nrf24 scan done");
 }
 
 // CRC16-CCITT over an ESB frame - ported verbatim from nrf_mousejack.cpp mj_crcUpdate().
@@ -155,10 +162,15 @@ static void runNrf24Sniff(int secs, uint32_t id) {
     NRFradio.flush_tx();
 
     uint32_t endT = millis() + (uint32_t)secs * 1000;
-    while ((int32_t)(millis() - endT) < 0) {
+    bool stopped = false;
+    while (!stopped && (int32_t)(millis() - endT) < 0) {
         if (check(EscPress)) break;
         for (uint8_t ch = 2; ch <= 84; ch++) { // ESB channel range
             if (check(EscPress) || (int32_t)(millis() - endT) >= 0) break;
+            if (companionPollStop()) { // app Stop: end now, not at the window's end
+                stopped = true;
+                break;
+            }
             NRFradio.setChannel(ch);
             NRFradio.startListening();
             for (int tries = 0; tries < 6; tries++) {
@@ -179,13 +191,13 @@ static void runNrf24Sniff(int secs, uint32_t id) {
     }
     NRFradio.stopListening();
     NRFradio.powerDown();
-    companionAckMsg(id, true, "nrf24 sniff done");
+    companionAckMsg(id, true, stopped ? "nrf24 sniff done (stopped)" : "nrf24 sniff done");
 }
 
 // nrf24_jammer <secs>: bounded 2.4GHz NRF24 jammer. AUTHORIZED / LAB USE ONLY - this is
 // an active transmitter that disrupts the 2.4GHz band (BLE, Wi-Fi, Zigbee, proprietary
 // ESB). Only run where you are authorized to. Reuses Bruce's const-carrier jammer via the
-// headless wrapper nrf_jammer_headless(); secs is clamped 1..30 and EscPress aborts.
+// headless wrapper nrf_jammer_headless(); secs is clamped 1..30; EscPress or the app stop aborts.
 static void runNrf24Jammer(int secs, uint32_t id) {
     if (!companionNrf24Present()) {
         companionAckMsg(id, false, "no NRF24 module");
@@ -193,13 +205,14 @@ static void runNrf24Jammer(int secs, uint32_t id) {
     }
     if (secs < 1) secs = 5;
     if (secs > 30) secs = 30;
-    int ran = nrf_jammer_headless(secs);
+    bool stopped = false;
+    int ran = nrf_jammer_headless(secs, [&stopped]() { return stopped = stopped || companionPollStop(); });
     if (ran < 0) {
         companionAckMsg(id, false, "NRF24 init failed");
         return;
     }
     char buf[32];
-    snprintf(buf, sizeof(buf), "nrf24 jammed %ds", ran);
+    snprintf(buf, sizeof(buf), stopped ? "nrf24 jammed %ds (stopped)" : "nrf24 jammed %ds", ran);
     companionAckMsg(id, true, buf);
 }
 
@@ -236,11 +249,14 @@ static void runNrf24Mousejack(int secs, const String &injectText, uint32_t id) {
     String txt = injectText;
     txt.trim();
     bool injected = false;
+    bool stopped = false;
     int n = nrf_mousejack_headless(
-        secs, txt.length() ? txt.c_str() : nullptr, companionMjOnTarget, nullptr, &injected
+        secs, txt.length() ? txt.c_str() : nullptr, companionMjOnTarget, nullptr, &injected,
+        [&stopped]() { return stopped = stopped || companionPollStop(); }
     );
     char buf[64];
-    if (injected) snprintf(buf, sizeof(buf), "nrf24 mousejack: %d device(s), injected", n);
+    if (stopped) snprintf(buf, sizeof(buf), "nrf24 mousejack: %d device(s), stopped", n);
+    else if (injected) snprintf(buf, sizeof(buf), "nrf24 mousejack: %d device(s), injected", n);
     else if (txt.length())
         snprintf(buf, sizeof(buf), "nrf24 mousejack: %d device(s), none vulnerable to inject", n);
     else snprintf(buf, sizeof(buf), "nrf24 mousejack: %d device(s) found", n);
@@ -263,6 +279,13 @@ bool dispatchNrf24Command(const CommandRequest &request) {
     const String &cmdStr = request.command;
     const uint32_t id = request.id;
     do {
+
+        // Idle stop guard: while an nrf24_* window runs its stop is consumed by companionPollStop
+        // inside the loop; one reaching an idle device (window already over) must not reach the CLI.
+        if (cmdStr == "nrf24_stop") {
+            companionAckMsg(id, true, "not running");
+            break;
+        }
 
         // Brucia: NRF24 (2.4GHz) features. Guarded so boards without the nRF24
         // wiring still link (reply "no NRF24 module"); a runtime probe also gates

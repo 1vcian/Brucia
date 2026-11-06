@@ -38,7 +38,7 @@ GROUP_REJECTIONS = {"ble_hid_": '"unknown ble_hid_ command"', "fs_upload_": '"un
 GROUP_HELPERS = {"uploadCommand(cmdStr": ("storage.cpp", r"bool uploadCommand\(const String &cmd, uint32_t id\)")}
 # Idle-stop guards added in batches 17/18; each must exist and only answer "not running".
 IDLE_STOPS = ("responder_stop", "karma_stop", "brucegotchi_stop", "jam_detect_stop", "ir_jammer_stop",
-              "ble_ibeacon_stop")
+              "ble_ibeacon_stop", "nrf24_stop", "ir_power_spam_stop")
 JUNK_SUFFIXES = ("_stop", "_zz", "_end", "_x 5")
 
 
@@ -301,8 +301,8 @@ class CompanionDispatchStopsTest(unittest.TestCase):
         self.assertTrue(any("'karma_zz' lands in" in p for p in found), found)
 
     def test_mutation_lite_ir(self):
-        found = self._mutant("infrared.cpp", 'cmdStr == "ir_jammer" || cmdStr.startsWith("ir_jammer ")) {\n        sendErr',
-                             'cmdStr.startsWith("ir_jammer")) {\n        sendErr', variant="lite")
+        found = self._mutant("infrared.cpp", 'cmdStr == "ir_jammer" || cmdStr.startsWith("ir_jammer ") ||',
+                             'cmdStr.startsWith("ir_jammer") ||', variant="lite")
         self.assertTrue(any("'ir_jammer_zz' lands in" in p for p in found), found)
 
     def test_mutation_group_rejection(self):

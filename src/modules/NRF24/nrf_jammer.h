@@ -2,6 +2,7 @@
 #define __NRF_JAMMER_H
 #include "modules/NRF24/nrf_common.h"
 #include <RF24.h>
+#include <functional>
 
 /*
 Credits: @smoochiee https://github.com/smoochiee/Ble-jammer
@@ -27,7 +28,8 @@ void nrf_jammer();
 // Headless, bounded 2.4GHz jammer for the Brucia companion (no TFT, no on-device menu).
 // AUTHORIZED / LAB USE ONLY. Reuses the same constant-carrier technique as nrf_jammer()
 // (RF24 const carrier at max PA, hopping across the 2.4GHz band) but bounded to `secs`
-// seconds (clamped 1..30) and abortable with EscPress. Returns the number of seconds
-// actually run, or -1 if the nRF24 radio could not be started.
-int nrf_jammer_headless(int secs);
+// seconds (clamped 1..30) and abortable with EscPress or [shouldAbort] (the companion's stop
+// poll; may be empty). Returns the number of seconds actually run, or -1 if the nRF24 radio
+// could not be started.
+int nrf_jammer_headless(int secs, std::function<bool()> shouldAbort = nullptr);
 #endif

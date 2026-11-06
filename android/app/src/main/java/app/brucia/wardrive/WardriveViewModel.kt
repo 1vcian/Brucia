@@ -30,6 +30,7 @@ import app.brucia.protocol.CommandCapabilities
 import app.brucia.protocol.LinkCounters
 import app.brucia.protocol.LinkCountersSnapshot
 import app.brucia.session.StreamSubscriptions
+import app.brucia.session.StopAllSequence
 import app.brucia.session.ServiceLifecycle
 import app.brucia.session.ServiceLifecycle.Entry
 import app.brucia.session.CommandSession
@@ -75,6 +76,7 @@ import app.brucia.audio.PcmStreamSpec
 import app.brucia.audio.PcmStreamSource
 import app.brucia.audio.SessionPcmLink
 import app.brucia.device.ClockService
+import app.brucia.device.CliParse
 import app.brucia.device.DiagnosticsService
 import app.brucia.device.DeviceAppearanceService
 import app.brucia.device.DeviceOutputs
@@ -83,6 +85,7 @@ import app.brucia.device.ScriptService
 import app.brucia.ibutton.IButtonService
 import app.brucia.ir.IrReceiveService
 import app.brucia.ir.TvBGoneService
+import app.brucia.ir.IrPowerSpamService
 import app.brucia.lora.LoraService
 import app.brucia.monitor.JamDetectService
 import app.brucia.monitor.WidsService
@@ -176,6 +179,10 @@ const val DEFAULT_SPAM_COPIES = 10
 // 8s keeps the op abortable (<=8s to Stop) while cutting that churn ~4x. The proper fix (keep the
 // radio up / run the op in a device-side task) is a firmware change tracked separately.
 private const val SPAM_BURST_SECS = 8
+/** Polled by every nrf24_* window on the device (src/companion/nrf24.cpp); idle it answers "not running". */
+private const val NRF24_STOP = "nrf24_stop"
+/** Refusal for framed commands while Remote control owns USB (F25). */
+private const val REMOTE_OWNS_LINK = "Remote control owns the device: stop Remote first."
 
 // Command log: how many of the most recent commands to retain (newest-first), and the
 // max length of a stored result string before it is truncated for display.
@@ -530,7 +537,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val fileReader = DeviceFileReader()
     private val fileTransferMutex = Mutex()
     private val subscriptions by lazy {
-        StreamSubscriptions(viewModelScope, { session }, { _device.value?.caps },
+        // No session while Remote owns USB: a SUB frame would reach the raw CLI unanswered.
+        StreamSubscriptions(viewModelScope, { session.takeUnless { remoteOwnsLink } }, { _device.value?.caps },
             onState = ::updateStreamState,
             onChanged = ::refreshConnectionNotification,
             onError = { stream, message ->
@@ -613,6 +621,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         linkCounters.noteLink()
         client = c
         session = app.brucia.session.CommandSession(c, t, preflight = { command ->
+            check(!remoteOwnsLink) { REMOTE_OWNS_LINK }
             CommandCapabilities.check(command, _device.value?.caps, _device.value?.features)
         }, onCallbackError = { e -> app.brucia.BruciaLog.w("VM", "disconnect callback", e) })
         lastPongAt = companionNowMs()
@@ -680,6 +689,19 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                         app.brucia.BruciaLog.w("VM", "invalid companion message", error)
                     }
                 }
+                // The device echoed our frames on its serial CLI: it left companion mode while USB
+                // stayed open, so no framed reply can come. Fail any pending command NOW (otherwise it
+                // would wait out its timeout - up to 650 s), and drop to re-negotiation, which the nudge
+                // below drives. The transport is NOT closed: the same session re-enters companion.
+                if (c.takeCliLeftCompanion()) {
+                    session?.failPending("The device left companion mode (reconnecting).")
+                    if (_device.value != null) {
+                        _device.value = null
+                        _status.value = "Reconnecting (device left companion)..."
+                        withContext(Dispatchers.Main) { stopAllBurstLoops(silent = true) }
+                    }
+                    helloDeadline = companionNowMs() // nudge companion again right away
+                }
                 if (_device.value == null && companionNowMs() > helloDeadline) {
                     // Raw bytes, NOT a framed message: the plain-text CLI reads this line.
                     try { transport?.write("companion\n".toByteArray(Charsets.US_ASCII)) } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "companion-mode nudge write", e) }
@@ -735,6 +757,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     private val _remoteRunning = MutableStateFlow(false)
     val remoteRunning: StateFlow<Boolean> = _remoteRunning.asStateFlow()
     fun remoteBitmap(): android.graphics.Bitmap? = remote?.renderer?.bitmap
+    /**
+     * True from just before `companion_exit` until [stopRemote]: the raw mirror owns USB, so every
+     * framed path (command preflight, direct stops, SUBs) refuses instead of writing frames the
+     * device's CLI would read as text and that no reader would answer.
+     */
+    @Volatile private var remoteOwnsLink = false
+    /** Set by [stopRemote] until the companion handshake (CAPS) is back; the global Stop waits on it. */
+    @Volatile private var remoteHandback = false
     // Mirror watchdog state: last time we saw any raw bytes vs. a decoded TFT frame.
     @Volatile private var lastRemoteByteAt = 0L
     @Volatile private var lastRemoteFrameAt = 0L
@@ -751,6 +781,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             },
             RemoteHandover.Step("script", { script.busy.value }) { script.stopForHandover(reason) },
             RemoteHandover.Step("file transfer", { fileTransfers.active }) { fileTransfers.cancelAllAndJoin() },
+            RemoteHandover.Step("De Bruijn sweep", { deBruijnTx.active.value }) {
+                deBruijnTx.stop("De Bruijn sweep stopped: Remote control took over the device; no further bursts will be sent, but a burst already sent may still be transmitting.")
+            },
             RemoteHandover.Step("burst loops", { burstLoops.anyActive }) {
                 withContext(Dispatchers.Main) { stopAllBurstLoops(silent = false) }
             },
@@ -775,6 +808,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             // the screen is black, and the app-lock would still be on. Ask it to leave first, then
             // (after it returns to the normal UI and resumes the serial task) start the mirror. On
             // stopRemote we re-enter companion mode, which re-applies the lock.
+            remoteOwnsLink = true
             try { client?.cmd("companion_exit") } catch (e: Exception) { app.brucia.BruciaLog.d("Remote", "companion_exit send: ${e.message}") }
             readJob?.cancel(); pingJob?.cancel() // remote is exclusive with the companion loop
             val rc = app.brucia.remote.RemoteController(t)
@@ -824,9 +858,17 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         remoteJob?.cancel(); remoteJob = null
         remote = null
         _remoteRunning.value = false
+        remoteOwnsLink = false
         // Remote was exclusive with the companion loops (startRemote cancelled them);
-        // bring companion mode back so wardrive/console/pings/file pulls work again.
-        if (transport?.isOpen == true) startCompanionLoops()
+        // bring companion mode back so wardrive/console/pings/file pulls work again. The device is
+        // at its CLI until it re-enters companion mode: drop the stale handshake so the read loop
+        // nudges it at once and "Connected" means the link answers frames again.
+        if (transport?.isOpen == true) {
+            remoteHandback = true
+            _device.value = null
+            _status.value = "Connecting..."
+            startCompanionLoops()
+        }
     }
 
     // --- Command log ---------------------------------------------------------------------
@@ -1037,6 +1079,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 app.brucia.BruciaLog.i("Caps", provenance)
                 _deviceDiag.value = Diagnostics.afterCaps(info, _deviceDiag.value)
                 // Handshake complete: only now is the link truly "Connected".
+                remoteHandback = false
                 lastPongAt = companionNowMs()
                 _status.value = "Connected"
                 refreshConnectionNotification()
@@ -1917,7 +1960,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // --- Sub-GHz capture / replay via the CLI (device decodes; phone stores) ---
     fun rfCapture(freqHz: Long = 433_920_000L) { echoConsole("rf rx $freqHz"); rfReceive.capture(freqHz) }
 
-    fun replaySaved(item: SavedItem) = replayPayload(item.payload)
+    /** Replay a saved item; an RF item whose `rf tx` cannot reproduce its capture is refused (old saves). */
+    fun replaySaved(item: SavedItem) {
+        if (item.payload.startsWith("rf tx") && !CliParse.rfPayloadReplayable(item.payload, item.subtitle)) {
+            _console.value = (_console.value + "Not replayed: \"${item.name}\": ${GeoReplayService.NOT_REPRODUCIBLE}").takeLast(500)
+            return
+        }
+        replayPayload(item.payload)
+    }
 
     /**
      * The one replay path for stored payloads (saved items and geo-signals pinned from them).
@@ -1989,18 +2039,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Write the captured frames to a real pcap (linktype 105, IEEE 802.11) in the app's
-     * external files dir, or null if nothing has been captured. Open it in Wireshark and add
+     * external files dir, or null if nothing has been captured; a storage failure throws IOException. Open it in Wireshark and add
      * the network PSK as a "wpa-pwd" decryption key to view decrypted payloads.
      */
     fun exportMonitorPcap(): java.io.File? {
         val snapshot = _monitorFrames.value
         if (snapshot.isEmpty()) return null
-        val dir = getApplication<Application>().getExternalFilesDir(null)
-        val file = java.io.File(dir, "brucia_monitor_${System.currentTimeMillis()}.pcap")
-        file.outputStream().use { os ->
+        val dir = app.brucia.report.ExportFiles.dir(getApplication())
+        return app.brucia.report.ExportFiles.writeNamed(dir, "brucia_monitor_${System.currentTimeMillis()}.pcap") { os ->
             PcapWriter.write(os, snapshot.map { it.tsMicros to it.raw })
         }
-        return file
     }
 
     /**
@@ -2017,9 +2065,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setWardriving(on: Boolean) {
-        setStream("wifi.ap", on)
-    }
+    /** Start/stop the shared wifi.ap scan; false when the request was rejected (not connected, no caps). */
+    fun setWardriving(on: Boolean): Boolean = setStream("wifi.ap", on)
 
     fun setSubghz(on: Boolean) {
         setSubghzStream("subghz.raw", on)
@@ -2056,14 +2103,11 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Write the captured rows to a CSV in the app's external files dir and return the file,
-     * or null if nothing has been captured yet.
+     * or null if nothing has been captured yet; a storage failure throws IOException.
      */
     fun exportRfCsv(): java.io.File? {
         val snapshot = synchronized(rfCaptureRows) { if (rfCaptureRows.isEmpty()) return null; rfCaptureRows.toList() }
-        val dir = getApplication<Application>().getExternalFilesDir(null)
-        val file = java.io.File(dir, "brucia_subghz_${System.currentTimeMillis()}.csv")
-        file.writeText(RfCaptureCsv.build(snapshot))
-        return file
+        return exportFile("brucia_subghz_${System.currentTimeMillis()}.csv", RfCaptureCsv.build(snapshot))
     }
 
     fun setBleScan(on: Boolean) {
@@ -2134,10 +2178,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             sb.append(s.mac).append(',').append(s.bssid).append(',').append(s.rssi).append(',')
                 .append(s.ch).append(',').append(s.count).append(',').append(s.lastSeen).append('\n')
         }
-        val dir = getApplication<Application>().getExternalFilesDir(null)
-        val file = java.io.File(dir, "brucia_stations_${System.currentTimeMillis()}.csv")
-        file.writeText(sb.toString())
-        return file
+        return exportFile("brucia_stations_${System.currentTimeMillis()}.csv", sb.toString())
     }
 
     fun clearBle() {
@@ -2209,10 +2250,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             sb.append(p.mac).append(',').append(ssid).append(',').append(p.rssi).append(',')
                 .append(p.count).append(',').append(p.lastSeen).append('\n')
         }
-        val dir = getApplication<Application>().getExternalFilesDir(null)
-        val file = java.io.File(dir, "brucia_probes_${System.currentTimeMillis()}.csv")
-        file.writeText(sb.toString())
-        return file
+        return exportFile("brucia_probes_${System.currentTimeMillis()}.csv", sb.toString())
     }
 
     /** Google Fast Pair (Android) popups; delegates to [startBleSpam] ("android"). */
@@ -2239,8 +2277,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // Scan and sniff are two loops sharing the _nrf24Status line.
-    private val nrf24ScanLoop by lazy { burstLoop(_nrf24Status) }
-    private val nrf24SniffLoop by lazy { burstLoop(_nrf24Status) }
+    private val nrf24ScanLoop by lazy { burstLoop(_nrf24Status, NRF24_STOP) }
+    private val nrf24SniffLoop by lazy { burstLoop(_nrf24Status, NRF24_STOP) }
     val nrf24Scanning: StateFlow<Boolean> get() = nrf24ScanLoop.active
     val nrf24Sniffing: StateFlow<Boolean> get() = nrf24SniffLoop.active
     private val _nrf24Status = MutableStateFlow("")
@@ -2248,11 +2286,11 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     // Jammer and MouseJack each run for a fixed window and ACK on completion; their status
     // lines are separate so the two cards never clobber each other.
-    private val nrf24JammerLoop by lazy { burstLoop(_nrf24JammerStatus) }
+    private val nrf24JammerLoop by lazy { burstLoop(_nrf24JammerStatus, NRF24_STOP) }
     val nrf24Jamming: StateFlow<Boolean> get() = nrf24JammerLoop.active
     private val _nrf24JammerStatus = MutableStateFlow("")
     val nrf24JammerStatus: StateFlow<String> = _nrf24JammerStatus.asStateFlow()
-    private val nrf24MjLoop by lazy { burstLoop(_nrf24MjStatus) }
+    private val nrf24MjLoop by lazy { burstLoop(_nrf24MjStatus, NRF24_STOP) }
     val nrf24MjRunning: StateFlow<Boolean> get() = nrf24MjLoop.active
     private val _nrf24MjStatus = MutableStateFlow("")
     val nrf24MjStatus: StateFlow<String> = _nrf24MjStatus.asStateFlow()
@@ -2273,7 +2311,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         if (client == null) { _nrf24Status.value = "Connect the device over USB first."; return }
         if (_micPcmActive.value) stopMicPcm()
         _nrf24Channels.value = emptyMap()
-        nrf24ScanLoop.start("Scanning 2.4GHz... (Stop to end)", { "nrf24_scan $SPAM_BURST_SECS" }, burstTimeoutMs, "Scan stopped.")
+        // One nrf24 window at a time: the device answers a second one "busy" while it polls the first.
+        nrf24SniffLoop.stop(silent = true)
+        nrf24ScanLoop.start("Scanning 2.4GHz... (Stop to end)", { "nrf24_scan $SPAM_BURST_SECS" }, burstTimeoutMs, "Scan stopped.",
+            after = nrf24SniffLoop.pendingDrain)
     }
 
     fun stopNrf24Scan(silent: Boolean = false) = nrf24ScanLoop.stop(silent)
@@ -2287,7 +2328,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     fun startNrf24Sniff(seconds: Int = 20) {
         if (client == null) { _nrf24Status.value = "Connect the device over USB first."; return }
         if (_micPcmActive.value) stopMicPcm()
-        nrf24SniffLoop.start("Sniffing ESB devices... (Stop to end)", { "nrf24_sniff $SPAM_BURST_SECS" }, burstTimeoutMs, "Sniff stopped.")
+        nrf24ScanLoop.stop(silent = true) // one nrf24 window at a time (see startNrf24Scan)
+        nrf24SniffLoop.start("Sniffing ESB devices... (Stop to end)", { "nrf24_sniff $SPAM_BURST_SECS" }, burstTimeoutMs, "Sniff stopped.",
+            after = nrf24ScanLoop.pendingDrain)
     }
 
     fun stopNrf24Sniff(silent: Boolean = false) = nrf24SniffLoop.stop(silent)
@@ -2567,17 +2610,40 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         if (wids.active.value) wids.stop() // WIDS is a monitor loop, not a BurstLoop
     }
 
-    /** Stop local work; firmware stop requests keep their real ACK/result in the command log. */
+    /**
+     * Stop local work at once; device stops go out through [stopAllSequence]: a blocking operation
+     * (or Remote) ends first, then every service's stop and the SUB OFFs. Firmware stop requests
+     * keep their real ACK/result in the command log.
+     */
     fun stopAllRunning() {
-        deviceLifecycle.stopAll()
         dictionaryTest.cancel()
         stopTimeline()
         stopDtmfDecode()
         stopPhoneMic()
         pauseRecording()
         stopRfCapture()
-        // Use the normal SUB ownership path: stale pending starts cannot re-enable a stream.
-        subscriptions.stopAll()
+        stopAllSequence.run(viewModelScope) {
+            deviceLifecycle.stopAll()
+            // Use the normal SUB ownership path: stale pending starts cannot re-enable a stream.
+            subscriptions.stopAll()
+        }
+    }
+
+    /** First phase of the global Stop: each entry's own stop keeps waiting for the operation's reply. */
+    private val stopAllSequence by lazy {
+        StopAllSequence(listOf(
+            StopAllSequence.Blocking("remote", { _remoteRunning.value || remoteHandback }) { if (_remoteRunning.value) stopRemote() },
+            StopAllSequence.Blocking("lora", { lora.receiving.value }) { lora.requestStopReceive() },
+            StopAllSequence.Blocking("jam-detect", { jamDetector.busy.value }) { jamDetector.requestStop() },
+            StopAllSequence.Blocking("ir-power-spam", { irPowerSpam.busy.value }) { irPowerSpam.requestStop() },
+            StopAllSequence.Blocking("nrf24", { nrf24Loops.any { it.active.value || it.draining.value } }) {
+                nrf24Loops.forEach { it.stop() }
+            },
+            StopAllSequence.Blocking("script", { script.busy.value }) { script.stop() },
+            StopAllSequence.Blocking("responder", { responder.running.value }) { responder.stop() },
+            StopAllSequence.Blocking("karma", { karma.running.value }) { karma.stop() },
+            StopAllSequence.Blocking("brucegotchi", { brucegotchi.running.value }) { brucegotchi.stop() },
+        )) { name, error -> BruciaLog.w("Cleanup", name, error) }
     }
 
     // --- Device panel (info / diagnostics / power) ---
@@ -2657,11 +2723,12 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             wave.isNotEmpty() -> SubFile.fromRawAbs(wave, freqHz)
             else -> return null
         }
-        val dir = getApplication<Application>().getExternalFilesDir(null)
-        val file = java.io.File(dir, "brucia_subghz_${System.currentTimeMillis()}.sub")
-        file.writeText(SubFile.generate(sub))
-        return file
+        return exportFile("brucia_subghz_${System.currentTimeMillis()}.sub", SubFile.generate(sub))
     }
+
+    /** Write an export file; any storage failure is an IOException for the UI to show (see ExportFiles). */
+    private fun exportFile(name: String, text: String): java.io.File =
+        app.brucia.report.ExportFiles.writeNamed(app.brucia.report.ExportFiles.dir(getApplication()), name, text)
 
     fun clearSession() {
         viewModelScope.launch(Dispatchers.IO) { dao.clear() }
@@ -2926,12 +2993,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
      * right after: the flash then replaces the link's notification and wake lock without a gap.
      */
     private fun disconnectLink(stopService: Boolean) {
+        stopAllSequence.cancel()
         deviceLifecycle.disconnect()
         // Remote mode owns independent readers; never let them consume a replacement transport.
         remoteWatchdogJob?.cancel(); remoteWatchdogJob = null
         remoteJob?.cancel(); remoteJob = null
         remote = null
         _remoteRunning.value = false
+        remoteOwnsLink = false
+        remoteHandback = false
         stopTimeline()
         dtmfJob?.cancel()
         dtmfJob = null
@@ -3362,6 +3432,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             Entry("nfc", { nfcTools.stopAll() }),
             Entry("ir-receive", { irRx.stopReceive(); irRx.stopCapture(); irRx.stopLearn() }),
             Entry("tvbgone", { tvbGone.stop() }),
+            Entry("ir-power-spam", { irPowerSpam.stop() }),
             Entry("ble-hid", { bleHid.stop(); bleHid.end() }, { bleHid.stop() }),
             Entry("badble", { badBle.stop() }),
             Entry("ble-media", { bleMediaService.stop() }),
@@ -3388,10 +3459,15 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     // Bounded monitors (lazy: built on first use, after commandRunner).
     private val subBrute by lazy { SubGhzBruteforceService(viewModelScope, commandRunner, isConnected = { session != null }) }
-    private val jamDetector by lazy { JamDetectService(viewModelScope, commandRunner, isConnected = { session != null }) }
+    private val jamDetector by lazy {
+        JamDetectService(viewModelScope, commandRunner, isConnected = { session != null }, stopRunner = directStop)
+    }
     private val wids by lazy { WidsService(viewModelScope, commandRunner, isConnected = { session != null }, linkOpen = { transport?.isOpen == true }) }
-    private fun burstLoop(line: MutableStateFlow<String> = MutableStateFlow("")) =
-        BurstLoop(viewModelScope, commandRunner, { transport?.isOpen == true }, burstLoops, line)
+    private fun burstLoop(line: MutableStateFlow<String> = MutableStateFlow(""), stopCmd: String? = null) =
+        BurstLoop(viewModelScope, commandRunner, { transport?.isOpen == true }, burstLoops, line,
+            stopCmd = stopCmd, stopRunner = if (stopCmd != null) directStop else null)
+    /** NRF24 bursts poll `nrf24_stop` on the device, so Stop ends the window instead of waiting it out. */
+    private val nrf24Loops get() = listOf(nrf24ScanLoop, nrf24SniffLoop, nrf24JammerLoop, nrf24MjLoop)
 
     // LoRa and Ethernet (optional modules; replies carry structured data, hence jsonRunner).
     // The receive stop is polled by the firmware and never ACKed: send it directly (a lambda,
@@ -3449,6 +3525,13 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val remoteCapture: StateFlow<String> = irRx.captureStatus
     private val tvbGone = TvBGoneService(viewModelScope, commandRunner, isConnected = { session != null })
     val irTvBGoneStatus: StateFlow<String> = tvbGone.status
+    // IR power spam: all power tables (both regions + universal), repeating, polled stop.
+    private val irPowerSpam by lazy { IrPowerSpamService(viewModelScope, commandRunner, isConnected = { session != null }, stopRunner = directStop) }
+    val irPowerSpamStatus: StateFlow<String> get() = irPowerSpam.status
+    val irPowerSpamBusy: StateFlow<Boolean> get() = irPowerSpam.busy
+    /** Blast every power table repeatedly for [secs] (Stop to end early). Authorized use only. */
+    fun irPowerSpamStart(secs: Int = IrPowerSpamService.DEFAULT_SECS) = irPowerSpam.run(secs)
+    fun irPowerSpamStop() = irPowerSpam.requestStop()
 
     // BLE HID / BadBLE / media control (authorized use; see the ble/ services).
     private val bleHid = BleHidService(viewModelScope, commandRunner, isConnected = { session != null })
@@ -3615,6 +3698,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 if (client === captured && captured != null) {
                     // Same preflight as the session (stops are always permitted on an open link).
+                    check(!remoteOwnsLink) { REMOTE_OWNS_LINK }
                     CommandCapabilities.check(cmd, _device.value?.caps, _device.value?.features)
                     captured.cmd(cmd)
                 }

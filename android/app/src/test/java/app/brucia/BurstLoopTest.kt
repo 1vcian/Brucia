@@ -187,4 +187,67 @@ class BurstLoopTest {
         delay(20)
         assertEquals(1, ends)
     }
+
+    /** A2: Stop mid-burst sends the polled stop and keeps the wait until the device answers. */
+    @Test(timeout = 5_000) fun stopWithStopCmdSendsItAndDrainsTheBurst() = runVirtual {
+        val stopsSent = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val l = BurstLoop(this, runner, { linkOpen }, registry, stopCmd = "nrf24_stop",
+            stopRunner = { cmd, _ -> stopsSent += cmd; true to "" })
+        l.start("Scanning", { "nrf24_scan 8" }, 12_000, "Scan stopped.")
+        until { runner.calls.size == 1 }
+        l.stop()
+        until { stopsSent.isNotEmpty() }
+        assertEquals(listOf("nrf24_stop"), stopsSent)
+        assertEquals("Scan stopped." to false, l.state())
+        assertTrue(l.draining.value)
+        runner.reply(0, true, "nrf24 scan done (stopped)")
+        until { !l.draining.value }
+        settle()
+        assertEquals(1, runner.calls.size) // no further burst after the drained reply
+        assertEquals("Scan stopped." to false, l.state())
+    }
+
+    @Test(timeout = 5_000) fun restartWaitsForTheDrainedBurstAndOldRunNeverContinues() = runVirtual {
+        val l = BurstLoop(this, runner, { linkOpen }, registry, stopCmd = "nrf24_stop", stopRunner = { _, _ -> true to "" })
+        l.start("A", { "nrf24_scan 8" }, 12_000)
+        until { runner.calls.size == 1 }
+        l.stop()
+        l.start("B", { "nrf24_sniff 8" }, 12_000)
+        settle()
+        assertEquals(1, runner.calls.size) // B waits: the device would answer it "busy"
+        runner.reply(0, true, "nrf24 scan done (stopped)")
+        until { runner.calls.size == 2 }
+        assertEquals(listOf("nrf24_scan 8", "nrf24_sniff 8"), runner.cmds)
+        assertEquals("B" to true, l.state())
+        l.stop(); runner.reply(1, true, "")
+    }
+
+    @Test(timeout = 5_000) fun withoutABurstInFlightOrLinkStopCancelsAndSendsNothing() = runVirtual {
+        val stopsSent = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val l = BurstLoop(this, runner, { linkOpen }, registry, stopCmd = "nrf24_stop",
+            stopRunner = { cmd, _ -> stopsSent += cmd; true to "" })
+        l.stop() // idle
+        l.start("A", { "nrf24_scan 8" }, 12_000)
+        until { runner.calls.size == 1 }
+        linkOpen = false
+        l.stop() // link gone: plain cancel
+        settle()
+        assertTrue(stopsSent.isEmpty())
+        assertFalse(l.draining.value)
+    }
+
+    @Test(timeout = 5_000) fun aLoopStartedAfterAnotherWaitsForItsDrain() = runVirtual {
+        val scan = BurstLoop(this, runner, { linkOpen }, registry, stopCmd = "nrf24_stop", stopRunner = { _, _ -> true to "" })
+        val sniff = BurstLoop(this, runner, { linkOpen }, registry, stopCmd = "nrf24_stop", stopRunner = { _, _ -> true to "" })
+        scan.start("Scan", { "nrf24_scan 8" }, 12_000)
+        until { runner.calls.size == 1 }
+        scan.stop(silent = true)
+        sniff.start("Sniff", { "nrf24_sniff 8" }, 12_000, after = scan.pendingDrain)
+        settle()
+        assertEquals(1, runner.calls.size)
+        runner.reply(0, true, "nrf24 scan done (stopped)")
+        until { runner.calls.size == 2 }
+        assertEquals("nrf24_sniff 8", runner.cmds[1])
+        sniff.stop(); runner.reply(1, true, "")
+    }
 }

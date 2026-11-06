@@ -69,14 +69,14 @@ int main() {
     {   // one zero-initialized instance; note helpers bump exactly one counter
         DiagLinkCounters &a = diagLink();
         check(&a == &diagLink(), "single instance");
-        bool zero = a.sessions == 0 && a.rxFrames == 0 && a.txFrames == 0 && a.busy409 == 0;
+        bool zero = a.sessions == 0 && a.rxFrames == 0 && a.txFrames == 0 && a.txTorn == 0 && a.busy409 == 0;
         for (int k = 0; k < DIAG_RX_REJECT_KINDS; k++) zero = zero && a.rxRejected[k] == 0;
         for (int b = 0; b < DIAG_ERR_BUCKETS; b++) zero = zero && a.err[b] == 0;
         check(zero, "zero at boot");
-        diagNoteSession(); diagNoteRxFrame(); diagNoteRxFrame(); diagNoteTxFrame(); diagNoteBusy();
+        diagNoteSession(); diagNoteRxFrame(); diagNoteRxFrame(); diagNoteTxFrame(); diagNoteTxTorn(); diagNoteBusy();
         diagNoteRxReject(DIAG_RX_BAD_JSON); diagNoteRxReject(DIAG_RX_REJECT_KINDS); // invalid kind ignored
         diagNoteErr(409); diagNoteErr(409); diagNoteErr(503); diagNoteErr(7);
-        check(a.sessions == 1 && a.rxFrames == 2 && a.txFrames == 1 && a.busy409 == 1, "link counts");
+        check(a.sessions == 1 && a.rxFrames == 2 && a.txFrames == 1 && a.txTorn == 1 && a.busy409 == 1, "link counts");
         check(a.rxRejected[DIAG_RX_BAD_JSON] == 1 && a.rxRejected[DIAG_RX_OVERSIZE] == 0, "reject counts");
         check(a.err[DIAG_ERR_409] == 2 && a.err[DIAG_ERR_5XX] == 1 && a.err[DIAG_ERR_OTHER] == 1 &&
               a.err[DIAG_ERR_400] == 0, "err counts");
@@ -85,7 +85,7 @@ int main() {
         check(a.err[DIAG_ERR_400] == UINT32_MAX, "err bucket saturates");
         a.err[DIAG_ERR_400] = 0;
     }
-    check(sizeof(DiagLinkCounters) == 4 * (4 + DIAG_RX_REJECT_KINDS + DIAG_ERR_BUCKETS), "fixed size, no padding");
+    check(sizeof(DiagLinkCounters) == 4 * (5 + DIAG_RX_REJECT_KINDS + DIAG_ERR_BUCKETS), "fixed size, no padding");
     PrintSink sink;
     diagWriteLink(diagLink(), sink);
     std::printf("%d/%d checks passed\n", checks - failures, checks);
@@ -93,7 +93,7 @@ int main() {
 }
 '''
 
-LINK_KEYS = ["sessions", "rx_frames", "tx_frames", "rx_zero_len", "rx_oversize", "rx_alloc_fail",
+LINK_KEYS = ["sessions", "rx_frames", "tx_frames", "tx_torn", "rx_zero_len", "rx_oversize", "rx_alloc_fail",
              "rx_stale", "rx_bad_json", "busy_409"]
 ERR_KEYS = ["400", "404", "409", "413", "4xx", "5xx", "other"]
 
@@ -136,6 +136,9 @@ def source_checks():
     poll = comp[comp.index("bool companionPollStop"):comp.index("static void runCompanionUSB")]
     need("DIAG_RX_BAD_JSON" in poll and poll.index("diagNoteBusy()") < poll.index('sendErr(id, 409, "device busy")'),
          "companionPollStop counts bad JSON and busy 409")
+    sub = poll.find("if (t == MSG_SUB) {")
+    need(sub > 0 and "sendErr(id, 409, \"device busy\")" in poll[sub:sub + 400] and sub < poll.index("if (t != MSG_CMD)"),
+         "companionPollStop refuses a SUB with 409 instead of dropping it")
     loop = comp[comp.index("static void runCompanionUSB"):]
     need("diagNoteSession()" in loop and loop.index("DIAG_RX_BAD_JSON") < loop.index('"bad json"'),
          "service loop counts sessions and bad JSON")

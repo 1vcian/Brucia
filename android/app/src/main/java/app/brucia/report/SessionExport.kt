@@ -11,6 +11,8 @@ object SessionExport {
         root.put("tool", "Brucia")
         root.put("generatedAt", System.currentTimeMillis())
         root.put("bleDevices", bleCount)
+        // DT01 (decided 2026-11-06, authorized): a recovered Wi-Fi key is kept in plaintext here. This
+        // is a pentest/authorized-research artifact and the operator needs the actual key; do not mask.
         root.put("crackResult", crackResult ?: JSONObject.NULL)
         val arr = JSONArray()
         for (ap in aps) {

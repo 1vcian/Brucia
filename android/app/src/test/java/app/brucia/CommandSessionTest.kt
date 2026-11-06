@@ -37,6 +37,54 @@ private fun reply(kind: Int, id: Int, d: JSONObject) =
 
 private fun ack(id: Int, out: String) = reply(Kind.ACK, id, JSONObject().put("ok", true).put("out", out))
 
+/**
+ * 4-byte little-endian length prefix + the envelope bytes, exactly as the device frames it. Takes a
+ * raw string so the envelope begins with the `{"v":` prefix the decoder resyncs on (the firmware emits
+ * `v` first; org.json's key order is unspecified, so an assembled JSONObject can't be relied on here).
+ */
+private fun frameBytes(payload: String): ByteArray {
+    val p = payload.toByteArray(Charsets.UTF_8)
+    val out = ByteArray(4 + p.size)
+    out[0] = (p.size and 0xFF).toByte()
+    out[1] = ((p.size shr 8) and 0xFF).toByte()
+    out[2] = ((p.size shr 16) and 0xFF).toByte()
+    out[3] = ((p.size shr 24) and 0xFF).toByte()
+    p.copyInto(out, 4)
+    return out
+}
+
+/** A transport the test can feed inbound bytes to and drop; records outbound frames like the device link. */
+private class FeedableTransport : Transport {
+    override var isOpen = true
+    val outbound = ArrayList<JSONObject>()
+    private val inbound = ArrayDeque<Byte>()
+    override fun write(bytes: ByteArray) {
+        val len = (bytes[0].toInt() and 0xFF) or ((bytes[1].toInt() and 0xFF) shl 8) or
+            ((bytes[2].toInt() and 0xFF) shl 16) or ((bytes[3].toInt() and 0xFF) shl 24)
+        outbound += JSONObject(String(bytes, 4, len, Charsets.UTF_8))
+    }
+    fun feed(bytes: ByteArray) { for (b in bytes) inbound.addLast(b) }
+    override fun read(buf: ByteArray, timeoutMs: Int): Int {
+        var i = 0
+        while (i < buf.size && inbound.isNotEmpty()) buf[i++] = inbound.removeFirst()
+        return i
+    }
+    override fun close() { isOpen = false }
+}
+
+/**
+ * The essential read loop of [app.brucia.wardrive.WardriveViewModel]: drain complete frames into the
+ * session, and when the link has dropped close the session so pending commands fail (never hang).
+ */
+private fun pump(client: CompanionClient, session: CommandSession, transport: Transport) {
+    while (true) {
+        val m = client.readMessage(20)
+        if (m != null) { session.route(m); continue }
+        if (!transport.isOpen) { session.close("Disconnected"); break }
+        break
+    }
+}
+
 class CommandSessionTest {
     private val t = RecordingTransport()
     private val session = CommandSession(CompanionClient(t), t)
@@ -180,5 +228,95 @@ class CommandSessionTest {
         session.expect(402) { ok, out -> results += ok to out }
         session.subscribe("wifi.monitor", false, null, null, 402)
         assertEquals(listOf(false to "stall"), results)
+    }
+
+    /**
+     * The device left companion mode but USB stayed OPEN (backlog F23, point 2 - the real fault): after
+     * a torn frame the firmware drops the companion loop and returns to its serial CLI, which echoes our
+     * frames as "COMMAND:". `transport.isOpen` stays true, so without detection a pending command would
+     * wait out its timeout (up to 650 s). The decoder flags the CLI echo; the read loop fails the
+     * pending command AT ONCE (transport NOT closed), and the SAME session re-enters companion and
+     * serves a new command. No artificial transport.close().
+     */
+    @Test(timeout = 5_000) fun truncatedFrameThenCliEchoFailsPendingFastThenSameSessionRecovers() = runVirtual {
+        val link = FeedableTransport()
+        val client = CompanionClient(link)
+        val s = CommandSession(client, link)
+
+        // A command is dispatched and awaiting its ACK (a long device timeout, as real commands use).
+        val pending = async(start = CoroutineStart.UNDISPATCHED) { s.await("wifi_scan", 650_000) }
+        assertTrue(s.hasPending)
+
+        // THE FAULT: the device sent a valid header but only part of the payload (a truncated frame),
+        // then left companion and its CLI echoes our frames as "COMMAND:". The transport stays OPEN.
+        link.feed(byteArrayOf(40, 0, 0, 0) + "{\"v\":0,\"t".toByteArray(Charsets.US_ASCII)) // header + partial
+        link.feed("COMMAND: {\"v\":0,\"t\":9} unknown command\r\n".toByteArray(Charsets.US_ASCII)) // CLI echo
+
+        // Recovery within a DEFINED time: a bounded number of read cycles (mirrors the VM read loop).
+        var recoveredFast = false
+        repeat(10) {
+            client.readMessage(20)
+            if (client.takeCliLeftCompanion()) {
+                s.failPending("The device left companion mode (reconnecting).")
+                recoveredFast = true
+                return@repeat
+            }
+        }
+        assertTrue("the truncated frame + CLI echo must be detected within a bounded number of reads", recoveredFast)
+        assertEquals(false to "The device left companion mode (reconnecting).", pending.await())
+        assertTrue("USB must stay open (no artificial close)", link.isOpen)
+        assertFalse("session must stay usable, not closed", s.isClosed)
+        assertFalse(s.hasPending)
+
+        // The device is back in companion: the SAME session serves a new command (no reconnect needed).
+        val recovered = async(start = CoroutineStart.UNDISPATCHED) { s.await("info", 650_000) }
+        assertTrue(s.hasPending)
+        val id = link.outbound.last().getInt("id")
+        link.feed(frameBytes("{\"v\":0,\"t\":${Kind.ACK},\"id\":$id,\"d\":{\"ok\":true,\"out\":\"ok\"}}"))
+        pump(client, s, link)
+        assertEquals(true to "ok", recovered.await())
+    }
+
+    /**
+     * The other recovery path: the device was unplugged, so the transport closes (EOF). A pending
+     * command fails once on the drop and a fresh session on a reconnected link serves a new command.
+     */
+    @Test(timeout = 5_000) fun unpluggedTransportFailsPendingCommandThenAFreshSessionRecovers() = runVirtual {
+        val link1 = FeedableTransport()
+        val client1 = CompanionClient(link1)
+        val s1 = CommandSession(client1, link1)
+
+        // A command is dispatched and awaiting its ACK.
+        val pending = async(start = CoroutineStart.UNDISPATCHED) { s1.await("wifi_scan", 60_000) }
+        assertTrue(s1.hasPending)
+        assertEquals(1, link1.outbound.size)
+
+        // The device sends a PARTIAL frame: a plausible 40-byte length header and the real envelope
+        // prefix, but only part of the payload before the TX tears. It is a recognised frame start the
+        // decoder waits to complete - it must NOT surface a message or resolve the pending command.
+        val header = byteArrayOf(40, 0, 0, 0)
+        link1.feed(header + "{\"v\":0,\"t\"".toByteArray(Charsets.US_ASCII))
+        assertNull(client1.readMessage(20))
+        assertTrue(s1.hasPending)
+
+        // The link drops (the firmware dropped it after the torn write). The read loop closes the
+        // session, so the pending command fails exactly once instead of hanging on the torn frame.
+        link1.close()
+        pump(client1, s1, link1)
+        assertEquals(false to "Disconnected", pending.await())
+        assertFalse(s1.hasPending)
+        assertTrue(s1.isClosed)
+
+        // Reconnect: a brand-new session over a fresh link serves a new command and gets its ACK.
+        val link2 = FeedableTransport()
+        val client2 = CompanionClient(link2)
+        val s2 = CommandSession(client2, link2)
+        val recovered = async(start = CoroutineStart.UNDISPATCHED) { s2.await("info", 60_000) }
+        assertTrue(s2.hasPending)
+        val id = link2.outbound.single().getInt("id")
+        link2.feed(frameBytes("{\"v\":0,\"t\":${Kind.ACK},\"id\":$id,\"d\":{\"ok\":true,\"out\":\"ok\"}}"))
+        pump(client2, s2, link2)
+        assertEquals(true to "ok", recovered.await())
+        assertFalse(s2.hasPending)
     }
 }

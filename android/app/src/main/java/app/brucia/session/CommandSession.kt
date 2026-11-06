@@ -98,6 +98,20 @@ class CommandSession(
         return routeCommandReply(message, pending, pendingJson)
     }
 
+    /**
+     * Fail every pending command now with [reason] but keep the session USABLE (unlike [close], which
+     * also rejects all future sends). For a link that went dead while the transport stayed open - the
+     * device left companion mode - so pending awaits return at once instead of waiting out their
+     * timeout, and the same session can serve new commands once the device is back in companion.
+     */
+    fun failPending(reason: String) {
+        if (closed.get()) return
+        val failed = pending.keys.mapNotNull { pending.remove(it) }
+        val failedJson = pendingJson.keys.mapNotNull { pendingJson.remove(it) }
+        failed.forEach { cb -> try { cb(false, reason) } catch (e: Exception) { onCallbackError(e) } }
+        failedJson.forEach { cb -> try { cb(false, JSONObject().put("msg", reason)) } catch (e: Exception) { onCallbackError(e) } }
+    }
+
     /** Idempotent: reject new sends, then fail every pending command once with [reason]. */
     fun close(reason: String = "Disconnected") {
         if (!closed.compareAndSet(false, true)) return

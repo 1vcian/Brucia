@@ -80,7 +80,11 @@ Cross-cutting paths:
 
 ## Follow-up fixes (coordinator request, same day)
 
-DT01 (recovered WPA key in reports and exports) is left unchanged, waiting for the owner's decision.
+DT01 (recovered WPA key in reports and exports): DECIDED 2026-11-06 (authorized) - KEEP the key in
+plaintext in the security report, session JSON and session report. These are authorized-assessment
+artifacts and the operator needs the actual key, so it is not masked; each emission point has a `DT01`
+comment and tests (`SessionExportTest`, `ReportTest`, `SessionReportTest.recoveredWifiKeyIsShownInPlaintext`)
+pin the decision. The "rotate it if this is your network" advisory stays.
 
 | Item | Sev | Fix | Test |
 |---|---|---|---|

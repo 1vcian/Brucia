@@ -37,6 +37,39 @@ class DeviceFileBrowserTest {
         assertEquals(listOf("storage list /", "storage list /").map { it to 650_000L }, runner.calls.toList())
     }
 
+    /** F30: ERR, timeout and exception surface as a listing failure, never as an empty folder; a retry recovers. */
+    @Test(timeout = 5_000) fun listingFailureIsReportedAndNeverParsedAsEntries() = runVirtual {
+        val s = svc()
+        s.list("/d")
+        answer(0, false, "SD read failed")
+        assertEquals(emptyList<FileEntry>(), s.entries.value)
+        assertFalse(s.loading.value)
+        assertEquals(DeviceFileBrowser.LIST_FAILED + "SD read failed", s.listStatus.value)
+        s.list("/d")
+        answer(1, false, "x\t1\n") // failure text that looks like a listing is still not parsed
+        assertEquals(emptyList<FileEntry>(), s.entries.value)
+        assertTrue(s.listStatus.value.startsWith(DeviceFileBrowser.LIST_FAILED))
+        s.list("/d")
+        answer(2, false, "") // timeout / exception without a message
+        assertEquals(DeviceFileBrowser.LIST_FAILED + "no reply from the device.", s.listStatus.value)
+        s.list("/d")
+        answer(3, true, "x\t1\n")
+        assertEquals(listOf(FileEntry("x", false, 1)), s.entries.value)
+        assertEquals("", s.listStatus.value)
+    }
+
+    @Test(timeout = 5_000) fun listingRunnerExceptionIsReported() = runVirtual {
+        val throwing = object : app.brucia.session.CommandRunner {
+            override suspend fun run(cmd: String, timeoutMs: Long): Pair<Boolean, String> = throw java.io.IOException("USB gone")
+        }
+        val s = DeviceFileBrowser(this, throwing) { true }
+        s.list("/d")
+        settle()
+        assertFalse(s.loading.value)
+        assertEquals(DeviceFileBrowser.LIST_FAILED + "USB gone", s.listStatus.value)
+        assertEquals(emptyList<FileEntry>(), s.entries.value)
+    }
+
     @Test(timeout = 5_000) fun changingDirectoryClearsStaleEntriesAndSupersedesTheOldListing() = runVirtual {
         val s = svc()
         s.list("/")

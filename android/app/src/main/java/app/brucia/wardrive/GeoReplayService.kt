@@ -22,7 +22,7 @@ class GeoReplayService(
     val busy: StateFlow<Boolean> = op.busy
 
     fun replay(name: String, payload: String) =
-        op.start(command(payload), "Replaying \"$name\"...", { if (payload.isBlank()) NOTHING else null }) { ok, out ->
+        op.start(command(payload), "Replaying \"$name\"...", { precheck(payload) }) { ok, out ->
             if (ok) "Replayed \"$name\"." else "Replay of \"$name\" failed: ${out.ifBlank { "no response" }}"
         }
 
@@ -30,6 +30,14 @@ class GeoReplayService(
 
     companion object {
         const val NOTHING = "Nothing to replay."
+        const val NOT_REPRODUCIBLE = "`rf tx` would send a different frame than this capture (saved before the replay check)."
+
+        /** Pins carry no protocol, so an `rf tx` pin is only checked for a 24-bit key. */
+        fun precheck(payload: String): String? = when {
+            payload.isBlank() -> NOTHING
+            payload.startsWith("rf tx") && !app.brucia.device.CliParse.rfPayloadReplayable(payload, null) -> NOT_REPRODUCIBLE
+            else -> null
+        }
 
         /** The device command for a saved payload (same mapping as the saved-signal replay). */
         fun command(payload: String): String =

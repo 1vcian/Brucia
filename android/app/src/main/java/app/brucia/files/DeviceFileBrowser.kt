@@ -11,7 +11,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * Device file manager over the storage CLI, three independent lines:
  * - listing (`storage list <dir>`): owns [entries]; [loading] is true while it waits; a newer
  *   listing supersedes a pending one and switching directory clears stale entries at once;
- *   [listStatus] says when the device's reply limit cut the listing or the path cannot be sent;
+ *   [listStatus] says when the listing failed, the device's reply limit cut it or the path cannot
+ *   be sent, so a failure never reads as an empty directory;
  * - changes (`storage remove|mkdir <path>`): the device's answer shows on [changeStatus]; when
  *   answered (success or not) the directory last listed is listed again, as the screen refreshed before;
  * - capture listing (`storage list /BrucePCAP/handshakes`) shown as text on [captureList].
@@ -31,7 +32,7 @@ class DeviceFileBrowser(
     private val _entries = MutableStateFlow<List<FileEntry>>(emptyList())
     val entries: StateFlow<List<FileEntry>> = _entries.asStateFlow()
     val loading: StateFlow<Boolean> = listing.busy
-    /** Empty, or why the listing is incomplete / could not be requested. */
+    /** Empty, or why the listing failed, is incomplete or could not be requested. */
     val listStatus: StateFlow<String> = listing.status
     /** The device's answer to the last remove / mkdir (or why it was not sent). */
     val changeStatus: StateFlow<String> = changes.status
@@ -44,9 +45,14 @@ class DeviceFileBrowser(
         dir = path
         val cmd = listCommand(path)
         listing.start(cmd ?: "", "", { if (cmd == null) unsupported(path) else null }) { ok, out ->
+            if (!ok) {
+                // Failure text (ERR, timeout, exception) is never parsed as entries; it must not read as an empty folder.
+                _entries.value = emptyList()
+                return@start "$LIST_FAILED${out.trim().ifBlank { "no reply from the device." }}"
+            }
             val parsed = FileList.parseListing(out)
             _entries.value = parsed.entries
-            if (ok && parsed.truncated) "The device's reply limit (${FileList.REPLY_LIMIT_BYTES} bytes) cut this listing: " +
+            if (parsed.truncated) "The device's reply limit (${FileList.REPLY_LIMIT_BYTES} bytes) cut this listing: " +
                 "${parsed.entries.size} entries shown, more may exist." else ""
         }
     }
@@ -72,6 +78,8 @@ class DeviceFileBrowser(
 
     companion object {
         const val CAPTURE_DIR = "/BrucePCAP/handshakes"
+        /** Prefix of a failed listing; the entries are cleared, not shown as an empty directory. */
+        const val LIST_FAILED = "Listing failed: "
         /** Kept at the legacy 650 s: listing, removal and mkdir walk SD/LittleFS without a firmware bound. */
         const val TIMEOUT_MS = 650_000L
 

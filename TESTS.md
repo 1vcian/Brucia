@@ -4,6 +4,113 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## IR power spam (new feature) — 2026-11-06
+
+User-requested: `ir_power_spam [secs]` blasts every power table (NA + EU + universal parsed + raw),
+repeating until the window ends or a stop. Firmware (`runIrPowerSpamHeadless` + companion dispatch,
+polling `companionPollStop`), app `IrPowerSpamService` + IR actions card.
+
+- `./gradlew :app:testDebugUnitTest`: **1105 tests, 0 failures** (`IrPowerSpamServiceTest`: clamp,
+  running/result texts, busy-ignored, polled stop keeps waiting for the reply, not-connected).
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **305 tests PASS** (`test_radio_guards.py`
+  checks the loop covers all four tables and polls stop; `test_companion_dispatch_stops.py` and the
+  mock add `ir_power_spam_stop` as an idle stop).
+- Firmware: `pio run -e lilygo-t-embed-cc1101` SUCCESS; flashed to the device.
+- On device (T-Embed flashed with this firmware): idle `ir_power_spam_stop` -> ok "not running"
+  **PASS** (hw_acceptance `idle_stops`), and `caps` PASS.
+- **Device check owed (not run):** the spam itself transmits IR, so the passive acceptance runner
+  does not send it. A human must confirm on permitted hardware that it switches displays off and
+  that Stop ends it promptly.
+
+## Backlog A2-A5 + stop follow-ups — 2026-11-06## Backlog A2-A5 + stop follow-ups — 2026-11-06
+
+Scope: uncommitted tree above `354a32db`; app and firmware (NRF24 loops and Bruce NRF24 module
+abort hooks, audio owner, `companionPollStop` SUB reply, ARPScanner lock order). No device
+command, flash, RF output, commit or release.
+
+- `./gradlew :app:testDebugUnitTest`: **1101 tests, 0 failures** (155 classes).
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **304 tests PASS**, 46.3 s (includes
+  the mock e2e SUB-409 and idle `nrf24_stop` cases and the selected Kotlin run).
+- `tools/test_firmware_diag.py` 19/19, `tools/test_companion_prompts.py` (ARP order, mutation
+  verified to fail on the old order), `tools/test_radio_guards.py`, `tools/test_companion_dispatch_stops.py`.
+- Firmware: `pio run -e lilygo-t-embed-cc1101 -e m5stack-cardputer` **SUCCESS** on the final tree (Cardputer compiles FM audio + NRF24; T-Embed has no Si4713). Build only, not flashed.
+- On device (T-Embed CC1101, this tree flashed over USB `pio run -t upload`, `hw_acceptance.py`,
+  all passive / non-transmitting): `busy` **PASS** - PONG, a CMD and a SUB all get ERR 409 while
+  `jam_detect` runs, and `stop` ended it in 0.11 s; `idle_stops` **PASS** - `nrf24_stop` and
+  `jam_detect_stop` answer ok "not running" on an idle device; `script_stop`, `caps`, `provenance`,
+  `evidence`, `ping` (median 3.0 ms), `malformed`, `fs_list/read/upload`, `streams`, `diag_counters`
+  all **PASS**. `heap` fell on the first run (one-time Wi-Fi allocation from `jam_detect` setup);
+  two repeat runs held free heap flat (68823 -> 68823), so no leak. Not exercised on device:
+  NRF24 Stop timing (no NRF24 module fitted), FM owner (no Si4713), the ARP key-wait path.
+- Limits: firmware checks are static or against `tools/mock_device.py`; NRF24 stop timing, FM- Limits: firmware checks are static or against `tools/mock_device.py`; NRF24 stop timing, FM
+  ownership (no Si4713 here), the SUB 409 and the ARP key wait are not run on a device (backlog C8).
+
+## F25-F31 software fixes — 2026-11-06
+
+Scope: uncommitted tree above `354a32db`; app-only changes (no firmware, protocol or
+Python tool edits). No device command, flash, RF/BLE output, commit or release.
+
+- `./gradlew :app:testDebugUnitTest` (JDK 23, cached Gradle): **1094 tests, 0 failures,
+  0 errors, 0 skipped** across 155 classes. Not a lint, instrumentation, screenshot,
+  signed-release or firmware build.
+- New/extended regressions: `StopAllSequenceTest` (F26: real `LoraService` +
+  `EvilPortalService` against a model of the firmware stop poll; frame order `lora_recv`,
+  `stop`, `evil_portal_stop`, portal ACKed and inactive, benign command served; the
+  unordered control still loses the portal stop), `StreamClaimTest` (F28/F29),
+  `RemoteLinkGateTest` (F25, source-level), `BleHidServiceTest` / `EvilPortalServiceTest`
+  (F27), `DeviceFileBrowserTest` (F30), `LocalFilesCleanupTest` (F31),
+  `StreamLeaveHooksTest` (Remote, Channels, Portal leave hooks).
+- Limits: the ViewModel and composables are not executed (F25 wiring and the
+  F28/F29 screen effects are checked at source level or through the extracted
+  classes); the firmware poll is modelled, not run; no phone storage failure was
+  induced. The probe table below records the pre-fix tree and is superseded for the
+  rows marked fixed in the backlog. Python suite not rerun (unchanged sources).
+
+## Cross-feature integration review — 2026-11-06
+
+Scope: current uncommitted tree above release `354a32db`, including the latest
+CompanionClient inactivity fix. Audited catalog/screen routes and cross-feature
+ownership, cancellation and error handling against the existing four feature audits.
+All 50 stable catalog IDs are unique and have screen routes. This does not establish
+that all controls or physical effects work. No production source edits, device commands,
+flash, RF/BLE output, commit or release were performed by this review.
+
+Fresh verification:
+
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **300 tests PASS**, 48.835 s.
+- `python3 tools/test_android_logic.py`: **265 selected Kotlin/JUnit tests PASS**.
+  Cached compiler/dependencies; this is not a fresh full Android/Gradle, lint,
+  instrumentation, screenshot, firmware or signed-release build.
+- `python3 .codex_tmp/integration-review-20261106/probe.py`: production Kotlin
+  services compiled with cached dependencies and simulated command runners. Four
+  service defects reproduced, with a LoRa positive control and a combined lifecycle model. No physical side effects.
+  Source hashes/results retained in that ignored directory's `result.json`.
+
+| Probe | Actual result on this tree | Required result after a fix |
+|---|---|---|
+| F26: `LoraService.receive(120)` then `stop()` (the hook selected by global Stop all) | `receiving=false`, status `Stopped.`, **zero** stop frames | LoRa hook must request device stop; disconnect remains local cleanup |
+| F26 control: receive then `stopReceive()` | Exactly one `stop` frame | Keep this behavior and test wiring through the lifecycle inventory |
+| F26 combined model: real LoRa/portal/lifecycle classes, simulated firmware suffix-stop rule | Portal stop consumed by LoRa, simulated portal still active, portal reply pending | Stop blocking operation first, then confirm background-service stops without consuming the wrong request |
+| F27: BLE HID begin succeeds, end returns false/Timeout | Status becomes `off` | Stop failure/unknown state must remain visible; do not assert device off |
+| F27: portal start succeeds, stop returns false/Timeout | `active=false`, status Timeout | Do not assert stopped based on a failed reply; reconcile actual state |
+| F30: Files list returns false/SD read failed | Empty entries, blank listStatus, loading=false | Visible listing error, distinct from an empty successful directory |
+
+F26 caveat: the isolated LoRa hook sending zero frames does NOT prove global Stop
+never stops LoRa. Other lifecycle hooks send `evil_portal_stop`/`speaker_stop`, and
+`companionPollStop` accepts any `_stop` without replying. Those can end LoRa but be
+lost to their intended service. The combined probe models that firmware rule; it
+does not execute the full Android VM or the firmware poll. On-device ordering remains
+unverified, and no guaranteed 120-second continuation is claimed.
+
+Additional source findings, not device reproductions: F25 Remote/raw mode leaks into
+normal navigation; F28 screens stop another owner's Wi-Fi scan; F29 Channels does not
+start/restart after connecting on the same screen; F31 export IO errors escape several
+button callbacks (extends DT07). Details and acceptance are in the backlog and
+[new checklist](docs/APP_CONTROLS_CHECKLIST.md#cross-feature-integration-acceptance--2026-11-06).
+These findings remain OPEN despite the passing suites. The earlier F23 quiet soaks
+are unchanged: zero radio events is not a stress test under radio-EVENT load. BLE
+packet emission and receiver/macOS reaction remain separate, unverified outcomes.
+
 ## Functional contract investigation — 2026-11-05 (after batch 14)
 
 Scope: investigate owner-reported De Bruijn reboot and missing Apple/Mac BLE
@@ -334,61 +441,124 @@ bring the limit to 2 KB/h. script_run and the CLI fail-fast items need the app.
 
 ### Soak runs that surfaced it (2026-11-06)
 
-- 6h45 on batch 16 firmware 7abe1143 (00:30-06:15, 811 intervals): FAIL, 9 findings in two
+Three soaks, all with wifi.probe/wifi.sta/subghz.raw subscribed. In all three those radio streams
+recorded ZERO events (no APs/stations/RF in range), so none of the runs exercised the link under
+actual radio-EVENT traffic - the condition that would most stress frame emission. Read the results
+with that limit in mind.
+
+- 6h45 on batch 16 firmware 7abe1143 (23:30-06:15 UTC, 811 intervals): FAIL, 9 findings in two
   clusters (~04:01, ~04:05); otherwise clean. No reboot, heap 102,899->101,195 B (no leak),
   p99 max 62 ms. Report soak-20261105T2330Z-7abe1143/.
-- 30 min on batch 18 release firmware f50c03ac, idle host (06:22-06:52): FAIL, 10 findings -
-  same ~2 undecodable frames despite 13x less traffic, which ruled out host load and pointed to
-  the writeFrame causes below. Report soak-20261106T0622Z-f50c03ac/.
-- Re-soak after the fix (commit 010c0adc, both causes), 40 min / 80 intervals on the T-Embed,
-  2026-11-06 08:46-09:26: PASS, 0 findings - link counters exact (rx +3762, tx +4322), no noise,
+- 30 min on batch 18 release firmware f50c03ac, idle host (06:22-06:52 UTC): FAIL, 10 findings -
+  about 2 undecodable frames despite ~13x less host traffic, which argues against host load as the
+  trigger and points at the writeFrame emission path below.
+  Report soak-20261106T0622Z-f50c03ac/.
+- Re-soak after the fix (commit 010c0adc), 40 min / 80 intervals on the T-Embed,
+  2026-11-06 07:46-08:26 UTC: PASS, 0 findings - link counters exact (rx +3762, tx +4322), no noise,
   no undecodable frames, no rejects, no reboot, heap flat (23 B/h), p99 4.19 ms. Report
-  soak-20261106T0846Z-010c0adc-fix/. The 0.1.6 gate is cleared.
+  soak-20261106T0746Z-010c0adc-fix/. This soak is PASS but, like the other two, saw zero radio-stream
+  events, so it does NOT prove stability under radio traffic; a re-soak under actual radio EVENT load
+  is still owed (checkbox below).
 
-### Hardware soak 2026-11-06 - FINDING (companion frame write race, backlog F23)
+### Hardware soak 2026-11-06 - FINDING (companion frame integrity, backlog F23)
 
-A companion soak with wifi.probe/wifi.sta/subghz.raw active surfaced a framing-integrity defect
+A companion soak with wifi.probe/wifi.sta/subghz.raw subscribed surfaced a framing-integrity defect
 (no crash, no leak; the app resynced): about 2 undecodable frames per run, stray bytes between
 frames, a link counter mismatch, one lost ping, and - the tell - a battery-PONG fragment embedded
-inside another frame. Two independent root causes in `writeFrame()` (`src/companion/protocol.cpp`),
-both fixed on this branch so one re-soak covers both:
+inside another frame. Two changes to `writeFrame()`/`writeAll()` (`src/companion/protocol.cpp`)
+address it; they are on this branch and the firmware builds (`lilygo-t-embed-cc1101` SUCCESS):
 
-1. PARTIAL WRITES (likely the primary cause; it corrupts even with a single writer). `writeFrame`
-   ignored the return of both `Serial.write` calls, and `Serial.write(buf,len)` is NOT guaranteed to
-   accept all `len` bytes. In the pinned arduino-esp32 3.3.9 core the ESP32-S3 USB-Serial-JTAG path
-   (HWCDC - the port `Serial` uses on the T-Embed) returns a short count under sustained host
-   backpressure: `HWCDC::write` (HWCDC.cpp ~L540-623) breaks with `size = so_far` after ~20*100 ms of
-   a stalled host and its own comment says "the caller sees a short write (Arduino's Stream::write
-   contract)"; it also returns 0 if the tx_lock is not taken within tx_timeout_ms (100). The TinyUSB
-   path `USBCDC::write` (USBCDC.cpp L395+) likewise returns `so_far` on disconnect/timeout. (The
-   classic-ESP32 UART path used by m5stack-core4mb is safe: `HardwareSerial::write` -> `uartWriteBuf`
-   -> `uart_write_bytes`, which blocks until all bytes are buffered.) A short write truncates the
-   length prefix or payload -> stray bytes, an undecodable frame and a tx/rx counter mismatch.
-   FIX: a new bounded `writeAll(buf,len,deadline)` loops on the return value writing only the
-   remainder, with a 1 ms yield up to a 2 s per-frame deadline (`COMPANION_TX_FRAME_MS`) so a vanished
-   host cannot wedge the companion loop; a frame that still cannot complete is left torn (the link is
-   already dead) and is not counted in `tx_frames`.
-2. CROSS-TASK INTERLEAVE. The length prefix, payload and flush were written with no lock, so a stream
-   EVENT emitted from another task could interleave its `Serial.write` bytes with a response and
-   desync the length. (In this tree every emitter happens to run on the companion loop task - the RMT
-   ISR and the esp_wifi promiscuous callbacks only queue/ring-buffer, and the `*Service()` emitters
-   run from the loop - but nothing enforced that single-task invariant.) FIX: a recursive FreeRTOS
-   mutex `g_frameLock` (static init, null-safe fallback for very early boot) now wraps the whole
-   emission - the two writes and the flush, nothing else. Recursive so a nested emission on the same
-   task cannot self-deadlock. No emitter runs in an ISR, so blocking on the mutex is safe.
+1. PARTIAL WRITES - the leading hypothesis, and a real defect regardless of whether it caused every
+   observed episode. `writeFrame` ignored the return of both `Serial.write` calls, and
+   `Serial.write(buf,len)` is NOT guaranteed to accept all `len` bytes. The T-Embed CC1101 builds with
+   `ARDUINO_USB_MODE=1`, so `Serial` is the ESP32-S3 USB-Serial-JTAG path (HWCDC). Under sustained host
+   backpressure `HWCDC::write` returns a SHORT count (its own comment: "the caller sees a short write
+   (Arduino's Stream::write contract)"), and returns 0 if the tx_lock is not taken within
+   `tx_timeout_ms` (100). The TinyUSB `USBCDC::write` likewise returns `so_far` on disconnect/timeout.
+   (The classic-ESP32 UART path is safe: `uart_write_bytes` blocks until all bytes are buffered.) A
+   short write truncates the length prefix or payload -> stray bytes, an undecodable frame and a tx/rx
+   counter mismatch, matching the symptoms. This is consistent with the observations but is NOT
+   proven as the definitive cause without further on-hardware evidence (see the owed re-soak and the
+   new `tx_torn` counter, which will name it if it recurs).
+   FIX (completing the earlier stop-gap, not just a bigger timeout): `writeAll` loops on the return
+   writing only the remainder and distinguishes a host that is *draining* from one that is *gone* -
+   the idle timer resets on every accepted byte, so a delayed/partial write that resumes completes,
+   while a host that accepts nothing is bounded by `COMPANION_TX_IDLE_MS` (1500 ms) and a trickling
+   host by an absolute per-frame ceiling `COMPANION_TX_FRAME_MS` (4000 ms). A frame that still cannot
+   be placed is torn: the length-prefixed stream cannot be resynced in place (no sync marker), so
+   `writeFrame` sets `g_txLinkBroken`, stops emitting (no more bytes onto the corrupt stream), and the
+   companion loop drops the link so the app reconnects onto a fresh, frame-aligned session. The torn
+   frame is counted as `tx_torn` (new diag counter), not `tx_frames`; the count is visible on the next
+   session's `diag` (the counters persist across sessions).
+   TIME BOUND INCLUDING THE DRIVER BLOCK: this is subtle. A single `HWCDC::write(buf,len)` splits the
+   buffer into 256-byte ring chunks and waits up to `tx_timeout_ms` per chunk, giving up after 20
+   CONSECUTIVE timeouts - but that counter RESETS whenever a chunk is accepted (HWCDC.cpp:606). So a
+   host that drains just enough to accept one chunk now and then keeps a SINGLE large write() alive far
+   past `20 * tx_timeout_ms` (measured ~6 s for a full frame, counted as a success). Shrinking
+   `tx_timeout_ms` alone does NOT fix this. The real bound needs two things: (a) `companionApplyTxTimeout(true)`
+   shrinks the per-attempt `tx_timeout_ms` to `COMPANION_TX_WRITE_MS` (10 ms, restored on exit; no-op on
+   the classic UART that never returns short); (b) `writeAll` caps each `Serial.write` to
+   `COMPANION_TX_CHUNK` (64 bytes <= one ring chunk), so a single call covers ONE chunk whose
+   consec-timeout counter cannot be reset mid-call -> one call blocks at most `20 * COMPANION_TX_WRITE_MS`,
+   and `writeAll` re-checks the deadline BEFORE the next call. Net worst-case loop stall for a torn
+   frame is then about `COMPANION_TX_FRAME_MS + 20 * COMPANION_TX_WRITE_MS` (~4.2 s) - far under the 60 s
+   idle-exit, task blocked (not spinning) so the watchdog is fed. `tools/test_firmware_frame_lock.py`
+   runs a faithful HWCDC model (chunked, consec-reset) and proves: with the cap each single write is
+   bounded and the frame tears at the ceiling; removing the cap lets ONE write exceed the whole ceiling.
+2. CROSS-TASK INTERLEAVE - a SAFEGUARD, not a demonstrated cause. In this tree every frame emitter
+   runs on the companion loop task (the RMT ISR and the esp_wifi promiscuous callbacks only
+   queue/ring-buffer; the `*Service()` emitters run from the loop), so no interleaving could actually
+   occur here and this was not shown to produce the observed episodes. But the framing relied on that
+   single-task invariant with nothing enforcing it. FIX: a recursive FreeRTOS mutex `g_frameLock`
+   (static init, null-safe fallback for very early boot) wraps the whole emission - the two writes and
+   the flush, nothing else. Recursive so a nested emission on the same task cannot self-deadlock. No
+   emitter runs in an ISR, so blocking on the mutex is safe. It protects future multi-task emitters;
+   it is not advanced as the root cause of the soak findings.
 
 The wire format is unchanged. Evidence, host-side only: `tools/test_firmware_frame_lock.py` compiles
 the real `writeFrame`/`writeAll` and proves, with a mutation for each fix: two threads give 0
-interleaved frames with the lock and 7812 once it is stripped; and a sink that accepts only a few
+interleaved frames with the lock and interleave once it is stripped; a sink that accepts only a few
 bytes per write yields the complete framed stream with `writeAll` but a truncated one once `writeAll`
-is reduced to the pre-fix single write. Plus static checks that the lock wraps both writes and the
-flush, that `writeAll` loops on the return and is bounded, and that `writeFrame`/`writeAll` hold the
-only `Serial.write` in `src/companion`. A clean hardware re-soak (0 undecodable frames, 0 noise bytes,
-counters exact) now gates BOTH fixes and is the remaining gate for the 0.1.6 release.
+assumes the full count; a host that stalls under the idle bound and resumes still completes (and tears
+once the idle-timer reset is removed); and a host that accepts nothing tears in bounded time, is
+counted as `tx_torn` not `tx_frames`, suppresses all further emission, and recovers on a fresh session.
+The sinks ADVANCE VIRTUAL TIME per write to model the driver's own block, so the asserted wait includes
+it: a trickling host is torn at the ceiling with `waited <= COMPANION_TX_FRAME_MS + one driver window`,
+and removing the pre-write ceiling check breaks that bound. The ACTUAL app recovery for THIS fault - the device leaves companion but USB stays OPEN - is proven in
+`CommandSessionTest.truncatedFrameThenCliEchoFailsPendingFastThenSameSessionRecovers`: with
+`transport.isOpen` kept TRUE (no artificial `close()`), the device sends a TRUNCATED frame (valid
+header, incomplete payload) and then its CLI echoes our frames as "COMMAND:". The decoder detects the
+CLI banner even though the parked frame would otherwise swallow the echo as payload
+(`CompanionClient`: a rolling match over non-frame bytes - noise, a parse-failed frame, and a
+stall-discarded partial frame - never over a valid payload, so "COMMAND:" inside valid JSON is not a
+false alarm; a parked frame is abandoned only after ~2 s of INACTIVITY - no new bytes, mirroring the
+firmware's `rxLastByte` rule and `COMPANION_MAX_FRAME`=8192 - NOT after a total duration, so a large
+valid frame that keeps advancing still decodes even if it takes longer than 2 s). Within a bounded number of
+read cycles the read loop calls `CommandSession.failPending(...)`, so a command that would otherwise
+wait out its up-to-650 s timeout fails AT ONCE, the session stays usable, and the SAME session
+re-enters companion and serves a new command. `CompanionClientCliTest` covers the decoder directly:
+truncated-frame-then-echo, a never-completing truncated frame recovered via the inactivity stall within
+a defined time, a banner split across reads, a banner after leading noise, NO false alarm for
+"COMMAND:" inside a valid JSON payload, and a valid JSON payload containing "COMMAND:" delivered in
+fragments spanning MORE than 2 s but always advancing - decoded, never flagged (inactivity, not total
+duration). The unplug path (transport actually closed) is covered separately by
+`unpluggedTransportFailsPendingCommandThenAFreshSessionRecovers`. `tools/test_firmware_diag.py` covers the new `tx_torn`
+counter; `proto/PROTOCOL.md` documents it. A clean hardware re-soak UNDER RADIO TRAFFIC is still the
+gate that would actually validate this end to end.
 
-- [ ] T-Embed CC1101 re-soak after flashing this fix: `python3 tools/hw_acceptance.py --port <port>
-      --soak 20 --streams wifi.probe,wifi.sta,subghz.raw`; expect 0 findings, no noise bytes, no
-      undecodable frames, counters exact. This gates 0.1.6 (mutex + partial-write fix).
+- [x] T-Embed CC1101 flashed with THIS branch and soak-verified clean (2026-11-06). The booted
+      firmware's live `diag` carries the new `tx_torn` key (= the fix is running), PING/CAPS ok. Two
+      soaks, both PASS, 0 findings, `tx_torn` 0, link counters exact, no noise, no reboot, heap flat:
+      a 15-min run before the review's two corrections
+      (report `hw-acceptance-reports/soak-20261106T1323Z-354a32db-prefix-run/`), then a 10-min run after
+      re-flashing with the chunk-cap fix (20 intervals, PING p99 4.09 ms,
+      report `hw-acceptance-reports/soak-20261106T1422Z-354a32db-f23fix/`). So the fix runs clean on
+      hardware with no framing corruption and no regression.
+- [ ] STILL OPEN - re-soak UNDER real radio-EVENT traffic. The run above saw ZERO events on all three
+      streams (RF-quiet environment; only wifi.probe/wifi.sta/subghz.raw are allowed as receive-only,
+      and we do not transmit), so it did not stress frame emission under stream-EVENT load. Repeat where
+      APs/stations/RF are active (non-zero `stream_events`) and confirm 0 findings, `tx_torn` 0, no
+      undecodable frames, counters exact. This is the gate that would actually validate F23 end to end.
 
 ### Batch 15 (SOAK) - passive soak mode for hw_acceptance.py, software only
 

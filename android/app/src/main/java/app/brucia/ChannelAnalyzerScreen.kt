@@ -1,5 +1,6 @@
 package app.brucia
 
+import app.brucia.session.StreamClaim
 import app.brucia.ui.rememberRetained
 import app.brucia.ui.LeaveEffect
 import androidx.compose.foundation.Canvas
@@ -35,11 +36,13 @@ internal fun ChannelAnalyzerScreen(vm: WardriveViewModel, onConnect: () -> Unit)
     val aps by vm.aps.collectAsState()
     val scanning by vm.wardriving.collectAsState()
 
-    // Start scanning on enter; stop on leave (unless the wardrive was already running). Whether it
-    // was running is retained across a rotation, which neither restarts nor stops the scan.
-    val wasScanning = rememberRetained { vm.wardriving.value }
-    LaunchedEffect(Unit) { if (connected && !wasScanning && !vm.wardriving.value) vm.setWardriving(true) }
-    LeaveEffect { if (!wasScanning && vm.wardriving.value) vm.setWardriving(false) }
+    // Scan whenever the session is usable while this screen is open: on enter, and again on a
+    // connect or reconnect made here (a disconnect ends the scan in the ViewModel). Leaving stops
+    // only a scan this screen started; a Wardrive scan already running stays on. The claim is
+    // retained across a rotation, which neither restarts nor stops the scan.
+    val wifiClaim = rememberRetained { StreamClaim() }
+    LaunchedEffect(connected) { if (connected) wifiClaim.acquire(vm.wardriving.value) { vm.setWardriving(true) } }
+    LeaveEffect { wifiClaim.release(vm.streamMayRun("wifi.ap")) { vm.setWardriving(false) } }
 
     val band24 = aps.filter { it.channel in 1..14 }
     val counts = remember(band24) { ChannelAdvisor.congestion(band24) }

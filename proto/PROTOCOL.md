@@ -117,9 +117,9 @@ replies with an error and keeps the loop running.
 command (e.g. `responder`, `karma`, `brucegotchi`, a `mifare_keycheck` batch), the main
 loop is paused but the device still drains one frame per poll so the link stays
 responsive: a `PING` is answered with `PONG` as usual, and any **other** `CMD` that is
-not a stop (`stop` / `*_stop`) is replied to immediately with `ERR {code: 409, msg:
-"device busy"}` carrying that frame's `id`, so the phone's await fails fast instead of
-blocking until its own timeout. Frames are not queued or replayed; the phone resends the
+not a stop (`stop` / `*_stop`), and any `SUB`, is replied to immediately with `ERR {code:
+409, msg: "device busy"}` carrying that frame's `id`, so the phone's await fails fast instead
+of blocking until its own timeout (firmware before 2026-11-06 dropped a `SUB` unanswered). Frames are not queued or replayed; the phone resends the
 rejected command after the operation ends. A `stop` / `*_stop` `CMD` is consumed to end
 the operation and is **not** itself ACKed (the operation's own final reply follows). This
 is why features serialize device commands and send their stop frames on a direct channel.
@@ -194,7 +194,7 @@ firmware) means the group is present. Each command of a dropped group answers
 | `features` key | LITE value | commands |
 |---|---|---|
 | `mifare_keycheck` | `false` | `mifare_keycheck` (`mifare_keycheck_report` / `mifare_keycheck_stop` are not sent) |
-| `ir_cmds` | `false` | `ir_tvbgone`, `ir_rx`, `ir_tx_raw`, `ir_jammer`; `caps.ir` stays, Bruce's `ir rx` / `ir tx` / `ir tx_raw` CLI still works |
+| `ir_cmds` | `false` | `ir_tvbgone`, `ir_rx`, `ir_tx_raw`, `ir_jammer`, `ir_power_spam`; `caps.ir` stays, Bruce's `ir rx` / `ir tx` / `ir tx_raw` CLI still works |
 | `ble_gatt` | `false` | `ble_gatt_connect`, `ble_gatt_read` |
 | `diag` | `false` | `diag` (the link counters are not kept either) |
 
@@ -385,7 +385,21 @@ which answers `ok:false` for an unknown command. (Before, `ir_jammer_stop` start
 `ble_ibeacon_stop` a broadcast, `jam_detect_stop` a detection window and `speaker_volume_stop`
 set the volume to 100 %.) While an operation runs, any `stop` / `*_stop` still ends or is consumed
 by it as described above. On an idle device `responder_stop`, `karma_stop`, `brucegotchi_stop`,
-`jam_detect_stop`, `ir_jammer_stop` and `ble_ibeacon_stop` reply `ACK {ok:true, out:"not running"}`.
+`jam_detect_stop`, `ir_jammer_stop`, `ble_ibeacon_stop`, `nrf24_stop` and `ir_power_spam_stop`
+reply `ACK {ok:true, out:"not running"}`.
+
+`nrf24_scan`, `nrf24_sniff`, `nrf24_jammer` and `nrf24_mousejack` poll the link like every
+blocking operation (2026-11-06; before, they read nothing until their window ended): a `stop` /
+`*_stop` (`nrf24_stop` reads best) ends the window at once and the command's own ACK follows with
+`(stopped)` in its text (`nrf24 mousejack: N device(s), stopped`; a stopped MouseJack never
+injects). Other `CMD`s and `SUB`s meanwhile get `ERR 409 device busy`, so a host runs one
+`nrf24_*` window at a time.
+
+Audio peripherals have one owner: FM audio TX (`fm_audio_begin`) drives the speaker's I2S pins
+and, with the `mic` source, reads the mic. Starting any of `fm_audio_begin`, `speaker_tone`,
+`speaker_play`, `spkr_pcm_begin`, `mic_record` or a `mic.spectrum` / `mic.pcm` SUB ends the other
+owner first (a `speaker_play` file reports `stopped`, reason `superseded`); a later
+`fm_audio_data` then answers `FM audio not active`.
 
 Results that used to report success when nothing was sent:
 
@@ -393,6 +407,7 @@ Results that used to report success when nothing was sent:
 |---|---|
 | `ir_tvbgone [na\|eu]` | `ok:true`, `TV-B-Gone done (sent <n> codes)`; `ok:false`, `TV-B-Gone sent 0 codes` when no code went out (IR TX busy, or the bound passed first) |
 | `ir_jammer [secs]` | `ok:true`, `ir jammed (sent <n> pkts)`; `ok:false`, `ir jammer sent 0 pkts` |
+| `ir_power_spam [secs]` | Blasts every power table (NA + EU + universal parsed + raw), repeating until `secs` (default 30, clamped 1..120) or a stop. Polls the link like a blocking op (a `stop` / `ir_power_spam_stop` ends it between codes; other CMDs/SUBs get 409). `ok:true`, `IR power spam sent <n> codes[ (stopped)]`; `ok:false`, `IR power spam sent 0 codes` when no code went out |
 | `subghz_tx_raw <freqKHz> <te> <csv>` | `ok:true`, `tx <n> edges on <f> kHz` only when the radio came up and the RMT transmit accepted the timings; else `ok:false`, `tx failed: 0 of <n> edges sent (radio init or transmit)` |
 | `subghz_replay <freqKHz> <secs> [repeats]` | `ok:true`, `replayed <e> edges on <f> kHz (<done>/<repeats> repeats[, stopped at the device])`; `ok:false`, `replay not sent (0/<repeats> repeats; ...)` when the radio did not initialize for TX or ESC came first; `ok:false`, `no signal captured` as before |
 | `ble_ibeacon <secs> <uuid>` | `ERR {code:400, msg:"invalid uuid (expected 8-4-4-4-12 hex, ...)"}` for anything but the canonical 36-character UUID; nothing is broadcast. No UUID still means the default |
@@ -531,7 +546,7 @@ CLI command into the module code it calls):
 | `js <file>` / `js run_from_file <file>` | the main loop to bring the script to the foreground (it never does in companion mode; later `script_run`s answered `interpreter busy`) | `ok:false`, `js is not available in companion mode (use script_run)`; `js exit` unchanged |
 | `badusb run_from_file` / `run_from_buffer` | a USB HID host on the port that is the app link (`while (!tud_mounted())`) | `ok:false`, `badusb is not available in companion mode (the USB port is the app link; use BadBLE)` |
 | `ble_badble` payloads | `WAIT_FOR_BUTTON_PRESS` in the payload | the payload stops there (`WAIT_FOR_BUTTON_PRESS: payload stopped, ...`) |
-| IR transmit (`ir tx`, `ir tx_raw`, `ir tx_from_file`, `IRSend`, `ir_tvbgone`, `ir_tx_raw`, `ir_jammer`) with the IR TX pin outside the board's IR TX pin list | the pin menu | `ok:false`, `IR TX pin not configured`; nothing is transmitted |
+| IR transmit (`ir tx`, `ir tx_raw`, `ir tx_from_file`, `IRSend`, `ir_tvbgone`, `ir_tx_raw`, `ir_jammer`, `ir_power_spam`) with the IR TX pin outside the board's IR TX pin list | the pin menu | `ok:false`, `IR TX pin not configured`; nothing is transmitted |
 | `nfc_emv_read` with no card | ESC at the device | gives up after 20 s (`ok:false`, `no EMV card present`); a `stop` ends it earlier |
 | `lora_recv <secs>` | the listen window (up to 120 s) | PING answered; a `stop` ends it early (`received <n> packet(s) (stopped)`) |
 | `settings` (no arguments) | nothing; it wrote the JSON straight onto the frame stream | the JSON goes into `ACK.d.out` (cut at 3500 bytes); pin setters no longer dump the pins file onto the link either |
@@ -800,7 +815,7 @@ firmware".
 {"ok": true, "v": 1, "reset": "poweron", "reset_code": 1, "uptime_s": 5123,
  "heap": {"free": 181220, "min_free": 120440, "largest": 110580},
  "psram": {"size": 8386295, "free": 8100000, "min_free": 8000000, "largest": 8257524},
- "link": {"sessions": 1, "rx_frames": 412, "tx_frames": 980, "rx_zero_len": 0,
+ "link": {"sessions": 1, "rx_frames": 412, "tx_frames": 980, "tx_torn": 0, "rx_zero_len": 0,
           "rx_oversize": 0, "rx_alloc_fail": 0, "rx_stale": 1, "rx_bad_json": 0, "busy_409": 2,
           "err": {"400": 0, "404": 1, "409": 2, "413": 0, "4xx": 0, "5xx": 0, "other": 0}},
  "drops": {"fm_pcm_lost": 0, "fm_pcm_active": false, "mic_pcm_dropped": 0}}
@@ -821,7 +836,8 @@ firmware".
 
 - `sessions`: companion-mode entries since boot.
 - `rx_frames`: complete frames read by the frame decoder (valid length, before JSON parsing). The `diag` request itself is included.
-- `tx_frames`: frames written, every kind. The `diag` reply itself is not included.
+- `tx_frames`: frames written whole, every kind. The `diag` reply itself is not included. A torn frame is not counted here.
+- `tx_torn`: frames abandoned mid-write because the host stopped accepting bytes (no progress for the idle bound, or past the per-frame ceiling). The TX stream is then desynced and the firmware drops the link so the app reconnects onto a clean session; the count is visible on the next session's `diag` (the counters persist across companion-mode entries).
 - `rx_zero_len`, `rx_oversize`: length prefix 0 or above `COMPANION_MAX_FRAME`; the decoder resets.
   (Bytes lost in the serial RX buffer itself are invisible to these counters; they surface as
   `rx_stale` or a malformed frame. Hosts keep frames within `rx_max` to avoid them.)

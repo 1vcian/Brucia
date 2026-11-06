@@ -44,16 +44,18 @@ class DeBruijnTxServiceTest {
         svc.stop()
     }
 
-    @Test(timeout = 5_000) fun stopBetweenBurstsSendsNothingMore() = runVirtual {
+    @Test(timeout = 5_000) fun stopWhileBurstInFlightIsHonestAndSendsNothingMore() = runVirtual {
         val p = plan(); val svc = svc(); svc.start(p, "F")
         until { runner.calls.size == 1 }
         runner.reply(0, true, "ok")
-        until { runner.calls.size == 2 } // burst 2 sent, awaiting its ACK
+        until { runner.calls.size == 2 } // burst 2 dispatched to the device, awaiting its ACK (on air)
         svc.stop()
         runner.reply(1, true, "late") // late ACK ignored
         delay(50)
-        assertEquals(2, runner.calls.size) // burst 3 was never sent
-        assertEquals(DeBruijnTxService.STOPPED, svc.status.value)
+        assertEquals(2, runner.calls.size) // burst 3 was never sent (later bursts cancelled)
+        // The in-flight burst cannot be recalled: the status must not claim the sweep is stopped.
+        assertEquals(DeBruijnTxService.STOPPED_IN_FLIGHT, svc.status.value)
+        assertNotEquals(DeBruijnTxService.STOPPED, DeBruijnTxService.STOPPED_IN_FLIGHT)
         assertFalse(svc.active.value)
     }
 

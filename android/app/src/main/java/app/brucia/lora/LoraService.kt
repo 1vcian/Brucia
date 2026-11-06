@@ -107,6 +107,16 @@ class LoraService(
         stop()
     }
 
+    /**
+     * Global Stop's first phase: send the polled `stop` but keep waiting, so [receiving] clears
+     * only when the device's lora_recv reply proves the listen window ended (then other
+     * services' stops cannot be taken for this one). No receive, no link: nothing is sent.
+     */
+    fun requestStopReceive() {
+        val wasReceiving = synchronized(lock) { _receiving.value }
+        if (wasReceiving && isConnected()) stops.run(stopRunner, STOP_CMD, STOP_TIMEOUT_MS)
+    }
+
     /** Hard stop: cancel any in-flight command and clear the receive indicator. */
     fun stop() = synchronized(lock) {
         ++recvToken

@@ -939,7 +939,8 @@ int nrf_mousejack_headless(
     const char *injectText,
     void (*onTarget)(const uint8_t addr[5], uint8_t ch, const char *type, void *user),
     void *user,
-    bool *injected
+    bool *injected,
+    std::function<bool()> shouldAbort
 ) {
     if (injected) *injected = false;
     if (secs < 1) secs = 5;
@@ -967,11 +968,13 @@ int nrf_mousejack_headless(
     for (uint8_t i = 0; i < 6; i++) { NRFradio.openReadingPipe(i, noiseAddress[i]); }
 
     uint8_t reported = 0;
+    bool aborted = false;
     const uint32_t endT = millis() + (uint32_t)secs * 1000;
-    while ((int32_t)(millis() - endT) < 0) {
+    while (!aborted && (int32_t)(millis() - endT) < 0) {
         if (check(EscPress)) break;
         for (uint8_t ch = 2; ch <= 84; ch++) { // ESB channel range
             if (check(EscPress) || (int32_t)(millis() - endT) >= 0) break;
+            if (shouldAbort && shouldAbort()) { aborted = true; break; }
             NRFradio.setChannel(ch);
             NRFradio.startListening();
             for (int tries = 0; tries < SCAN_TRIES_PER_CH; tries++) {
@@ -1003,7 +1006,7 @@ int nrf_mousejack_headless(
 
     // Optional keystroke injection into the first discovered target, reusing the
     // module's own TX setup + inject path (the same one the on-device menu uses).
-    if (injectText && injectText[0] && mj_targetCount > 0) {
+    if (!aborted && injectText && injectText[0] && mj_targetCount > 0) {
         const MjTarget &target = mj_targets[0];
         mj_setupTxForTarget(target);
         mj_logitechWake(target);

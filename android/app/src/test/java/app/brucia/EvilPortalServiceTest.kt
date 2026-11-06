@@ -113,7 +113,7 @@ class EvilPortalServiceTest {
         until { runner.calls.size == 1 }
         // Only the stop reached the device; the cancelled push never launches the portal.
         pushGates[0].complete(true to "ok")
-        runner.reply(0, false, "")
+        runner.reply(0, true, "")
         until { !svc.busy.value }
         assertEquals(listOf("evil_portal_stop"), runner.cmds)
         assertEquals("Stopped." to false, svc.state())
@@ -128,5 +128,47 @@ class EvilPortalServiceTest {
         svc.stop()
         assertFalse(svc.active.value)
         assertEquals(1, runner.calls.size)
+    }
+
+    /** F27: a rejected or lost stop keeps [active]; only an acknowledged retry clears it. */
+    @Test(timeout = 5_000) fun failedStopKeepsActiveUntilAck() = runVirtual {
+        val svc = svc()
+        svc.start("MyAp")
+        until { runner.calls.size == 1 }
+        runner.reply(0, true, "AP up")
+        until { svc.active.value && !svc.busy.value }
+        svc.stop()
+        until { runner.calls.size == 2 }
+        runner.reply(1, false, "ERR")
+        until { !svc.busy.value }
+        assertEquals(EvilPortalService.STOP_FAILED + "ERR" to true, svc.state())
+        svc.stop()
+        until { runner.calls.size == 3 }
+        runner.reply(2, false, "") // timeout/exception arrives as (false, msg)
+        until { !svc.busy.value }
+        assertEquals(EvilPortalService.STOP_FAILED + "no reply" to true, svc.state())
+        svc.stop()
+        until { runner.calls.size == 4 }
+        runner.reply(3, true, "portal stopped")
+        until { !svc.busy.value }
+        assertEquals("portal stopped" to false, svc.state())
+    }
+
+    /** F27: a late failed reply of a superseded stop cannot revive or clear state after a newer ACK. */
+    @Test(timeout = 5_000) fun lateFailedStopIgnoredAfterNewerAck() = runVirtual {
+        val svc = svc()
+        svc.start("MyAp")
+        until { runner.calls.size == 1 }
+        runner.reply(0, true, "AP up")
+        until { svc.active.value && !svc.busy.value }
+        svc.stop()
+        until { runner.calls.size == 2 }
+        svc.stop()
+        until { runner.calls.size == 3 }
+        runner.reply(2, true, "portal stopped")
+        until { !svc.busy.value }
+        runner.reply(1, false, "timeout")
+        delay(20)
+        assertEquals("portal stopped" to false, svc.state())
     }
 }

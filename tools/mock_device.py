@@ -158,7 +158,7 @@ class LinkCounters:
     ERR_KEYS = ("400", "404", "409", "413", "4xx", "5xx", "other")
 
     def __init__(self):
-        self.values = {"sessions": 1, "rx_frames": 0, "tx_frames": 0}
+        self.values = {"sessions": 1, "rx_frames": 0, "tx_frames": 0, "tx_torn": 0}
         self.values.update({k: 0 for k in self.REJECT_KEYS})
         self.values["busy_409"] = 0
         self.err = {k: 0 for k in self.ERR_KEYS}
@@ -311,7 +311,7 @@ def rf_tx_reject_reason(cmd):
 # `*_stop` verbs the firmware answers with "not running" when nothing runs (exact-match guards
 # placed before each operation's own handler; tools/test_companion_dispatch_stops.py).
 IDLE_STOPS = ("responder_stop", "karma_stop", "brucegotchi_stop", "jam_detect_stop", "ir_jammer_stop",
-              "ble_ibeacon_stop")
+              "ble_ibeacon_stop", "nrf24_stop", "ir_power_spam_stop")
 
 
 SUBGHZ_RADIO_VERBS = ("rx", "tx", "txp", "scan", "tx_from_file", "tx_from_buffer", "keeloqtx")
@@ -640,7 +640,7 @@ class MockDevice:
 
     def _blocking_op(self, fd, mid, secs, stop, reply=None):
         """A blocking command (`jam_detect`, a looping `script_run`): drains one frame per poll as
-        companionPollStop does - PING answered, stop/*_stop ends it, other CMDs get ERR 409.
+        companionPollStop does - PING answered, stop/*_stop ends it, other CMDs and SUBs get ERR 409.
         reply(stopped) sends the final reply (default: jam_detect's ACK)."""
         deadline = time.time() + secs
         stopped = False
@@ -666,6 +666,9 @@ class MockDevice:
                 if cs == "stop" or cs.endswith("_stop"):
                     stopped = True
                     break
+                self.counters.note("busy_409")
+                self._send(fd, ERR, cid, {"code": 409, "msg": "device busy"})
+            elif t == SUB:  # awaits an ACK like a CMD: refused, never dropped
                 self.counters.note("busy_409")
                 self._send(fd, ERR, cid, {"code": 409, "msg": "device busy"})
         if reply is not None:

@@ -101,4 +101,10 @@ void sendRawCodeBatch(const RawIrCode *const *codes, uint8_t count, IRsend &irse
 // abortable. Returns the number of codes actually transmitted.
 uint16_t runTvBGoneHeadless(bool useEU, uint32_t maxMs);
 
+// Brucia: IR power spam for the companion. AUTHORIZED USE ONLY. Blasts both regions' power codes
+// (NA + EU) plus the universal parsed + raw codes, REPEATING the whole set until maxMs elapses or
+// [shouldAbort] / check(EscPress) ends it. Returns the total codes transmitted.
+#include <functional>
+uint16_t runIrPowerSpamHeadless(uint32_t maxMs, std::function<bool()> shouldAbort = nullptr);
+
 #endif

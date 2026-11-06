@@ -12,6 +12,7 @@ import app.brucia.wardrive.SecurityFindings
 import app.brucia.wardrive.WigleCsv
 import app.brucia.wardrive.computeStats
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -77,6 +78,41 @@ class LogicTest {
         // The display form "Protocol: <name>(<preset>)" is matched by name.
         assertEquals("rf tx 445533 433920000 350 10",
             CliParse.rfReplayCommand(rcswitch.replace("Protocol: RcSwitch", "Protocol: Princeton(0)")))
+    }
+
+    /** Backlog A4: items saved before the replay guard keep their text but are not replayed. */
+    @Test
+    fun storedRfPayloadReplayableOnlyWhenRfTxReproducesIt() {
+        val cmd = "rf tx 445533 433920000 350 10"
+        assertTrue(CliParse.rfPayloadReplayable(cmd, "RcSwitch"))
+        assertTrue(CliParse.rfPayloadReplayable(cmd, "Princeton(0)"))
+        assertTrue(CliParse.rfPayloadReplayable(cmd, ""))   // protocol not recorded
+        assertTrue(CliParse.rfPayloadReplayable(cmd, null)) // geo pin
+        assertTrue(CliParse.rfPayloadReplayable("rf tx 0000000000445533 433920000 350 10", null))
+        // Old saves: another protocol was stored with an `rf tx` command.
+        assertFalse(CliParse.rfPayloadReplayable(cmd, "CAME"))
+        assertFalse(CliParse.rfPayloadReplayable(cmd, "KeeLoq"))
+        assertFalse(CliParse.rfPayloadReplayable(cmd, "Nice FLO(1)"))
+        // A key wider than 24 bits cannot be the 24-bit frame `rf tx` sends.
+        assertFalse(CliParse.rfPayloadReplayable("rf tx 1445533 433920000 350 10", null))
+        assertFalse(CliParse.rfPayloadReplayable("rf tx 00000123456789AB 433920000 350 10", "RcSwitch"))
+        // Not a replay command: raw capture text, malformed or IR.
+        assertFalse(CliParse.rfPayloadReplayable("Frequency: 433920000\nProtocol: CAME", "CAME"))
+        assertFalse(CliParse.rfPayloadReplayable("rf tx zz 433920000 350 10", null))
+        assertFalse(CliParse.rfPayloadReplayable("rf tx 445533", null))
+        assertFalse(CliParse.rfPayloadReplayable("ir tx NEC 0x04 0x08", null))
+        // Every command the current capture path builds stays replayable with its own protocol.
+        val fresh = "Frequency: 433920000\nProtocol: RcSwitch\nBit: 24\nKey: 44 55 33\nTE: 350"
+        assertTrue(CliParse.rfPayloadReplayable(CliParse.rfReplayCommand(fresh)!!, "RcSwitch"))
+    }
+
+    @Test
+    fun geoReplayRefusesAnRfPinRfTxCannotReproduce() {
+        assertEquals(app.brucia.wardrive.GeoReplayService.NOT_REPRODUCIBLE,
+            app.brucia.wardrive.GeoReplayService.precheck("rf tx 00000123456789AB 433920000 350 10"))
+        assertEquals(null, app.brucia.wardrive.GeoReplayService.precheck("rf tx 445533 433920000 350 10"))
+        assertEquals(null, app.brucia.wardrive.GeoReplayService.precheck("ir tx NEC 0x04 0x08"))
+        assertEquals(app.brucia.wardrive.GeoReplayService.NOTHING, app.brucia.wardrive.GeoReplayService.precheck(" "))
     }
 
     @Test

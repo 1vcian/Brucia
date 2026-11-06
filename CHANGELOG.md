@@ -7,6 +7,47 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- New IR power spam (authorized use only): `ir_power_spam` blasts the power-off codes for TVs,
+  projectors, audio and more - both regions (NA + EU) and the universal parsed + raw tables - and
+  repeats the whole set until you Stop, so it covers all device types rather than one region's TVs.
+  Start/Stop is in the IR actions card; the device reads the link while it runs so Stop ends it at
+  once, and it joins the global Stop. Needs an on-device check (it transmits IR).
+
+- Stops that only cancelled the wait on the phone now reach the device (firmware + app; needs a
+  build and a device check):
+  - NRF24 scan, sniff, jammer and MouseJack read the link while they run, so Stop ends the window
+    at once instead of after up to 8 s (a stopped MouseJack never injects). The app sends
+    `nrf24_stop`, waits for the device's answer, and never runs a scan and a sniff together.
+  - Jam detect: Stop all now sends `jam_detect_stop`; before, the device kept listening for up to
+    120 s and answered every other command "busy".
+  - A stream subscription sent while the device runs a blocking operation is answered "device
+    busy" instead of being dropped (the app waited for its timeout).
+- FM audio, speaker and microphone have one owner at the firmware level, also from Console and
+  Macros: starting one ends the other (as speaker and mic already did).
+- Saved RF signals stored before the replay check, whose `rf tx` command would send a different
+  frame (CAME, Nice, KeeLoq, wider keys), no longer offer Replay or Geo pinning; the saved items
+  are kept unchanged.
+- Bruce ARP scanner (standalone): the lwIP lock is released before the "Ethernet not ready" key
+  wait.
+- App integration fixes from the 2026-11-06 cross-feature review (backlog F25-F31; host-tested,
+  phone acceptance pending):
+  - Remote: leaving the Remote screen ends Remote and hands USB back to companion mode; while the
+    raw mirror owns USB, framed commands, direct stops and SUBs are refused with a clear message
+    instead of being written to the device CLI. Stop all ends Remote too.
+  - Stop all: a blocking device operation (LoRa receive, script, responder, karma, brucegotchi,
+    Remote) is ended first through its own stop; the other services' stops follow once it has
+    answered (bounded at 8 s), so the firmware's stop poll can no longer swallow, for example, the
+    Evil Portal stop during a LoRa receive.
+  - BLE keyboard and Evil Portal no longer report "off"/inactive after a rejected or unanswered
+    stop; the status says the stop failed and the state is kept until a stop is acknowledged.
+  - Channels, RF Fingerprint, RF Timeline and the Evil Portal target list stop only a Wi-Fi scan
+    they started; a running Wardrive scan survives visiting them. Channels starts its scan on a
+    connect or reconnect made while it is open.
+  - Files shows "Listing failed: <reason>" instead of an empty folder when the device cannot list.
+  - Exports (Wardrive CSV/KML/GPX, NDEF, hashcat 22000, RF CSV/.sub, stations, probes, monitor
+    pcap) show "Export failed" on unavailable or full storage instead of crashing, fall back to
+    internal storage when external is missing, and never share a partial file.
+
 - Companion frames are now emitted atomically and completely (backlog F23; firmware change, needs a
   build and a clean hardware re-soak). `writeFrame()` had two framing-integrity defects behind the
   2026-11-06 soak corruption (stray non-frame bytes, an undecodable frame, a tx/rx counter mismatch;
@@ -16,19 +57,56 @@ that offloads computation to the phone. Format loosely follows
     its bytes with a response. A recursive FreeRTOS mutex now wraps the whole emission, so two tasks
     can never interleave. No emitter runs in an ISR (the RMT and Wi-Fi promiscuous callbacks only
     queue/ring-buffer; frames are emitted later from the loop), so blocking on the mutex is safe.
-  - Partial writes: `Serial.write(buf, len)` is not guaranteed to accept all `len` bytes - the
-    ESP32-S3 USB-Serial-JTAG path (HWCDC) and the TinyUSB path (USBCDC) return a short count under
-    host backpressure (Arduino Stream::write contract; the classic-ESP32 UART path always writes
-    all). The code ignored both `Serial.write` return values, so a short write truncated the length
-    prefix or the payload and desynced the stream even with a single writer. A new bounded `writeAll`
-    loops on the return value, writing the remainder with a 1 ms yield up to a 2 s per-frame deadline
-    so a vanished host cannot wedge the companion loop; a frame that still cannot be completed is left
-    torn (link already dead) and is not counted in `tx_frames`.
-  The wire format is unchanged. Host test `tools/test_firmware_frame_lock.py` compiles the real
-  `writeFrame`/`writeAll` and proves (a) two concurrent writers never interleave with the lock and do
-  interleave once it is removed, and (b) a sink that accepts only a few bytes per write still yields
-  the complete framed stream with `writeAll` but a truncated one once it is reduced to the pre-fix
-  single write.
+  - Partial writes: `Serial.write(buf, len)` is not guaranteed to accept all `len` bytes - on the
+    T-Embed (`ARDUINO_USB_MODE=1`, so `Serial` is HWCDC) and on the TinyUSB path (USBCDC) it returns
+    a short count under host backpressure (Arduino Stream::write contract; the classic-ESP32 UART path
+    always writes all). The code ignored both `Serial.write` return values, so a short write truncated
+    the length prefix or the payload and desynced the stream even with a single writer. A new bounded
+    `writeAll` loops on the return value and distinguishes a host that is draining from one that is
+    gone: the idle timer resets on every accepted byte (a delayed/partial write that resumes
+    completes), while a host accepting nothing is bounded by a 1.5 s idle timeout and a trickling host
+    by a 4 s per-frame ceiling. The bound also accounts for the driver's OWN blocking, which is subtle:
+    a single `HWCDC::write` can run for seconds because its consecutive-timeout counter resets on every
+    accepted ring chunk. So `writeAll` caps each `Serial.write` to one ring chunk (64 bytes) - a single
+    call then covers one chunk and cannot be reset-amplified - and companion mode shrinks the CDC
+    per-write timeout (restored on exit; no-op on the classic-ESP32 UART). With the deadline re-checked
+    before each capped write, worst-case torn-frame stall is ~4.2 s, far under the 60 s idle-exit. When a frame still cannot be placed the stream is torn and cannot be resynced in place,
+    so the firmware now RECOVERS: `writeFrame` stops emitting, the companion loop drops the link, and
+    the app reconnects onto a fresh, frame-aligned session. The torn frame is counted in a new `diag`
+    counter `tx_torn` (not `tx_frames`), visible on the next session.
+  The wire format is unchanged; the firmware builds (`lilygo-t-embed-cc1101`) and was flashed and
+  soak-verified clean on the T-Embed (2026-11-06: 15-min soak, 0 findings, `tx_torn` 0, link counters
+  exact, no noise/rejects/reboot, heap flat). Honesty note: that soak - like the three before it -
+  recorded ZERO events from the radio streams, so it does not prove stability under radio traffic (the
+  remaining gate); partial writes are the leading hypothesis for the corruption, not a definitively
+  established cause; the mutex is a safeguard for future multi-task emitters, not a demonstrated cause. Host test `tools/test_firmware_frame_lock.py` compiles the real
+  `writeFrame`/`writeAll` and proves, each with a mutation: lock atomicity, `writeAll` completion
+  under short writes, a stall-then-resume completing (vs tearing without the idle-timer reset), and a
+  gone host tearing in bounded time, counting `tx_torn`, suppressing further emission, and recovering
+  after a fresh session. The sinks advance virtual time per write so the asserted wait includes the
+  driver's own block (chunked, with the consec-timeout reset), proving the chunk cap bounds one write
+  while removing it lets a single write exceed the whole ceiling. `CommandSessionTest` proves the real
+  app recovery for the actual fault - the device leaves companion but USB stays OPEN, often after a
+  TRUNCATED frame (valid header, incomplete payload) whose parked state would otherwise swallow the CLI
+  echo. The decoder matches the CLI banner ("COMMAND:") over non-frame bytes only - noise, a
+  parse-failed frame, and a partial frame discarded only after ~2 s of INACTIVITY (no new bytes, like
+  the firmware's receiver; not a total duration) - so it catches a truncated-frame-then-echo, a
+  fragmented or noise-prefixed banner, never false-alarms on "COMMAND:" inside valid JSON, and still
+  decodes a large valid frame that keeps advancing even if it takes longer than 2 s. The app then fails the pending command at once (instead of waiting up to
+  650 s), keeping the transport open and the session usable so it re-enters companion - plus the unplug
+  case (transport closed) separately.
+- Tooling: `tools/hw_acceptance.py` now enters companion mode on its own (sends the raw `companion`
+  CLI nudge and retries HELLO, as the app does) and drops DTR/RTS after opening, so a soak works right
+  after a flash even though opening the ESP32-S3 USB-Serial-JTAG port resets the board to its CLI.
+- Recovered Wi-Fi keys stay in plaintext in the security report, session JSON and session report
+  (backlog DT01, authorized decision): these are authorized-assessment artifacts and the operator needs
+  the actual key, so it is not masked. The "rotate it if this is your network" advisory remains.
+- De Bruijn sweep lifecycle (backlog F24; app): a running sweep now stops when you leave the RF
+  screen and when Remote control takes over the device (it was only stopped by Stop-all/disconnect
+  before), so it can no longer keep transmitting `subghz_tx_raw` bursts after you leave. A rotation
+  does not stop it. Stop now reports honestly: it always cancels the remaining bursts, but a burst
+  already sent to the device is on air and cannot be recalled, so the status says so instead of
+  claiming the whole sweep stopped. No new transmit capability.
 - Stops, results and parsers (batch 18, software only; firmware changes need a build and the
   hardware checks H16-H19 in `docs/audit/radio.md`):
   - A stop could start the operation it named. Several companion commands were matched by a bare

@@ -210,7 +210,7 @@ void nrf_jammer() {
 // AUTHORIZED / LAB USE ONLY. Same constant-carrier technique as nrf_jammer() above
 // (max-PA RF24 const carrier hopped across the 2.4GHz band), but driven headless and
 // time-bounded so the phone-driven companion can run it without the on-device menu.
-int nrf_jammer_headless(int secs) {
+int nrf_jammer_headless(int secs, std::function<bool()> shouldAbort) {
     if (secs < 1) secs = 1;
     if (secs > 30) secs = 30;
 
@@ -228,7 +228,7 @@ int nrf_jammer_headless(int secs) {
     const uint32_t endT = startT + (uint32_t)secs * 1000;
     uint8_t ch = 0;
     while ((int32_t)(millis() - endT) < 0) {
-        if (check(EscPress)) break;
+        if (check(EscPress) || (shouldAbort && shouldAbort())) break;
         NRFradio.setChannel(ch); // hop the whole band while the carrier is up
         if (++ch > 80) ch = 0;
         delayMicroseconds(1000);

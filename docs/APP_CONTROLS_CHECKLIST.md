@@ -22,6 +22,52 @@ files (`AudioScreens.kt`, `MitmUi.kt`, `NetworkScanScreen.kt`, `WidsScreen.kt`,
 `GeoSignalsScreen.kt`).
 
 
+## Cross-feature integration acceptance — 2026-11-06
+
+The current 50-tool catalog has a route for every entry. The following cases supplement
+the per-control inventory with integration failures found in the current dirty tree
+above 0.1.6 (`354a32db`). **No physical checkbox was completed in this review.**
+HOST means actual service code with simulated replies; CODE means a source trace,
+not an on-device reproduction. Full details/status belong to backlog F25-F31 and TESTS.md.
+Software fixes for F25-F31 landed 2026-11-06 with host/source regressions; every physical
+check below is still to perform.
+
+| ID | Reproduction / evidence | Regression and physical acceptance to perform |
+|---|---|---|
+| F25 | **CODE:** Start Remote, navigate Home -> Device info/Files without pressing Remote Stop. Raw mirror still owns the reader while Connected/session allow framed operations. | Test navigation, Stop all, rapid Start/Stop and rotation using a fake transport first: one reader, no framed write in raw mode, no stale wait. On phone, leave Remote and run benign info/list successfully after a completed companion handshake. Rotation may retain Remote; actual leave must restore companion or visibly gate incompatible operations. |
+| F26 | **HOST component + CODE integration:** LoRa global hook only cancels locally. Another service's `_stop` can be consumed by LoRa's generic stop poll without ACK, leaving that service's stop unexecuted. | Test receive + simulated active background service through the lifecycle inventory, both stop-frame orders, missed ACK and late result. Require termination of both operations with honest status and bounded waits. Then verify receive-only Stop on an equipped board; never infer that global Stop always leaves LoRa running. Disconnect cleanup must not send to a replacement device. |
+| F27 | **HOST:** BLE HID end with ERR/timeout reports off; portal stop failure clears active. | Inject stop rejection, lost ACK, exception, success, delayed old ACK and disconnect. Failure must not claim inactive. Verify successful retry/state refresh restores an accurate state. Use fake drivers for portal lifecycle and a benign HID fixture for physical cessation; no payload/rate changes. |
+| F28 | **CODE:** Start Wardrive, visit RF Fingerprint / RF Timeline / Evil Portal without starting a separate target scan, then Back: each can stop the prior Wi-Fi scan. | Test prior scan ON and OFF, pending SUB ON, two rotations, Stop all, reconnect and screen exit. Borrowed scans remain active; screen-owned scans stop once; stale callbacks cannot resurrect a stopped scan. Include BLE ownership as a control. |
+| F29 | **CODE:** Open Channels disconnected -> connect without leaving; also disconnect/reconnect while staying there. Its Unit-keyed effect does not start again. | Expect one appropriate SUB after CAPS, updated channel samples and no duplicate SUB on rotation. Previously running Wardrive must remain owned by its original user after leaving Channels. |
+| F30 | **HOST:** Files receives ERR/timeout/SD read failure and shows empty results with no error. | Service regression for each failure, successful empty directory, ordinary listing, truncated listing and retry. Phone check: absent/unreadable storage must say why; no error string becomes a filename and no failed listing is called empty success. |
+| F31 | **CODE, extends DT07:** unguarded writes in Wardrive CSV/KML/GPX, NDEF, hc22000, RF CSV/.sub, station/probe exports. | Fault-inject file open/write/close failure and unavailable external directory. No uncaught exception, success toast or share of a partial file; preserve the source for retry. Then export each format on phone and reopen with an independent reader. |
+
+Keep these family checks in the acceptance run; they are **NOT RUN here**, not extra
+claims that each family is broken. Use controlled fixtures; unsupported/missing modules
+must produce a bounded explanation. A start ACK alone is never proof of the physical effect.
+
+| Catalog family (tools) | Essential remaining functional check |
+|---|---|
+| Wi-Fi (11) | Known AP/traffic fixture reaches scan, station/probe/monitor views; saved capture opens independently. Join failure/retry and special-character SSIDs; Channels reconnect and shared scan ownership; stop/error paths tested with fakes before any active network test. |
+| Sub-GHz (1) | Passive known-signal capture, completeness metadata, save/reopen and receive-mode conflicts. Reject malformed inputs with no reboot; F24 leave/Remote cancellation and F21 legacy saved-item compatibility remain separate checks. |
+| Radio: FM/LoRa (2) | Missing module vs actual initialization; LoRa receive and both Stops; FM/speaker/mic exclusive ownership and actual audio on equipped hardware. |
+| 2.4 GHz: NRF24/ESP-NOW (2) | Missing-module errors and receive cancellation; one radio owner, subsequent ordinary Wi-Fi still usable. NRF24 stop gap remains open. |
+| NFC (1) | Read-only action leaves a known tag unchanged; destructive actions require their confirmation; remove tag mid-operation, then retry. Unsupported headless actions must remain explicit. |
+| BLE & IR (5) | Known BLE peripheral and IR remote; scan/HID/GATT transitions and stop failures; absent pins/headless rejection; save/reopen a learned IR button. BadUSB unsupported companion path must return promptly. |
+| Spam (3) | Stub driver init/start/stop failures, leave/Stop/disconnect and reject conflicting ownership. For BLE visibility, separate observed packets from OS UI response; the Mac card is not verified by an advertising ACK. NFC cancel/length limits and Wi-Fi loop cleanup remain scoped checks. |
+| Intercept (6) | Local fixture for proxy/scan with Wi-Fi + mobile/VPN and unavailable LAN; actual response forwarding; stop/restart/rotation; fingerprint/timeline scan ownership. Negative/cleanup paths for other network tools use fakes or an isolated bench. |
+| Device (6) | Remote round trip, Files errors and transfer hashes, USB reconnect, live diagnostics/settings; update cancel/permission/integrity failure and recovery; optional Ethernet absence/link state. |
+| Audio (4) | Known mic/tone/image input, independent output/decoder check, recording retention after failed save; mic/speaker/FM ownership, rotate/leave/disconnect and restart. |
+| Tools (9) | Reports preserve authorized export policy; harmless script timeout followed by a fresh script; macro Stop; map/geo persistence; Bug Sweep ownership; PCAP malformed/bounded import; clock/iButton presence; Unicode QR round trip and other offline utilities. |
+
+Cross-cutting: F23 needs a soak with **measured nonzero events** from the permitted
+receive-only streams and zero framing findings/tx_torn. Record event counts and rates,
+not only requested subscriptions. Add an isolated USB backpressure/recovery test that
+keeps USB open and has a pending command; a clean quiet soak does not exercise that fault.
+For each supported benign operation, run start -> rotate -> leave -> start -> disconnect
+-> reconnect, followed by a known-good read. Retain versions, fixture, expected/observed
+effect, errors, timing and PASS/FAIL/BLOCKED/NOT RUN separately.
+
 ## Functional acceptance priorities — 2026-11-05
 
 This pass follows two owner reports: De Bruijn reboots the T-Embed, and the

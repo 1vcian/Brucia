@@ -157,6 +157,7 @@ import app.brucia.ir.IrRemoteMap
 import app.brucia.ir.RemoteKey
 import app.brucia.ir.CatalogDevice
 import app.brucia.device.CliCatalog
+import app.brucia.device.CliParse
 import app.brucia.wardrive.ApObservation
 import app.brucia.wardrive.RiskScore
 import app.brucia.wardrive.RssiDistance
@@ -652,28 +653,24 @@ private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit, onGoCrack
             Button(
                 enabled = list.isNotEmpty(),
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    val f = File(context.getExternalFilesDir(null), "brucia_${System.currentTimeMillis()}.csv")
-                    f.writeText(WigleCsv.build(list))
-                    shareFile(context, f, "text/csv")
-                }
+                onClick = { shareExport(context, "text/csv") { exportNamed(context, "brucia_${System.currentTimeMillis()}.csv", WigleCsv.build(list)) } }
             ) { Text("CSV") }
             Button(
                 enabled = list.isNotEmpty(),
                 modifier = Modifier.weight(1f),
                 onClick = {
-                    val f = File(context.getExternalFilesDir(null), "brucia_${System.currentTimeMillis()}.kml")
-                    f.writeText(KmlExport.build(list))
-                    shareFile(context, f, "application/vnd.google-earth.kml+xml")
+                    shareExport(context, "application/vnd.google-earth.kml+xml") {
+                        exportNamed(context, "brucia_${System.currentTimeMillis()}.kml", KmlExport.build(list))
+                    }
                 }
             ) { Text("KML") }
             Button(
                 enabled = track.size >= 2,
                 modifier = Modifier.weight(1f),
                 onClick = {
-                    val f = File(context.getExternalFilesDir(null), "brucia_${System.currentTimeMillis()}.gpx")
-                    f.writeText(GpxExport.build(track))
-                    shareFile(context, f, "application/gpx+xml")
+                    shareExport(context, "application/gpx+xml") {
+                        exportNamed(context, "brucia_${System.currentTimeMillis()}.gpx", GpxExport.build(track))
+                    }
                 }
             ) { Text("GPX") }
             OutlinedButton(
@@ -2782,11 +2779,7 @@ private fun StationSnifferScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             OutlinedButton(
                 enabled = stations.isNotEmpty(),
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    val f = vm.exportStationsCsv()
-                    if (f != null) shareFile(context, f, "text/csv")
-                    else Toast.makeText(context, "Nothing captured yet", Toast.LENGTH_SHORT).show()
-                }
+                onClick = { shareExport(context, "text/csv") { vm.exportStationsCsv() } }
             ) { Text("Export CSV") }
             OutlinedButton(
                 enabled = stations.isNotEmpty(),
@@ -2899,11 +2892,7 @@ private fun WifiProbeScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             OutlinedButton(
                 enabled = probes.isNotEmpty(),
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    val f = vm.exportProbesCsv()
-                    if (f != null) shareFile(context, f, "text/csv")
-                    else Toast.makeText(context, "Nothing captured yet", Toast.LENGTH_SHORT).show()
-                }
+                onClick = { shareExport(context, "text/csv") { vm.exportProbesCsv() } }
             ) { Text("Export CSV") }
             OutlinedButton(
                 enabled = probes.isNotEmpty(),
@@ -3146,20 +3135,12 @@ private fun WifiMonitorScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             OutlinedButton(
                 enabled = frames.isNotEmpty(),
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    val f = vm.exportMonitorPcap()
-                    if (f != null) shareFile(context, f, "application/vnd.tcpdump.pcap")
-                    else Toast.makeText(context, "Nothing captured yet", Toast.LENGTH_SHORT).show()
-                }
+                onClick = { shareExport(context, "application/vnd.tcpdump.pcap") { vm.exportMonitorPcap() } }
             ) { Text("Export pcap") }
             OutlinedButton(
                 enabled = frames.isNotEmpty(),
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    val f = vm.exportMonitorPcap()
-                    if (f != null) openWith(context, f, "application/vnd.tcpdump.pcap")
-                    else Toast.makeText(context, "Nothing captured yet", Toast.LENGTH_SHORT).show()
-                }
+                onClick = { shareExport(context, "application/vnd.tcpdump.pcap", open = true) { vm.exportMonitorPcap() } }
             ) { Text("Open pcap") }
             OutlinedButton(
                 enabled = frames.isNotEmpty(),
@@ -3251,6 +3232,9 @@ private fun RemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val frame by vm.remoteFrame.collectAsState()
     // From the ViewModel: survives rotation/resize with the session it describes.
     val running by vm.remoteRunning.collectAsState()
+    // Leaving the screen (Home, Device, back; not a rotation) ends Remote and hands USB back to
+    // companion mode, so no other screen issues framed commands while the raw mirror owns the link.
+    LeaveEffect { if (vm.remoteRunning.value) vm.stopRemote() }
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -3898,7 +3882,7 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
     // replay fall back to Bruce's own `ir` CLI in the ViewModel, so only these two are disabled.
     val irCmdsOmitted = device?.features?.omits(app.brucia.wardrive.DeviceFeatures.IR_CMDS) == true
     var region by rememberSaveable { mutableStateOf("na") }
-    LeaveEffect { vm.stopIrJammer(silent = true) }
+    LeaveEffect { vm.stopIrJammer(silent = true); if (vm.irPowerSpamBusy.value) vm.irPowerSpamStop() }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -3950,6 +3934,33 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
             if (tvStatus.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(tvStatus, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurface)
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // --- IR power spam (all power tables, both regions, repeating) ---
+            val powerSpamming by vm.irPowerSpamBusy.collectAsState()
+            val powerSpamStatus by vm.irPowerSpamStatus.collectAsState()
+            Button(
+                enabled = connected && (powerSpamming || !irCmdsOmitted),
+                modifier = Modifier.fillMaxWidth(),
+                colors = BruciaButtonDefaults.buttonColors(containerColor = if (powerSpamming) Color(0xFFD32F2F) else cs.primary),
+                onClick = {
+                    if (powerSpamming) vm.irPowerSpamStop()
+                    else {
+                        vm.irPowerSpamStart()
+                        Toast.makeText(context, "IR power spam started", Toast.LENGTH_SHORT).show()
+                    }
+                },
+            ) { Text(if (powerSpamming) "Stop IR power spam" else "IR power spam (all power codes)") }
+            Text(
+                "Authorized use only. Blasts power codes for TVs, projectors, audio and more (both regions + universal), repeating until you Stop.",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+            )
+            if (powerSpamStatus.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(powerSpamStatus, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurface)
             }
 
             Spacer(Modifier.height(14.dp))
@@ -4113,6 +4124,7 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         if (vm.streamMayRun("subghz.raw")) vm.setSubghz(false)
         if (vm.streamMayRun("subghz.spectrum")) vm.stopSpectrum()
         vm.stopSubghzJammer(silent = true)
+        vm.stopDeBruijnTx() // leaving the tool ends an in-flight sweep; a rotation does not (LeaveEffect)
     }
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -4189,11 +4201,7 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Button(
                     enabled = capture.samples > 0,
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        val f = vm.exportRfCsv()
-                        if (f != null) shareFile(context, f, "text/csv")
-                        else Toast.makeText(context, "Nothing captured yet", Toast.LENGTH_SHORT).show()
-                    }
+                    onClick = { shareExport(context, "text/csv") { vm.exportRfCsv() } }
                 ) { Text("Export / Share CSV") }
             }
         }
@@ -4337,11 +4345,7 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     OutlinedButton(
                         modifier = Modifier.weight(1f),
                         enabled = signals.isNotEmpty() || wave.isNotEmpty(),
-                        onClick = {
-                            val f = vm.exportSub(signals.firstOrNull(), freqHz)
-                            if (f != null) shareFile(context, f, "application/octet-stream")
-                            else Toast.makeText(context, "Nothing to export yet", Toast.LENGTH_SHORT).show()
-                        }
+                        onClick = { shareExport(context, "application/octet-stream", "Nothing to export yet") { vm.exportSub(signals.firstOrNull(), freqHz) } }
                     ) { Text("Export .sub") }
                 }
                 val sub = importedSub
@@ -4380,7 +4384,7 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             // Replay only captures stored with a replay command; others (a protocol `rf tx` cannot
             // reproduce, or RAW) keep their text but offer no Replay that would send something else.
             savedRf.forEach { srf ->
-                SavedRow(srf, onReplay = if (srf.payload.startsWith("rf tx")) ({ vm.replaySaved(srf) }) else null,
+                SavedRow(srf, onReplay = if (CliParse.rfPayloadReplayable(srf.payload, srf.subtitle)) ({ vm.replaySaved(srf) }) else null,
                     onDelete = { vm.deleteSaved(srf.id) })
             }
         }
@@ -5820,14 +5824,35 @@ private fun EspnowScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
  * both FileProvider paths), keep only the newest few of its kind, and share it. A failure shows a
  * message instead of crashing the app.
  */
-private fun exportAndShare(context: android.content.Context, prefix: String, ext: String, mime: String, text: () -> String) {
-    try {
-        val dir = context.getExternalFilesDir(null) ?: context.filesDir
-        shareFile(context, app.brucia.report.ExportFiles.write(dir, prefix, ext, text()), mime)
+private fun exportAndShare(context: android.content.Context, prefix: String, ext: String, mime: String, text: () -> String) =
+    shareExport(context, mime) { app.brucia.report.ExportFiles.write(app.brucia.report.ExportFiles.dir(context), prefix, ext, text()) }
+
+/**
+ * Run an export that writes its own file ([write] returns null when there is nothing to export,
+ * shown as [empty]) and share it (or [open] it in a viewer). Any failure (no storage, full disk, build error) shows a message
+ * instead of escaping the click callback; nothing is shared after a failure.
+ */
+private fun shareExport(
+    context: android.content.Context,
+    mime: String,
+    empty: String = "Nothing captured yet",
+    open: Boolean = false,
+    write: () -> java.io.File?,
+) {
+    val file = try {
+        write()
     } catch (e: Exception) {
         android.widget.Toast.makeText(context, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        return
     }
+    if (file == null) android.widget.Toast.makeText(context, empty, android.widget.Toast.LENGTH_SHORT).show()
+    else if (open) openWith(context, file, mime)
+    else shareFile(context, file, mime)
 }
+
+/** Write a named export in [app.brucia.report.ExportFiles.dir]; failures throw IOException for [shareExport]. */
+private fun exportNamed(context: android.content.Context, name: String, text: String): java.io.File =
+    app.brucia.report.ExportFiles.writeNamed(app.brucia.report.ExportFiles.dir(context), name, text)
 
 private fun shareFile(context: android.content.Context, file: java.io.File, mime: String) {
     try {
@@ -6099,10 +6124,9 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     enabled = ndefUrl.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
-                        val tlv = NdefBuilder.tlv(NdefBuilder.uri(ndefUrl.trim()))
-                        val f = java.io.File(context.getExternalFilesDir(null), "brucia_ndef.txt")
-                        f.writeText(NdefBuilder.hex(tlv))
-                        shareFile(context, f, "text/plain")
+                        shareExport(context, "text/plain") {
+                            exportNamed(context, "brucia_ndef.txt", NdefBuilder.hex(NdefBuilder.tlv(NdefBuilder.uri(ndefUrl.trim()))))
+                        }
                     }
                 ) { Text("Build NDEF (share hex)") }
             }
@@ -8298,13 +8322,8 @@ private fun CrackScreen(vm: WardriveViewModel) {
                         OutlinedButton(
                             modifier = Modifier.fillMaxWidth(),
                             onClick = {
-                                val line = vm.exportHashcat()
-                                if (line != null) {
-                                    val f = java.io.File(context.getExternalFilesDir(null), "brucia_${System.currentTimeMillis()}.hc22000")
-                                    f.writeText(line + "\n")
-                                    shareFile(context, f, "text/plain")
-                                } else {
-                                    Toast.makeText(context, "Load a handshake or PMKID first", Toast.LENGTH_SHORT).show()
+                                shareExport(context, "text/plain", "Load a handshake or PMKID first") {
+                                    vm.exportHashcat()?.let { exportNamed(context, "brucia_${System.currentTimeMillis()}.hc22000", it + "\n") }
                                 }
                             }
                         ) { Text("Export hashcat 22000") }

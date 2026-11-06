@@ -199,6 +199,56 @@ class FirmwareGuards(unittest.TestCase):
         loop = body[body.find("while ((int32_t)(millis() - end) < 0)"):]
         self.assertIn("companionPollStop()", loop, "lora_recv ignores the app's stop (up to 120 s)")
 
+    def test_ir_power_spam_polls_stop_and_covers_all_tables(self):
+        """New IR power spam: both regions + universal, repeating, abortable by the app stop."""
+        tv = strip_comments(read("src/modules/ir/TV-B-Gone.cpp"))
+        body = body_of(tv, r"uint16_t runIrPowerSpamHeadless\(")
+        for tbl in ("NApowerCodes", "EUpowerCodes", "UniversalParsedCodes", "UniversalRawCodes"):
+            self.assertIn(tbl, body, f"ir power spam misses {tbl}")
+        self.assertIn("while (!done())", body, "ir power spam does not repeat the set")
+        self.assertIn("shouldAbort && shouldAbort()", body)
+        ir = strip_comments(read("src/companion/infrared.cpp"))
+        disp = body_of(ir, r"bool dispatchInfraredCommand\(")
+        self.assertLess(disp.find('cmdStr == "ir_power_spam_stop"'), disp.find('cmdStr == "ir_power_spam"'),
+                        "idle ir_power_spam_stop guard must precede the start handler")
+        spam = body_of(ir, r"static void runIrPowerSpam\(")
+        self.assertIn("companionPollStop()", spam, "ir_power_spam does not poll the app stop")
+        self.assertIn("(stopped)", spam)
+
+    def test_nrf24_windows_poll_stop(self):
+        """Backlog A2: every nrf24_* window ends on the app's stop, not only at its end."""
+        src = strip_comments(read("src/companion/nrf24.cpp"))
+        for fn in ("runNrf24Scan", "runNrf24Sniff"):
+            body = body_of(src, r"static void %s\(" % fn)
+            self.assertIn("companionPollStop()", body[body.find("while ("):], f"{fn} ignores the app's stop")
+        self.assertIn("nrf_jammer_headless(secs, [&stopped]() { return stopped = stopped || companionPollStop(); })", src)
+        self.assertIn("[&stopped]() { return stopped = stopped || companionPollStop(); }",
+                      body_of(src, r"static void runNrf24Mousejack\("))
+        jam = body_of(strip_comments(read("src/modules/NRF24/nrf_jammer.cpp")), r"int nrf_jammer_headless\(")
+        self.assertIn("shouldAbort && shouldAbort()", jam)
+        mj = body_of(strip_comments(read("src/modules/NRF24/nrf_mousejack.cpp")), r"int nrf_mousejack_headless\(")
+        self.assertIn("shouldAbort && shouldAbort()", mj)
+        self.assertIn("if (!aborted && injectText", mj, "an aborted MouseJack scan must not inject")
+
+    def test_fm_i2s_single_owner(self):
+        """Backlog A3: FM audio TX, speaker and mic release each other at the firmware boundary."""
+        audio = strip_comments(read("src/companion/audio.cpp"))
+        begin = body_of(audio, r"static void runFmAudioBegin\(")
+        release = begin.find('speakerOutputRelease("superseded");')
+        self.assertGreater(release, 0, "fm_audio_begin keeps a speaker output on the shared pins")
+        self.assertLess(release, begin.find("fm_tx_digital_begin("))
+        self.assertIn("micPcmStop();", begin[:begin.find("fm_tx_digital_begin(")], "FM mic source vs mic.pcm")
+        for fn in (r"static void runSpeakerTone\(", r"static void runSpeakerPlay\(", r"static void runSpkrPcmBegin\("):
+            self.assertIn("fmAudioRelease(false);", body_of(audio, fn), f"{fn} leaves FM audio on the speaker pins")
+        rel = body_of(audio, r"void fmAudioRelease\(bool onlyMicSource\)")
+        self.assertIn("fmAudioActive && (!onlyMicSource || fmAudioMic)", rel)
+        rec = audio.find('if (cmdStr == "mic_record" || cmdStr.startsWith("mic_record "))')
+        self.assertGreater(rec, 0)
+        self.assertLess(audio.find("fmAudioRelease(true);", rec), audio.find("runMicRecord(", rec),
+                        "mic_record vs FM mic source")
+        comp = strip_comments(read("src/companion/companion.cpp"))
+        self.assertEqual(2, comp.count("if (on) fmAudioRelease(true);"), "mic.spectrum / mic.pcm ON vs FM mic source")
+
     def test_companion_idle_exit_measured_after_handling(self):
         src = strip_comments(read("src/companion/companion.cpp"))
         loop = body_of(src, r"static void runCompanionUSB\(bool headless\)")
@@ -511,6 +561,23 @@ class MockProtocol(unittest.TestCase):
             busy = self.cli.reply(30 + i, ERR)
             self.assertIsNotNone(busy, c)
             self.assertEqual(409, busy["d"]["code"])
+
+    def test_sub_during_blocking_op_is_refused_not_dropped(self):
+        self.cli.send(3, 40, {"cmd": "jam_detect 30"})
+        time.sleep(0.1)
+        self.cli.send(SUB, 41, {"stream": "wifi.ap", "on": True})
+        busy = self.cli.reply(41, ERR, timeout=3)
+        self.assertIsNotNone(busy, "SUB dropped unanswered during a blocking op")
+        self.assertEqual(409, busy["d"]["code"])
+        self.cli.send(3, 42, {"cmd": "jam_detect_stop"})
+        self.assertIsNotNone(self.cli.reply(40, ACK, timeout=5))
+        self.cli.send(SUB, 43, {"stream": "wifi.ap", "on": True})  # idle again: served
+        self.assertIsNotNone(self.cli.reply(43, ACK, timeout=3))
+
+    def test_nrf24_stop_idle_answers_not_running(self):
+        r = self.cli.cmd(50, "nrf24_stop")
+        self.assertTrue(r["ok"])
+        self.assertEqual("not running", r["out"])
 
     def test_lora_recv_answers_ping_and_ends_on_stop(self):
         t0 = time.time()

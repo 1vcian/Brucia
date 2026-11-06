@@ -1,5 +1,6 @@
 package app.brucia
 
+import app.brucia.session.StreamClaim
 import app.brucia.ui.rememberRetained
 import app.brucia.ui.LeaveEffect
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -41,21 +42,23 @@ internal fun RfTimelineScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
     var filter by rememberSaveable { mutableStateOf("") }
     var bleStartedHere by rememberRetained { mutableStateOf(false) }
+    val wifiClaim = rememberRetained { StreamClaim() }
 
-    // Scan Wi-Fi + BLE and accumulate while the screen is open; stop what we started on leave.
+    // Scan Wi-Fi + BLE and accumulate while the screen is open; stop only what we started on leave
+    // (a Wardrive scan already running stays on).
     // Starts only what is not already on, so a screen recreated by a rotation re-binds to the
     // running scans (no second SUB ON); a rotation is not leaving (LeaveEffect). A disconnect is
     // cleaned up by the ViewModel, and the next connect starts the scans again here.
     LaunchedEffect(connected) {
         if (connected) {
-            if (!vm.wardriving.value) vm.setWardriving(true)
+            wifiClaim.acquire(vm.wardriving.value) { vm.setWardriving(true) }
             if (!vm.bleScanning.value) { vm.setBleScan(true); bleStartedHere = true }
             vm.startTimeline()
         }
     }
     LeaveEffect {
         vm.stopTimeline()
-        if (vm.wardriving.value) vm.setWardriving(false)
+        wifiClaim.release(vm.streamMayRun("wifi.ap")) { vm.setWardriving(false) }
         if (bleStartedHere) { vm.setBleScan(false); bleStartedHere = false }
     }
 

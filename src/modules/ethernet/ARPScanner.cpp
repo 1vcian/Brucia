@@ -144,8 +144,9 @@ void ARPScanner::setup() {
 
     if (ip_info.ip.addr == 0 || ip_info.netmask.addr == 0) {
         Serial.println("Ethernet has no IP/netmask, aborting ARP scan");
-        displayError("Ethernet not ready", true);
+        // Brucia: release before the key wait, so lwIP is not held while the user reads this.
         UNLOCK_TCPIP_CORE(); // Brucia: the lock taken above was never released on this path
+        displayError("Ethernet not ready", true);
         return;
     }
 

@@ -105,7 +105,7 @@ def test_healthy(tmp):
         check("diag deltas equal the runner's frame counts",
               counters["delta"]["rx_frames"] == counters["expected"]["rx_frames"] > 0
               and counters["delta"]["tx_frames"] == counters["expected"]["tx_frames"] > 0
-              and counters["delta"]["busy_409"] == 1 and counters["delta"]["rx_bad_json"] == 1, str(counters["delta"]))
+              and counters["delta"]["busy_409"] == 2 and counters["delta"]["rx_bad_json"] == 1, str(counters["delta"]))
         jp, mp = paths
         data = json.loads(Path(jp).read_text())
         md = Path(mp).read_text()

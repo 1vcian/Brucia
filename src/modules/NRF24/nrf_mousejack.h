@@ -13,6 +13,7 @@
 #define __NRF_MOUSEJACK_H
 #if !defined(LITE_VERSION)
 #include "modules/NRF24/nrf_common.h"
+#include <functional>
 
 // ── Maximum targets ───────────────────────────────────────────
 #define MJ_MAX_TARGETS 16
@@ -119,13 +120,15 @@ void nrf_mousejack();
 // standard unencrypted-keystroke injection is attempted against the first target
 // (the text is typed verbatim; \n and \t are honoured). Returns the number of
 // targets discovered and sets *injected (if non-null) to whether an injection ran.
-// check(EscPress) aborts the scan and any injection in progress.
+// check(EscPress) aborts the scan and any injection in progress. [shouldAbort] (the
+// companion's stop poll; may be empty) also ends the scan, and an aborted scan never injects.
 int nrf_mousejack_headless(
     int secs,
     const char *injectText,
     void (*onTarget)(const uint8_t addr[5], uint8_t ch, const char *type, void *user),
     void *user,
-    bool *injected
+    bool *injected,
+    std::function<bool()> shouldAbort = nullptr
 );
 #endif
 #endif // __NRF_MOUSEJACK_H

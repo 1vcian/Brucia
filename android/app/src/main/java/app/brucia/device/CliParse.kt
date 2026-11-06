@@ -34,6 +34,24 @@ object CliParse {
         return "rf tx $key $freq $te 10"
     }
 
+    /**
+     * Whether a STORED payload is a replay command that still reproduces its capture. Items saved
+     * before the replay guard (batch 17) kept an `rf tx` command for any protocol, so a CAME/Nice/
+     * KeeLoq capture would be sent as a different 24-bit protocol-1 frame. [protocol] is the saved
+     * capture's Protocol text (SavedItem subtitle; null when unknown, e.g. a geo pin): a known
+     * protocol must be one `rf tx` reproduces, and the key must fit 24 bits. Read-time only: the
+     * stored item is kept, it just offers no Replay.
+     */
+    fun rfPayloadReplayable(payload: String, protocol: String?): Boolean {
+        val words = payload.trim().split(Regex("\\s+"))
+        if (words.size < 5 || words[0] != "rf" || words[1] != "tx") return false
+        val p = protocol?.substringBefore('(')?.trim()
+        if (!p.isNullOrEmpty() && RF_TX_PROTOCOLS.none { it.equals(p, ignoreCase = true) }) return false
+        val hex = words[2].removePrefix("0x").removePrefix("0X").trimStart('0')
+        if (hex.length > 6 || hex.any { Character.digit(it, 16) < 0 }) return false
+        return true
+    }
+
     /** Protocol names a capture may carry that `rf tx` (protocol 1, 24 bits) reproduces. */
     private val RF_TX_PROTOCOLS = listOf("RcSwitch", "RcSwitch_1", "Princeton")
     private const val RF_TX_BITS = 24
