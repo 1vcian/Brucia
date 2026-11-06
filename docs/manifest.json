@@ -1,6 +1,6 @@
 {
   "name": "Brucia",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "new_install_prompt_erase": true,
   "builds": [
     {
