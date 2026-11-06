@@ -369,6 +369,35 @@ handling the last frame, so a bounded command that blocks for about a minute
 (NDEF push / emulate, TV-B-Gone) does not trip them before the PINGs queued
 meanwhile are read.
 
+#### Verb matching, idle stops and transmit results
+
+Each companion command is matched by its exact verb: the bare verb or the verb followed by a
+space and arguments. A longer word that only starts with a verb (`ir_jammer_stop`,
+`speaker_volume_stop`, `evil_portal_start_x`) is not read as that verb; it reaches the Bruce CLI,
+which answers `ok:false` for an unknown command. (Before, `ir_jammer_stop` started a jam window,
+`ble_ibeacon_stop` a broadcast, `jam_detect_stop` a detection window and `speaker_volume_stop`
+set the volume to 100 %.) While an operation runs, any `stop` / `*_stop` still ends or is consumed
+by it as described above. On an idle device `responder_stop`, `karma_stop`, `brucegotchi_stop`,
+`jam_detect_stop`, `ir_jammer_stop` and `ble_ibeacon_stop` reply `ACK {ok:true, out:"not running"}`.
+
+Results that used to report success when nothing was sent:
+
+| `cmd` | reply now |
+|---|---|
+| `ir_tvbgone [na\|eu]` | `ok:true`, `TV-B-Gone done (sent <n> codes)`; `ok:false`, `TV-B-Gone sent 0 codes` when no code went out (IR TX busy, or the bound passed first) |
+| `ir_jammer [secs]` | `ok:true`, `ir jammed (sent <n> pkts)`; `ok:false`, `ir jammer sent 0 pkts` |
+| `subghz_tx_raw <freqKHz> <te> <csv>` | `ok:true`, `tx <n> edges on <f> kHz` only when the radio came up and the RMT transmit accepted the timings; else `ok:false`, `tx failed: 0 of <n> edges sent (radio init or transmit)` |
+| `subghz_replay <freqKHz> <secs> [repeats]` | `ok:true`, `replayed <e> edges on <f> kHz (<done>/<repeats> repeats[, stopped at the device])`; `ok:false`, `replay not sent (0/<repeats> repeats; ...)` when the radio did not initialize for TX or ESC came first; `ok:false`, `no signal captured` as before |
+| `ble_ibeacon <secs> <uuid>` | `ERR {code:400, msg:"invalid uuid (expected 8-4-4-4-12 hex, ...)"}` for anything but the canonical 36-character UUID; nothing is broadcast. No UUID still means the default |
+| `ble_hid_begin` | `ERR {code:503, msg:"ble init failed"}` when NimBLE does not initialize; `ERR {code:500, msg:"ble hid start failed (not advertising)"}` when the HID advertiser is not running after start (the session is torn down) |
+| `nfc_ndef_push contact <Name[;+phone]>` | `ERR {code:400, msg:"contact too long (<n>-byte record, max 126)"}` before the reader starts, when the text/vcard record exceeds the PN532 NDEF limit (name + phone up to about 65 bytes, a name alone up to 71) |
+
+Bruce CLI number arguments (routed `CMD`): `tone` / `beep <frequency> <duration>` take whole
+numbers 0..20000 Hz and 0..10000 ms; `screen color hex <rrggbb>` a hexadecimal value up to
+`FFFFFF`; `screen color rgb <r> <g> <b>` whole numbers 0..255. Anything else prints a reason
+(`invalid frequency: ...`, `Invalid color: ...`) and returns `ok:false`; it used to abort the
+device (`std::stoul` threw, backlog F03) or take a numeric prefix.
+
 #### Device appearance and lite-control state in `CAPS` (additive)
 
 `CAPS` also reports the device's look and its output state, so an app that connects or reconnects
@@ -827,8 +856,10 @@ the CC1101 itself (every `subghz_*` command, `RfSend`, and the CLI `rf`/`subghz`
 `rx`, `tx`, `txp`, `scan`, `tx_from_file`, `tx_from_buffer`, `keeloqtx`) replies
 `ERR {code:409, msg:"sub-ghz receiver busy (stop Listen/Spectrum first)"}` instead of
 re-initializing and then idling the radio under the running stream. `rf/subghz mfcodes`
-(file only) is unaffected. Likewise `ble_media` replies `ERR {code:409}` while
-`ble.scan` runs.
+(file only) is unaffected. The check ignores letter case and covers every newline or `;;`
+segment of the command, as the Bruce CLI does (`RF RX 433920000` and
+`subghz mfcodes list;;subghz rx` are refused too). Likewise `ble_media` replies `ERR {code:409}`
+while `ble.scan` runs.
 
 - **Structured streams** deliver `EVENT {ev: "<name>", data: {...}}` messages
   (`id` is always 0 — these are unsolicited).
@@ -868,6 +899,21 @@ Current streams:
   reports proved loss. The app shows a burst at the limit as "possibly
   truncated" and appends both values as trailing `symbols,max_symbols` CSV
   columns (empty when absent); the `.sub` export format is unchanged.
+
+  The inverse command is `subghz_tx_raw <freqKHz> <te> <csv of durations>` (a
+  `CMD`, not a stream; needs `caps.cc1101`): it transmits an explicit OOK edge
+  list the phone already holds, driving the same RMT raw-timings TX as a saved
+  `.sub` RAW replay. Durations are signed µs played in CSV order (comma- or
+  space-separated): a **positive** value holds the line HIGH, a **negative**
+  value LOW, for `abs(value)` µs; `0` is a terminator and must not appear mid-
+  list (`src/modules/rf/protocols/rf_encoder.cpp` `rf_tx_durations`). `<te>` is
+  accepted for API symmetry but RAW uses the explicit durations directly. One
+  call's payload must fit `rx_max`/`COMPANION_MAX_FRAME`, so a long waveform is
+  split across several sequential `subghz_tx_raw` calls (each a separate on-air
+  burst with a short gap). The ACK is `{ok, out:"tx N edges on F kHz"}`; like
+  `.sub` transmit it reports that the command ran, not a verified radiation.
+  The app's De Bruijn sweep (`subghz/DeBruijnTx.kt`) uses this: one half-pulse
+  of `te` µs per sweep bit (`1`→`+te`, `0`→`-te`), split into overlapping bursts.
 - `subghz.spectrum` — CC1101 RSSI sweep (not an IQ SDR), one `EVENT` per
   completed sweep: `ev = "subghz.spectrum"`,
   `data = {start, step, count, rssi: [dBm, ...]}` with `start`/`step` in kHz;

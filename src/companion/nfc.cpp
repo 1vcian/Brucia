@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "ndef_contact.h"
 #include <globals.h>
 #if !defined(LITE_VERSION)
 #include "modules/rfid/ST25R3916.h"
@@ -196,6 +197,18 @@ static void runNfcNdefPush(const String &argsIn, uint32_t id) {
         sendErr(id, 400, why);
         return;
     }
+    // A contact is a text/vcard record; PN532 target mode serves at most NDEF_PUSH_MAX_RECORD bytes
+    // and emulate() failed only after starting the module. Refuse it before touching the reader.
+    const std::string contactPayload(payload.c_str());
+    if (type == "contact" && ndefContactRecordSize(contactPayload) > NDEF_PUSH_MAX_RECORD) {
+        char why[80];
+        snprintf(
+            why, sizeof(why), "contact too long (%u-byte record, max %u)",
+            (unsigned)ndefContactRecordSize(contactPayload), (unsigned)NDEF_PUSH_MAX_RECORD
+        );
+        sendErr(id, 400, why);
+        return;
+    }
 
     RFIDInterface *rfid = createCompanionRfidModule();
     if (!rfid || !rfid->begin()) {
@@ -205,21 +218,10 @@ static void runNfcNdefPush(const String &argsIn, uint32_t id) {
     }
 
     if (type == "contact") {
-        // Build a minimal vCard and wrap it as a "text/vcard" MIME NDEF record,
-        // reusing the same Ndef::mimeRecord helper as buildWifiNdef(). Payload may
-        // be "Full Name" or "Full Name;+123456789".
-        String name = payload;
-        String tel = "";
-        int semi = payload.indexOf(';');
-        if (semi >= 0) {
-            name = payload.substring(0, semi);
-            tel = payload.substring(semi + 1);
-            name.trim();
-            tel.trim();
-        }
-        String vcard = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:" + name + "\r\n";
-        if (tel.length() > 0) vcard += "TEL:" + tel + "\r\n";
-        vcard += "END:VCARD\r\n";
+        // Build a minimal vCard (ndef_contact.h, the same text the size check measured) and wrap
+        // it as a "text/vcard" MIME NDEF record, reusing the same Ndef::mimeRecord helper as
+        // buildWifiNdef(). Payload may be "Full Name" or "Full Name;+123456789".
+        const std::string vcard = ndefContactVcard(contactPayload);
         std::vector<uint8_t> body(vcard.begin(), vcard.end());
         rfid->rawNdefRecord = Ndef::mimeRecord("text/vcard", body);
     } else {

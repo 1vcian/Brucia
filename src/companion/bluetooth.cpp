@@ -1,5 +1,6 @@
 #include "core/display.h"
 #include "core/mykeyboard.h"
+#include "ibeacon_uuid.h"
 #include "internal.h"
 #include <NimBLEDevice.h>
 #include <globals.h>
@@ -377,7 +378,13 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
 
         // Brucia: phone-driven, time-bounded iBeacon advertiser.
         //   ble_ibeacon <secs> [uuid]
-        if (cmdStr.startsWith("ble_ibeacon")) {
+        // Idle stop guard: the advertiser runs its whole window (ESC only), so a ble_ibeacon_stop is
+        // read after it ended and must not start a new broadcast (startsWith read it as a start).
+        if (cmdStr == "ble_ibeacon_stop") {
+            companionAckMsg(id, true, "not running");
+            break;
+        }
+        if (cmdStr == "ble_ibeacon" || cmdStr.startsWith("ble_ibeacon ")) {
             String a = cmdStr.length() > 12 ? cmdStr.substring(12) : "";
             a.trim();
             int sp = a.indexOf(' ');
@@ -386,6 +393,12 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
             uuid.trim();
             if (secs < 1) secs = 8;
             if (secs > 60) secs = 60;
+            // A malformed UUID did not become the 16-byte UUID the user typed, yet the broadcast
+            // ran and the ACK said "ibeacon done". Refuse it before the BLE stack is touched.
+            if (uuid.length() && !ibeaconUuidValid(uuid.c_str())) {
+                sendErr(id, 400, "invalid uuid (expected 8-4-4-4-12 hex, e.g. 8ec76ea3-6668-48da-9866-75be8bc86f4d)");
+                break;
+            }
             {
                 const char *busy = bleAdvertiserConflict();
                 if (busy) {
@@ -603,9 +616,22 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
                     break;
                 }
                 if (!g_companionHid) {
-                    if (!NimBLEDevice::isInitialized()) NimBLEDevice::init("Brucia");
+                    // The ACK said "advertising" whatever happened: check the stack init and that
+                    // BleKeyboard::begin() (void) left the advertiser running.
+                    if (!NimBLEDevice::isInitialized() && !NimBLEDevice::init("Brucia")) {
+                        sendErr(id, 503, "ble init failed");
+                        break;
+                    }
                     g_companionHid = new BleKeyboard(BRUCIA_PRODUCT_NAME, BRUCIA_MANUFACTURER, 100);
                     g_companionHid->begin();
+                    NimBLEAdvertising *hidAdv = NimBLEDevice::getAdvertising();
+                    if (hidAdv == nullptr || !hidAdv->isAdvertising()) {
+                        g_companionHid->end(); // deinit the stack it set up, like ble_hid_end
+                        delete g_companionHid;
+                        g_companionHid = nullptr;
+                        sendErr(id, 500, "ble hid start failed (not advertising)");
+                        break;
+                    }
                 }
                 companionAckMsg(id, true, "advertising - pair 'Brucia' from the target");
             } else if (cmdStr == "ble_hid_status") {

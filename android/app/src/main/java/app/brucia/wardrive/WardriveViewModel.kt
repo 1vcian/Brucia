@@ -95,6 +95,8 @@ import app.brucia.session.BurstLoop
 import app.brucia.session.BurstLoopRegistry
 import app.brucia.session.CommandRunner
 import app.brucia.subghz.SubGhzBruteforceService
+import app.brucia.subghz.DeBruijnTx
+import app.brucia.subghz.DeBruijnTxService
 import app.brucia.subghz.RfReceiveService
 import app.brucia.session.JsonCommandRunner
 import app.brucia.wifi.BrucegotchiService
@@ -1278,17 +1280,38 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * De Bruijn brute force request. The device `subghz tx` path sends a single fixed code and
-     * cannot carry a De Bruijn sweep (a full sequence is 2^n bits; the key is one code of at most
-     * 64 bits), so this validates and refuses with a clear reason, echoes it to the console, and
-     * transmits NOTHING - no false "sent", no exception on the device. Returns the reason shown so
-     * the UI can surface it. [freqHz], [teUs] and [repeat] are unused while the path refuses.
+     * De Bruijn transmit request. The single-code `subghz tx` path cannot carry a sweep, but the
+     * device's raw-timing primitive (`subghz_tx_raw`) can: [DeBruijnTx] plans the sweep into a
+     * sequence of raw bursts sized to the frame budget, and [DeBruijnTxService] streams them. For
+     * orders/params the planner cannot cover it still refuses with a clear reason and transmits
+     * NOTHING - no false "sent", no silent truncation. Returns the immediate status line (the
+     * rejection reason, or the "Transmitting ..." text); progress then flows through
+     * [deBruijnTxStatus]. Capability gating (CC1101) is enforced by the session preflight.
      */
     fun transmitDeBruijn(bits: Int, freqHz: Long, teUs: Int, repeat: Int): String {
-        val reason = app.brucia.subghz.DeBruijn.transmitRejection(bits)
-        _console.value = (_console.value + "> de Bruijn B(2,$bits) refused: $reason").takeLast(500)
-        return reason
+        val frameLimit = app.brucia.protocol.FrameBudget.sendLimit(_device.value?.rxMax)
+        return when (val plan = DeBruijnTx.plan(bits, teUs, freqHz, repeat, frameLimit)) {
+            is DeBruijnTx.Plan.Rejected -> {
+                _console.value = (_console.value + "> de Bruijn B(2,$bits) refused: ${plan.reason}").takeLast(500)
+                deBruijnTx.show(plan.reason)
+                plan.reason
+            }
+            is DeBruijnTx.Plan.Ready -> {
+                val label = "%.2f MHz".format(freqHz / 1_000_000.0)
+                _console.value = (_console.value +
+                    "> de Bruijn B(2,$bits): streaming ${plan.chunkCount} raw burst(s) on $label").takeLast(500)
+                deBruijnTx.start(plan, label)
+            }
+        }
     }
+
+    /** De Bruijn raw-sweep streamer (subghz_tx_raw bursts); status/active for the UI; stop on disconnect. */
+    private val deBruijnTx by lazy {
+        DeBruijnTxService(viewModelScope, commandRunner, isConnected = { session != null })
+    }
+    val deBruijnTxStatus: StateFlow<String> get() = deBruijnTx.status
+    val deBruijnTxActive: StateFlow<Boolean> get() = deBruijnTx.active
+    fun stopDeBruijnTx() = deBruijnTx.stop()
 
     // Wi-Fi deauth of one AP is a time-bounded op that blocks the whole companion link for its full
     // duration on the firmware. Like the spam loops, we run it as a cancellable loop of SHORT (~8s)
@@ -2346,8 +2369,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startIbeacon(uuid: String = "") {
         if (client == null) { _ibeaconStatus.value = "Connect the device over USB first."; return }
-        if (_micPcmActive.value) stopMicPcm()
         val u = uuid.trim()
+        app.brucia.ble.IbeaconUuid.problem(u)?.let { _ibeaconStatus.value = it; return }
+        if (_micPcmActive.value) stopMicPcm()
         ibeaconLoop.start("Broadcasting iBeacon... (Stop to end)", { if (u.isEmpty()) "ble_ibeacon $SPAM_BURST_SECS" else "ble_ibeacon $SPAM_BURST_SECS $u" }, burstTimeoutMs, "Stopped.")
     }
 
@@ -3331,6 +3355,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             Entry("mifare", { mifareKeyCheck.stop() }, { mifareKeyCheck.stop("Disconnected") }),
             Entry("capture", { captureWorkflow.stop() }, { captureWorkflow.stop("Disconnected") }),
             Entry("subghz", { subBrute.stop() }),
+            Entry("debruijn-tx", { deBruijnTx.stop() }),
             Entry("jam-detect", { jamDetector.stop() }),
             Entry("lora", { lora.stop() }),
             Entry("ethernet", { ethernet.stop() }),

@@ -58,13 +58,13 @@ void rf_raw_emit_draw(void *parameter) {
     }
 }
 
-void rf_raw_emit(RawRecording &recorded, bool &returnToMenu) {
+bool rf_raw_emit(RawRecording &recorded, bool &returnToMenu) {
     rssiCount = 0;
     selPressed = false;
     escPressed = false;
     frequency = recorded.frequency;
 
-    initRfModule("tx", recorded.frequency);
+    const bool radioReady = initRfModule("tx", recorded.frequency);
 
     gpio_num_t txPin = gpio_num_t(bruceConfigPins.rfTx);
     if (bruceConfigPins.rfModule == CC1101_SPI_MODULE) txPin = gpio_num_t(bruceConfigPins.CC1101_bus.io0);
@@ -107,4 +107,5 @@ void rf_raw_emit(RawRecording &recorded, bool &returnToMenu) {
     deinitRfModule();
 
     if (escPressed) returnToMenu = true;
+    return radioReady;
 }

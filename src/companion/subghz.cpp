@@ -303,8 +303,9 @@ static void freeRecording(RawRecording &rec) {
 //   subghz_replay <freqKHz> <secs> [repeats]
 // Captures raw OOK for up to <secs> (1..30) on <freqKHz> (reusing the record.cpp
 // RMT RX path) then replays the captured waveform [repeats] times (1..10, default
-// 1) via rf_raw_emit(). ACK {ok, out:"replayed <n> edges on <freq>"}; ok:false if
-// nothing was captured.
+// 1) via rf_raw_emit(). ACK {ok, out:"replayed <n> edges on <freq> kHz (<done>/<repeats> repeats)"};
+// ok:false if nothing was captured, the radio did not initialize for TX, or no repeat was sent
+// (ESC at the device before the first one).
 static void runSubghzReplay(const String &argsIn, uint32_t id) {
 #if defined(COMPANION_HAS_CC1101)
     String args = argsIn;
@@ -331,15 +332,29 @@ static void runSubghzReplay(const String &argsIn, uint32_t id) {
         companionAckMsg(id, false, "no signal captured");
         return;
     }
-    // Retransmit via the shared raw emitter (handles TX bring-up + teardown).
+    // Retransmit via the shared raw emitter (handles TX bring-up + teardown). Count the repeats
+    // actually emitted with the radio up: the ACK used to say "replayed" even when the TX init
+    // failed or ESC ended it before the first repeat.
     bool returnToMenuSaved = returnToMenu;
     bool rtm = false;
-    for (int r = 0; r < repeats && !check(EscPress); r++) rf_raw_emit(rec, rtm);
+    int done = 0;
+    for (int r = 0; r < repeats && !rtm && !check(EscPress); r++) {
+        if (!rf_raw_emit(rec, rtm)) break; // radio not initialized for TX: nothing went out
+        done++;
+    }
     returnToMenu = returnToMenuSaved;
     freeRecording(rec);
 
-    char out[64];
-    snprintf(out, sizeof(out), "replayed %u edges on %.0f kHz", (unsigned)edges, freqMHz * 1000.0f);
+    char out[96];
+    if (done == 0) {
+        snprintf(out, sizeof(out), "replay not sent (0/%d repeats; radio TX init failed or stopped)", repeats);
+        companionAckMsg(id, false, out);
+        return;
+    }
+    snprintf(
+        out, sizeof(out), "replayed %u edges on %.0f kHz (%d/%d repeats%s)", (unsigned)edges, freqMHz * 1000.0f,
+        done, repeats, rtm ? ", stopped at the device" : ""
+    );
     companionAckMsg(id, true, out);
 #else
     (void)argsIn;
@@ -353,7 +368,8 @@ static void runSubghzReplay(const String &argsIn, uint32_t id) {
 // Reuses sendRfCommand() with protocol "RAW" (OOK preset), which parses the
 // space-separated durations and drives the existing RMT raw-timings TX. <te> is
 // accepted for API symmetry (RAW uses the explicit durations directly).
-// ACK {ok, out}.
+// ACK {ok:true, out:"tx <n> edges on <freq> kHz"} only when sendRfCommand() reports the transmit;
+// ok:false "tx failed: 0 of <n> edges sent ..." otherwise.
 static void runSubghzTxRaw(const String &argsIn, uint32_t id) {
 #if defined(COMPANION_HAS_CC1101)
     String args = argsIn;
@@ -390,9 +406,16 @@ static void runSubghzTxRaw(const String &argsIn, uint32_t id) {
     code.preset = "Ook270Async"; // OOK/ASK, 270 kHz BW
     code.data = csv;
     code.te = te;
-    sendRfCommand(code, true); // hideDefaultUI = true (headless)
+    // sendRfCommand reports whether the radio came up and the RMT transmit accepted the timings;
+    // the ACK used to say "tx <n> edges" whatever happened.
+    const bool sent = sendRfCommand(code, true); // hideDefaultUI = true (headless)
 
     char out[64];
+    if (!sent) {
+        snprintf(out, sizeof(out), "tx failed: 0 of %d edges sent (radio init or transmit)", n);
+        companionAckMsg(id, false, out);
+        return;
+    }
     snprintf(out, sizeof(out), "tx %d edges on %.0f kHz", n, freqMHz * 1000.0f);
     companionAckMsg(id, true, out);
 #else

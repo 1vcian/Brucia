@@ -141,7 +141,7 @@ import app.brucia.nfc.NdefBuilder
 import app.brucia.nfc.NfcSecurity
 import app.brucia.wordlist.BundledWordlistUi
 import app.brucia.wordlist.WordlistInfo
-import app.brucia.subghz.DeBruijn
+import app.brucia.subghz.DeBruijnTx
 import app.brucia.subghz.SubGhzEncoder
 import app.brucia.subghz.DecodedSignal
 import app.brucia.subghz.SubFile
@@ -4228,9 +4228,12 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text("De Bruijn sequence", fontWeight = FontWeight.SemiBold, color = cs.primary)
                 Text(
-                    "Compute the shortest ${dbBits}-bit De Bruijn sweep on the phone. Note: the device " +
-                        "subghz tx sends a single fixed code and cannot carry a full sweep, so Transmit " +
-                        "refuses with a reason and sends nothing.",
+                    "Compute the shortest ${dbBits}-bit De Bruijn sweep on the phone and stream it to the " +
+                        "device as raw OOK timings (subghz_tx_raw), split into several bursts to fit the " +
+                        "companion frame. Each burst is a separate transmission with a small gap; " +
+                        "consecutive bursts overlap so every ${dbBits}-bit code is still sent intact. " +
+                        "Orders above ${DeBruijnTx.MAX_TX_ORDER} are refused (too long to stream). " +
+                        "AUTHORIZED USE ONLY - only against receivers you own.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
@@ -4241,13 +4244,13 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text("Code length (bits)", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    DeBruijn.OFFERED_ORDERS.forEach { n -> SegButton("$n", dbBits == n, Modifier) { dbBits = n } }
+                    DeBruijnTx.OFFERED_TX_ORDERS.forEach { n -> SegButton("$n", dbBits == n, Modifier) { dbBits = n } }
                 }
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
                     value = dbBits.toString(),
-                    onValueChange = { s -> s.toIntOrNull()?.let { dbBits = it.coerceIn(1, DeBruijn.MAX_ORDER) } },
-                    label = { Text("Custom order (1-${DeBruijn.MAX_ORDER})") },
+                    onValueChange = { s -> s.toIntOrNull()?.let { dbBits = it.coerceIn(1, DeBruijnTx.MAX_TX_ORDER) } },
+                    label = { Text("Custom order (1-${DeBruijnTx.MAX_TX_ORDER})") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -4264,27 +4267,42 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                // Sequence size, so the scale (and why the device cannot carry it) is clear.
+                // Sweep scale and a rough on-air estimate (2^n bits, each a te-us half-pulse).
                 val seqBits = 1L shl dbBits
-                val fitsDeviceKey = seqBits <= DeBruijn.DEVICE_TX_KEY_BITS
+                val onAirSecs = seqBits * dbTe / 1_000_000.0
+                val feasible = dbBits in DeBruijnTx.MIN_TX_ORDER..DeBruijnTx.MAX_TX_ORDER
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "= $seqBits bits" +
-                        if (!fitsDeviceKey) "  (exceeds the ${DeBruijn.DEVICE_TX_KEY_BITS}-bit device code - not transmittable)" else "",
+                    "= $seqBits bits  (~%.1f s on air at ${dbTe}us)".format(onAirSecs) +
+                        if (!feasible) "  - order too large to stream (max ${DeBruijnTx.MAX_TX_ORDER})" else "",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (!fitsDeviceKey) Amber else cs.onSurfaceVariant,
+                    color = if (!feasible) Amber else cs.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(10.dp))
-                Button(
-                    enabled = connected,
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        val reason = vm.transmitDeBruijn(dbBits, freqHz, dbTe, 1)
-                        Toast.makeText(context, reason, Toast.LENGTH_LONG).show()
-                    }
-                ) { Text("Transmit de Bruijn") }
+                val dbTxActive by vm.deBruijnTxActive.collectAsState()
+                val dbTxStatus by vm.deBruijnTxStatus.collectAsState()
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        enabled = connected && !dbTxActive,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            val reason = vm.transmitDeBruijn(dbBits, freqHz, dbTe, 1)
+                            Toast.makeText(context, reason, Toast.LENGTH_LONG).show()
+                        }
+                    ) { Text("Transmit de Bruijn") }
+                    OutlinedButton(
+                        enabled = dbTxActive,
+                        modifier = Modifier.weight(1f),
+                        onClick = { vm.stopDeBruijnTx() }
+                    ) { Text("Stop") }
+                }
+                if (dbTxStatus.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(dbTxStatus, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
                 Text(
-                    "The device transmit path cannot carry a De Bruijn sweep; Transmit refuses and sends nothing.",
+                    "Streams the sweep as raw timings in sequential bursts; a feasible order transmits, " +
+                        "an infeasible one is refused and sends nothing.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 )
             }
@@ -6683,9 +6701,11 @@ private fun SpamScreen(vm: WardriveViewModel, onConnect: () -> Unit, filter: Str
         "nfc" -> "NFC spam"
         else -> "Spam hub - grouped by transport"
     }
-    // Leaving the screen ends the BLE advertising burst loop (like the IR/Sub-GHz/NRF loops), so it
-    // never keeps broadcasting with no visible Stop. A rotation is not leaving (LeaveEffect).
+    // Leaving the screen ends the BLE advertising and the Wi-Fi beacon burst loops (like the
+    // IR/Sub-GHz/NRF loops), so neither keeps broadcasting with no visible Stop. A rotation is not
+    // leaving (LeaveEffect).
     if (showBle) LeaveEffect { vm.stopBleSpam() }
+    if (showWifi) LeaveEffect { vm.stopBeaconSpam() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),

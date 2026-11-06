@@ -7,6 +7,9 @@ a "start a run" handler: a bare-word `startsWith("karma")` would otherwise read 
 idle device as `karma <secs>` and launch a ~60 s run (brucegotchi already guards against this with an
 exact `cmdStr == "brucegotchi_stop"` before its startsWith). This test fails if any such `*_stop`
 verb reaches a prefix handler instead of an exact-match (stop/idle) handler earlier in the order.
+Batch 18: every verb is now matched exactly (`== "x"` or `startsWith("x ")`); the same check for all
+dispatchers, with made-up `<verb>_<suffix>` commands and mutation checks, is
+tools/test_companion_dispatch_stops.py.
 
 Also pins the monitor channel clamp (monStart) at 1..13 to match the app and PROTOCOL.md.
 
@@ -48,10 +51,12 @@ def app_stops(caps_text):
 
 class CompanionWifiDispatchTest(unittest.TestCase):
     def setUp(self):
-        self.text = open(WIFI).read()
+        with open(WIFI) as f:
+            self.text = f.read()
         self.body = dispatch_body(self.text)
         self.conds = ordered_conditions(self.body)
-        self.stops = app_stops(open(CAPS).read())
+        with open(CAPS) as f:
+            self.stops = app_stops(f.read())
 
     def test_sources_present(self):
         self.assertTrue(self.conds, "no cmd conditions parsed from dispatchWifiCommand")
@@ -69,26 +74,22 @@ class CompanionWifiDispatchTest(unittest.TestCase):
         return None
 
     def test_app_stop_frames_never_start_a_run(self):
-        # A stop is at risk when a bare-word prefix (no trailing space) is a STRICT prefix of it,
-        # i.e. the handler would read it as "<verb> <args>" and launch that verb's run. A prefix
-        # equal to the stop is the stop's own dedicated handler and is fine (e.g. wifi_disconnect).
-        bare_prefixes = [lit for kind, lit, _ in self.conds if kind == "prefix" and not lit.endswith(" ")]
-        at_risk = [s for s in self.stops if any(s.startswith(p) and s != p for p in bare_prefixes)]
-        # The two newly guarded runs must appear here, else the test is not exercising anything.
-        for expected in ("karma_stop", "responder_stop", "brucegotchi_stop"):
-            self.assertIn(expected, at_risk, f"{expected} is no longer guarded by a bare prefix; update the test")
-        for stop in at_risk:
+        # Batch 18 generalized this check to every dispatcher (tools/test_companion_dispatch_stops.py)
+        # and replaced the bare-word prefixes with exact verb matching. Here: each app stop either
+        # reaches its own exact handler (idle-stop guard / wifi_disconnect) or no Wi-Fi handler.
+        for stop in self.stops:
             match = self._first_match(stop)
-            self.assertIsNotNone(match, f"{stop} matched no handler")
+            if match is None:
+                continue
             kind, lit = match
-            # Acceptable: an exact guard, or the stop's own dedicated prefix handler (lit == stop).
-            self.assertTrue(
-                kind == "eq" or lit == stop,
-                f"app stop '{stop}' falls into the start handler startsWith(\"{lit}\") before any "
-                f"exact 'cmdStr == \"{stop}\"' guard; add an idle-stop guard like brucegotchi_stop",
-            )
-            if kind == "eq":
-                self.assertEqual(stop, lit, f"'{stop}' should be caught by its own exact handler, got '{lit}'")
+            self.assertEqual(stop, lit.rstrip(" "),
+                             f"app stop '{stop}' falls into the handler of '{lit}'; use exact verb matching")
+        for guarded in ("karma_stop", "responder_stop", "brucegotchi_stop", "jam_detect_stop"):
+            self.assertEqual(("eq", guarded), self._first_match(guarded), f"{guarded} idle guard missing")
+
+    def test_no_bare_word_prefix_left(self):
+        bare = [lit for kind, lit, _ in self.conds if kind == "prefix" and not lit.endswith(" ")]
+        self.assertEqual([], bare, "bare-word startsWith() also matches '<verb>_stop'; match the verb exactly")
 
     def test_monitor_channel_clamped_to_1_13(self):
         mon = self.text[self.text.index("void monStart("):]

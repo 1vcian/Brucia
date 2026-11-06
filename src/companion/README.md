@@ -14,8 +14,8 @@ by `internal.h`. The USB wire contract remains in
 | `serial_rx.*` | Serial RX buffer sized in `setup()` to hold one inbound frame; CAPS `rx_max`/`rx_buf` |
 | `capabilities.*` / `capability_evidence_core.*` | Probe supported chips once before capture, cache results and report CAPS; Arduino-free evidence-level and static pin-conflict logic |
 | `commands.*` / `command_request.h` | Small dispatcher registry, CLI output capture and session/UI commands |
-| `wifi.*`, `bluetooth.*`, `subghz.*` | Radio-specific command matching, capture state, callbacks, service polling and cleanup |
-| `nfc.*`, `infrared.*`, `nrf24.*` | Reader/IR/optional-radio commands and their hardware-specific error paths |
+| `wifi.*`, `bluetooth.*`, `subghz.*` | Radio-specific command matching, capture state, callbacks, service polling and cleanup; Arduino-free `subghz_busy.h` (CC1101 owner classifier) and `ibeacon_uuid.h` |
+| `nfc.*`, `infrared.*`, `nrf24.*` | Reader/IR/optional-radio commands and their hardware-specific error paths; Arduino-free `ndef_contact.h` (vCard record and its PN532 size limit) |
 | `audio.*` | Microphone, speaker, PCM streaming and FM audio ownership |
 | `network.*` | LoRa/Ethernet command matching and teardown |
 | `storage.*` / `storage_upload.*` / `codec.*` | FS adapter, Arduino-free upload transaction/recovery engine and bounded binary/text encoding |
@@ -28,6 +28,8 @@ when it does not recognize the command, or handle it and return `true` after
 sending its response. The central registry tries these handlers, then preserves
 the legacy CLI fallback. Recognition must be distinct from execution success: a
 failed recognized command must not fall through and execute another CLI path.
+Match the exact verb (`cmd == "v" || cmd.startsWith("v ")`), never a bare-word prefix: a
+bare `startsWith("v")` also takes `v_stop` and starts `v` (tools/test_companion_dispatch_stops.py).
 `CommandRequest` borrows its string/envelope/session for the duration of dispatch;
 services must not retain those references asynchronously.
 

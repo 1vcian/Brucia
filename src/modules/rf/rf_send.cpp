@@ -351,7 +351,7 @@ bool txSubFile(RfCodes &selected_code, bool hideDefaultUI) {
     return true;
 }
 
-void sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
+bool sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
     uint32_t frequency = rfcode.frequency;
     String protocol = rfcode.protocol;
     String preset = rfcode.preset;
@@ -401,12 +401,12 @@ void sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
         if (!found) {
             if (!g_companionActive) Serial.print("unsupported preset: ");
             if (!g_companionActive) Serial.println(preset);
-            return;
+            return false;
         }
     }
 
     // init transmitter
-    if (!initRfModule("", frequency / 1000000.0)) return;
+    if (!initRfModule("", frequency / 1000000.0)) return false;
     if (bruceConfigPins.rfModule == CC1101_SPI_MODULE) { // CC1101 in use
         // derived from
         // https://github.com/LSatan/SmartRC-CC1101-Driver-Lib/blob/master/examples/Rc-Switch%20examples%20cc1101/SendDemo_cc1101/SendDemo_cc1101.ino
@@ -430,11 +430,12 @@ void sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
         if (modulation != 2) {
             if (!g_companionActive) Serial.print("unsupported modulation: ");
             if (!g_companionActive) Serial.println(modulation);
-            return;
+            return false;
         }
         initRfModule("tx", frequency / 1000000.0);
     }
 
+    bool sent = false;
     if (protocol == "RAW") {
         // count the number of elements of RAW_Data
         int buff_size = 0;
@@ -446,6 +447,10 @@ void sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
         // alloc buffer for transmittimings
         int *transmittimings =
             (int *)calloc(sizeof(int), buff_size + 1); // should be smaller the data.length()
+        if (transmittimings == nullptr) { // was written through unchecked
+            deinitRfModule();
+            return false;
+        }
         size_t transmittimings_idx = 0;
 
         // split data into words, convert to int, and store them in transmittimings
@@ -464,21 +469,21 @@ void sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
 
         // send rf command
         if (!hideDefaultUI) { displayTextLine("Sending.."); }
-        rfTransmitRawTimings(transmittimings);
+        sent = rfTransmitRawTimings(transmittimings);
         free(transmittimings);
     } else if (protocol == "BinRAW") {
         // transform from "00 01 02 ... FF" into "00000000 00000001 00000010 .... 11111111"
         rfcode.data = hexStrToBinStr(rfcode.data);
         // Serial.println(rfcode.data);
         rfcode.data.trim();
-        rfTransmitRawBits(rfcode);
+        sent = rfTransmitRawBits(rfcode);
     }
 
     else if (protocol == "KeeLoq") {
         // KeeLoq has dedicated framing (see rf_keeloq_durations). `rfcode.key` is
         // the 64-bit rolling code already assembled by keeloq_step.
         if (!hideDefaultUI) { displayTextLine("Sending.."); }
-        rf_tx_keeloq(rfcode.key, num_signal_repeat);
+        sent = rf_tx_keeloq(rfcode.key, num_signal_repeat);
     }
 
     else {
@@ -494,37 +499,39 @@ void sendRfCommand(struct RfCodes rfcode, bool hideDefaultUI) {
 #endif
 
         if (def != nullptr) {
-            rf_tx_protocol(rfcode.key, rfcode.Bit, rfcode.te, def, num_signal_repeat);
+            sent = rf_tx_protocol(rfcode.key, rfcode.Bit, rfcode.te, def, num_signal_repeat);
         } else {
             if (!g_companionActive) Serial.print("unsupported protocol: ");
             if (!g_companionActive) Serial.println(protocol);
             if (!g_companionActive) Serial.println("Falling back to generic RcSwitch_11");
-            rfTransmitCode(rfcode.key, rfcode.Bit, 270, 11, 10);
+            sent = rfTransmitCode(rfcode.key, rfcode.Bit, 270, 11, 10);
         }
     }
 
     // digitalWrite(bruceConfigPins.rfTx, LED_OFF);
     deinitRfModule();
+    return sent;
 }
 
 // Transmit `data` (`bits` long) using a classic OOK protocol NUMBER. Thin
 // wrapper over the RMT encoder; the number is resolved to a registry definition
 // (keeps the external CLI/JSON numeric contract). Signature unchanged.
-void rfTransmitCode(uint64_t data, unsigned int bits, int pulse, int protocol, int repeat) {
+bool rfTransmitCode(uint64_t data, unsigned int bits, int pulse, int protocol, int repeat) {
     const RfProtocolDef *def = rf_protocol_for_number(protocol);
-    rf_tx_protocol(data, bits, pulse, def, repeat);
+    bool sent = rf_tx_protocol(data, bits, pulse, def, repeat);
     deinitRfModule();
+    return sent;
 }
 
 // Transmit a bit string (each bit held for `te` µs) via RMT. Signature unchanged.
-void rfTransmitRawBits(RfCodes data) {
-    if (data.data == "") return;
-    rf_tx_raw_bits(data.data, data.te);
+bool rfTransmitRawBits(RfCodes data) {
+    if (data.data == "") return false;
+    return rf_tx_raw_bits(data.data, data.te);
 }
 
 // Transmit a 0-terminated RAW timings array (signed µs) via RMT. Signature
 // unchanged (1 repetition, as before).
-void rfTransmitRawTimings(int *ptrtransmittimings) {
-    if (!ptrtransmittimings) return;
-    rf_tx_raw_timings(ptrtransmittimings);
+bool rfTransmitRawTimings(int *ptrtransmittimings) {
+    if (!ptrtransmittimings) return false;
+    return rf_tx_raw_timings(ptrtransmittimings);
 }

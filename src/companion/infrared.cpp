@@ -34,8 +34,10 @@ static void runIrTvbgone(const String &argsIn, uint32_t id) {
     }
     // Cap the whole blast so the command stays bounded even if the full table is large.
     uint16_t sent = runTvBGoneHeadless(useEU, 60000);
-    String out = "TV-B-Gone done (" + String(sent) + " codes)";
-    companionAckMsg(id, true, out.c_str());
+    // ok only when codes went out: 0 means the IR TX lock was not available (or the bound passed
+    // before the first code); it used to ACK ok:true "done (0 codes)".
+    String out = sent ? "TV-B-Gone done (sent " + String(sent) + " codes)" : String("TV-B-Gone sent 0 codes");
+    companionAckMsg(id, sent > 0, out.c_str());
 #else
     companionAckMsg(id, false, "no IR");
 #endif
@@ -146,8 +148,17 @@ bool dispatchInfraredCommand(const CommandRequest &request) {
             break;
         }
 
+        // Idle stop guard: ir_jammer_headless() runs its whole window (it does not poll the link),
+        // so an ir_jammer_stop is read only after it ended. It must not start a new jam window
+        // (the old startsWith("ir_jammer") read it as "ir_jammer <secs>").
+        if (cmdStr == "ir_jammer_stop") {
+            companionAckMsg(id, true, "not running");
+            break;
+        }
+
         // Brucia: phone-driven, time-bounded IR jammer (abortable bursts).
-        if (cmdStr.startsWith("ir_jammer")) {
+        //   ir_jammer [secs]
+        if (cmdStr == "ir_jammer" || cmdStr.startsWith("ir_jammer ")) {
 #ifdef COMPANION_HAS_IR
             if (!irTxPinReady()) { // no pin menu in companion mode (nobody at the device)
                 companionAckMsg(id, false, "IR TX pin not configured");
@@ -156,9 +167,11 @@ bool dispatchInfraredCommand(const CommandRequest &request) {
 #endif
             int secs = cmdStr.length() > 10 ? cmdStr.substring(10).toInt() : 0;
             uint32_t n = ir_jammer_headless(secs);
-            char buf[32];
-            snprintf(buf, sizeof(buf), "ir jammed (%lu pkts)", (unsigned long)n);
-            companionAckMsg(id, true, buf);
+            // ok only when bursts went out (it used to ACK ok:true with 0 packets).
+            char buf[40];
+            if (n == 0) snprintf(buf, sizeof(buf), "ir jammer sent 0 pkts");
+            else snprintf(buf, sizeof(buf), "ir jammed (sent %lu pkts)", (unsigned long)n);
+            companionAckMsg(id, n > 0, buf);
             break;
         }
         return false;
@@ -170,8 +183,12 @@ bool dispatchInfraredCommand(const CommandRequest &request) {
 // own IR menus and `ir` CLI are unchanged; CAPS keeps caps.ir and reports features.ir_cmds:false.
 bool dispatchInfraredCommand(const CommandRequest &request) {
     const String &cmdStr = request.command;
+    if (cmdStr == "ir_jammer_stop") { // same idle answer as the full build; never a start
+        companionAckMsg(request.id, true, "not running");
+        return true;
+    }
     if (cmdStr == "ir_rx" || cmdStr == "ir_tvbgone" || cmdStr.startsWith("ir_tvbgone ") ||
-        cmdStr.startsWith("ir_tx_raw ") || cmdStr.startsWith("ir_jammer")) {
+        cmdStr.startsWith("ir_tx_raw ") || cmdStr == "ir_jammer" || cmdStr.startsWith("ir_jammer ")) {
         sendErr(request.id, 501, "ir companion commands not available in this (lite) build");
         return true;
     }

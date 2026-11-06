@@ -20,6 +20,15 @@ Covered:
        `ir tx` rejects a protocol sendIRCommand ignores (was a false success).
   NFC  nfc_emv_read waits a bounded time and polls `stop`; a cancelled wait is never "parsed".
   ESP-NOW espnow_send keeps the Wi-Fi owner (no forced STA / disconnect).
+Batch 18 (open items of docs/audit/radio.md):
+  RF   the CC1101 classifier is case-insensitive and checks every newline/";;" segment (SimpleCLI
+       matches names in any case and splits on them); subghz_tx_raw / subghz_replay ACK ok only
+       when something was transmitted (sendRfCommand / rf_raw_emit report it).
+  IR   TV-B-Gone and the IR jammer answer ok:false when 0 codes / packets were sent.
+  BLE  ble_ibeacon refuses a malformed UUID (host-compiled ibeacon_uuid.h); ble_hid_begin checks
+       the stack init and that the HID advertiser is running before answering "advertising".
+  NFC  nfc_ndef_push contact refuses a vCard record over the PN532 126-byte NDEF limit before the
+       reader is started (host-compiled ndef_contact.h, mirrored by the app check).
 
 Run: python3 tools/test_radio_guards.py
 """
@@ -95,9 +104,14 @@ int main() {
         "subghz_config 433920", "subghz_bruteforce 0 433920000 12 5", "rf rx 433920000", "subghz rx",
         "rf tx 445533 433920000 350 10", "subghz txp Princeton 433920000 24 1 350 10", "rf scan 433 434",
         "subghz tx_from_file /a.sub", "rf tx_from_buffer", "subghz keeloqtx CAME 433920000",
-        "RfSend {\"Data\":\"0x1\"}", "  rf  rx 433920000"};
+        "RfSend {\"Data\":\"0x1\"}", "  rf  rx 433920000",
+        // batch 18: SimpleCLI matches names in any case and runs every newline / ";;" segment.
+        "RF RX 433920000", "SubGhz Tx 445533 433920000 350 10", "rfsend {}", "RFSEND {}", "SUBGHZ_REPLAY 1 2",
+        "subghz mfcodes list;;subghz rx", "diag\nrf rx 433920000", "diag\r\nRF TXP X 1 24 1",
+        "\"rf\" \"rx\" 433920000", "rf mfcodes list;;rx 433920000", "subghz \"mfcodes list;;scan 1 2\""};
     const char *free_[] = {"subghz mfcodes list", "rf mfcodes add a;b;c", "rfid read", "rfx rx",
-        "subghzz rx", "ir tx NEC 00 00", "diag", "", "rf", "subghz", "rf txpx", "RfSendX"};
+        "subghzz rx", "ir tx NEC 00 00", "diag", "", "rf", "subghz", "rf txpx", "RfSendX",
+        "RF MFCODES LIST", "diag;;rfid read", "rx 433920000", "ir rx;;tx 1"};
     for (const char *c : radio) expect(true, c);
     for (const char *c : free_) expect(false, c);
     expect(false, nullptr);
@@ -127,19 +141,35 @@ class SubghzBusyClassifier(unittest.TestCase):
         rc, out = compile_run(self.HEADER.parent)
         self.assertEqual(0, rc, out)
 
-    def test_companion_prefix_rule_is_load_bearing(self):
+    def _mutant(self, old, new):
         src = self.HEADER.read_text()
-        anchor = 'if (strncmp(cmd, "subghz_", 7) == 0) return true;'
-        self.assertIn(anchor, src)
+        self.assertIn(old, src)
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "subghz_busy.h").write_text(src.replace(anchor, ""))
-            rc, out = compile_run(Path(tmp))
+            (Path(tmp) / "subghz_busy.h").write_text(src.replace(old, new))
+            return compile_run(Path(tmp))
+
+    def test_companion_prefix_rule_is_load_bearing(self):
+        rc, out = self._mutant('strncmp(first, "subghz_", 7) == 0 || ', "")
         self.assertNotEqual(0, rc, "mutation survived: subghz_* commands not classified")
 
+    def test_case_folding_is_load_bearing(self):
+        # Without lowercasing, "RF RX ..." (SimpleCLI is case-insensitive) bypasses the 409.
+        rc, out = self._mutant("return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;", "return c;")
+        self.assertNotEqual(0, rc, "mutation survived: upper-case radio verbs not classified")
+        self.assertIn("RF RX 433920000", out)
+
+    def test_segment_split_is_load_bearing(self):
+        rc, out = self._mutant("*p == '\\0' || *p == '\\n' || *p == '\\r' || (p[0] == ';' && p[1] == ';')",
+                               "*p == '\\0'")
+        self.assertNotEqual(0, rc, "mutation survived: a newline/;; segment bypasses the classifier")
+
     def test_mock_mirrors_classifier(self):
-        for c in ("subghz_replay 1 2", "rf rx 433920000", "subghz txp X 1 24 1", "RfSend {}"):
+        for c in ("subghz_replay 1 2", "rf rx 433920000", "subghz txp X 1 24 1", "RfSend {}",
+                  "RF RX 433920000", "rfsend {}", "diag\nrf rx 1", "subghz mfcodes list;;subghz rx",
+                  "rf mfcodes list;;rx 433920000", '"rf" "rx" 1'):
             self.assertTrue(subghz_needs_radio(c), c)
-        for c in ("subghz mfcodes list", "rfid read", "diag"):
+        for c in ("subghz mfcodes list", "rfid read", "diag", "RF MFCODES LIST", "rx 433920000",
+                  "rf mfcodes add a;b;c"):
             self.assertFalse(subghz_needs_radio(c), c)
 
 
@@ -214,7 +244,8 @@ class FirmwareGuards(unittest.TestCase):
             body = body_of(ir, fn)
             self.assertGreaterEqual(body.find("if (!irTxPinReady())"), 0, fn)
             self.assertLess(body.find("if (!irTxPinReady())"), body.find(call), fn)
-        jam = ir[ir.find('cmdStr.startsWith("ir_jammer")'):]
+        jam = ir[ir.find('cmdStr == "ir_jammer" || cmdStr.startsWith("ir_jammer ")'):]
+        self.assertGreater(len(jam), 0)
         self.assertLess(jam.find("if (!irTxPinReady())"), jam.find("ir_jammer_headless("))
         tvb = strip_comments(read("src/modules/ir/TV-B-Gone.cpp"))
         chk = body_of(tvb, r"void checkIrTxPin\(\)")
@@ -267,6 +298,175 @@ class FirmwareGuards(unittest.TestCase):
         self.assertIn("else if (mode == WIFI_MODE_AP) WiFi.enableSTA(true);", body)
 
 
+# --- batch 18: host-compiled iBeacon UUID and NDEF contact checks ---------------------------------
+UUID_DRIVER = r"""
+#include "ibeacon_uuid.h"
+#include <cstdio>
+using brucia::companion::ibeaconUuidValid;
+static int failures = 0;
+static void expect(bool want, const char *s) {
+    if (ibeaconUuidValid(s) != want) { failures++; std::printf("FAIL: %s -> %d\n", s ? s : "(null)", !want); }
+}
+int main() {
+    expect(true, "8ec76ea3-6668-48da-9866-75be8bc86f4d");
+    expect(true, "8EC76EA3-6668-48DA-9866-75BE8BC86F4D");
+    expect(true, "00000000-0000-0000-0000-000000000000");
+    expect(false, nullptr);
+    expect(false, "");
+    expect(false, "xyz");
+    expect(false, "8ec76ea3666848da986675be8bc86f4d");        // no dashes
+    expect(false, "8ec76ea3-6668-48da-9866-75be8bc86f4");     // 35 chars
+    expect(false, "8ec76ea3-6668-48da-9866-75be8bc86f4d0");   // 37 chars
+    expect(false, "8ec76ea3-6668-48da-9866-75be8bc86f4g");    // non-hex
+    expect(false, "8ec76ea3-6668-48da-9866_75be8bc86f4d");    // wrong separator
+    expect(false, "8ec76ea3-6668-48da-9866-75be8bc86f4d x");  // extra word
+    expect(false, "-8ec76ea-6668-48da-9866-75be8bc86f4d");    // dash moved
+    std::printf("failures=%d\n", failures);
+    return failures ? 1 : 0;
+}
+"""
+
+NDEF_DRIVER = r"""
+#include "ndef_contact.h"
+#include <cstdio>
+#include <string>
+using namespace brucia::companion;
+static int failures = 0;
+static void check(bool ok, const char *what) { if (!ok) { failures++; std::printf("FAIL: %s\n", what); } }
+int main() {
+    // Same text the firmware built before (BEGIN/VERSION/FN[/TEL]/END, CRLF).
+    check(ndefContactVcard("Ann") == "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ann\r\nEND:VCARD\r\n", "name only");
+    check(ndefContactVcard("Ann ; +391234") ==
+          "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ann\r\nTEL:+391234\r\nEND:VCARD\r\n", "name;tel trimmed");
+    check(ndefContactVcard("Ann;") == "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ann\r\nEND:VCARD\r\n", "empty tel");
+    // Record = 3 header bytes + "text/vcard" (10) + vCard.
+    check(ndefContactRecordSize("Ann") == 13 + 45, "record size name only");
+    // Limit: 126 bytes. Name only: 13 + 42 + name <= 126 -> name <= 71.
+    check(ndefContactRecordSize(std::string(71, 'a')) == 126, "71-char name fits exactly");
+    check(ndefContactRecordSize(std::string(72, 'a')) == 127, "72-char name is one over");
+    // With a phone: 13 + 42 + 6 + name + tel <= 126 -> name + tel <= 65.
+    check(ndefContactRecordSize(std::string(50, 'a') + ";" + std::string(15, '1')) == 126, "name+tel fits");
+    check(ndefContactRecordSize(std::string(50, 'a') + ";" + std::string(16, '1')) == 127, "name+tel over");
+    check(NDEF_PUSH_MAX_RECORD == 126, "PN532 limit");
+    std::printf("failures=%d\n", failures);
+    return failures ? 1 : 0;
+}
+"""
+
+
+def compile_driver(driver, header_dir):
+    with tempfile.TemporaryDirectory(prefix="brucia-b18-") as tmp:
+        tmp = Path(tmp)
+        (tmp / "d.cpp").write_text(driver)
+        exe = tmp / "d"
+        comp = subprocess.run([CXX, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fno-exceptions", "-I",
+                               str(header_dir), str(tmp / "d.cpp"), "-o", str(exe)], capture_output=True, text=True)
+        if comp.returncode:
+            return comp.returncode, comp.stderr
+        run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+        return run.returncode, run.stdout
+
+
+def mutant_driver(driver, header, old, new):
+    src = (SRC / "companion" / header).read_text()
+    assert old in src, f"mutation anchor missing: {old!r}"
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / header).write_text(src.replace(old, new))
+        return compile_driver(driver, Path(tmp))
+
+
+class Batch18Headers(unittest.TestCase):
+    def test_ibeacon_uuid(self):
+        rc, out = compile_driver(UUID_DRIVER, SRC / "companion")
+        self.assertEqual(0, rc, out)
+
+    def test_ibeacon_uuid_mutations(self):
+        rc, out = mutant_driver(UUID_DRIVER, "ibeacon_uuid.h", "return s[36] == '\\0';", "return true;")
+        self.assertNotEqual(0, rc, "length check mutation survived")
+        rc, out = mutant_driver(UUID_DRIVER, "ibeacon_uuid.h", "if (c != '-') return false;", "")
+        self.assertNotEqual(0, rc, "separator check mutation survived")
+
+    def test_ndef_contact(self):
+        rc, out = compile_driver(NDEF_DRIVER, SRC / "companion")
+        self.assertEqual(0, rc, out)
+
+    def test_ndef_contact_mutation(self):
+        rc, out = mutant_driver(NDEF_DRIVER, "ndef_contact.h", "= 3 + 10;", "= 3;")
+        self.assertNotEqual(0, rc, "record overhead mutation survived")
+
+    def test_app_mirrors_the_ndef_limit(self):
+        kt = read("android/app/src/main/java/app/brucia/nfc/NfcToolsService.kt")
+        self.assertIn("NDEF_MAX_CONTACT_RECORD_BYTES = 126", kt)
+        self.assertIn("NDEF_CONTACT_RECORD_OVERHEAD = 13", kt)
+
+
+class Batch18Firmware(unittest.TestCase):
+    def test_ibeacon_uuid_checked_before_the_stack(self):
+        bt = strip_comments(read("src/companion/bluetooth.cpp"))
+        h = bt[bt.find('if (cmdStr == "ble_ibeacon" || cmdStr.startsWith("ble_ibeacon ")) {'):]
+        check = h.find("if (uuid.length() && !ibeaconUuidValid(uuid.c_str())) {")
+        self.assertGreater(check, 0, "ble_ibeacon does not validate the UUID")
+        self.assertIn("sendErr(id, 400,", h[check:check + 200])
+        self.assertLess(check, h.find("bleAdvertiserConflict()"))
+        self.assertLess(check, h.find("runIbeaconBounded("))
+
+    def test_ble_hid_begin_checks_init_and_advertising(self):
+        bt = strip_comments(read("src/companion/bluetooth.cpp"))
+        h = bt[bt.find('if (cmdStr == "ble_hid_begin") {'):bt.find('} else if (cmdStr == "ble_hid_status") {')]
+        init = h.find('if (!NimBLEDevice::isInitialized() && !NimBLEDevice::init("Brucia")) {')
+        self.assertGreater(init, 0, "ble_hid_begin ignores the NimBLE init result")
+        self.assertIn("sendErr(id, 503,", h[init:init + 120])
+        adv = h.find("if (hidAdv == nullptr || !hidAdv->isAdvertising()) {")
+        self.assertGreater(adv, h.find("g_companionHid->begin();"))
+        self.assertIn("sendErr(id, 500,", h[adv:adv + 300])
+        self.assertIn("g_companionHid = nullptr;", h[adv:adv + 300])
+        self.assertLess(adv, h.find('companionAckMsg(id, true, "advertising'))
+
+    def test_ir_zero_codes_is_not_ok(self):
+        ir = strip_comments(read("src/companion/infrared.cpp"))
+        tvb = body_of(ir, r"static void runIrTvbgone\(")
+        self.assertIn("companionAckMsg(id, sent > 0, out.c_str());", tvb)
+        self.assertNotIn("companionAckMsg(id, true, out.c_str());", tvb)
+        jam = ir[ir.find('cmdStr == "ir_jammer" || cmdStr.startsWith("ir_jammer ")'):]
+        jam = jam[:jam.find("break;\n        }\n        return false;")]
+        self.assertIn("companionAckMsg(id, n > 0, buf);", jam)
+
+    def test_subghz_tx_raw_reports_the_transmit(self):
+        sg = strip_comments(read("src/companion/subghz.cpp"))
+        body = body_of(sg, r"static void runSubghzTxRaw\(")
+        self.assertIn("const bool sent = sendRfCommand(code, true);", body)
+        self.assertIn("companionAckMsg(id, false, out);", body[body.find("if (!sent)"):])
+        rs = strip_comments(read("src/modules/rf/rf_send.cpp"))
+        send = body_of(rs, r"bool sendRfCommand\(struct RfCodes rfcode, bool hideDefaultUI\)")
+        self.assertIn('if (!initRfModule("", frequency / 1000000.0)) return false;', send)
+        for call in ("sent = rfTransmitRawTimings(", "sent = rfTransmitRawBits(", "sent = rf_tx_keeloq(",
+                     "sent = rf_tx_protocol(", "sent = rfTransmitCode("):
+            self.assertIn(call, send)
+        self.assertTrue(send.rstrip().endswith("return sent;"))
+        self.assertIn("if (transmittimings == nullptr) {", send)
+
+    def test_subghz_replay_reports_repeats_sent(self):
+        sg = strip_comments(read("src/companion/subghz.cpp"))
+        body = body_of(sg, r"static void runSubghzReplay\(")
+        self.assertIn("if (!rf_raw_emit(rec, rtm)) break;", body)
+        zero = body.find("if (done == 0) {")
+        self.assertGreater(zero, 0)
+        self.assertIn("companionAckMsg(id, false, out);", body[zero:zero + 250])
+        emit = strip_comments(read("src/modules/rf/emit.cpp"))
+        eb = body_of(emit, r"bool rf_raw_emit\(RawRecording &recorded, bool &returnToMenu\)")
+        self.assertIn('const bool radioReady = initRfModule("tx", recorded.frequency);', eb)
+        self.assertTrue(eb.rstrip().endswith("return radioReady;"))
+
+    def test_ndef_contact_checked_before_the_reader(self):
+        nfc = strip_comments(read("src/companion/nfc.cpp"))
+        body = body_of(nfc, r"static void runNfcNdefPush\(")
+        check = body.find('if (type == "contact" && ndefContactRecordSize(contactPayload) > NDEF_PUSH_MAX_RECORD) {')
+        self.assertGreater(check, 0)
+        self.assertIn("sendErr(id, 400, why);", body[check:check + 400])
+        self.assertLess(check, body.find("createCompanionRfidModule()"))
+        self.assertIn("ndefContactVcard(contactPayload)", body)
+
+
 # --- protocol level against the mock ---------------------------------------------------------------
 class MockProtocol(unittest.TestCase):
     def setUp(self):
@@ -296,6 +496,21 @@ class MockProtocol(unittest.TestCase):
         self.cli.send(SUB, 5, {"stream": "subghz.raw", "on": False})
         self.assertIsNotNone(self.cli.reply(5, ACK))
         self.assertIsNotNone(self.cli.cmd(6, "subghz_config 433920"))  # radio free again: ACK
+
+    def test_idle_stops_never_start_a_run(self):
+        for i, stop in enumerate(("jam_detect_stop", "ir_jammer_stop", "ble_ibeacon_stop", "karma_stop")):
+            r = self.cli.cmd(20 + i, stop)
+            self.assertTrue(r["ok"], stop)
+            self.assertEqual("not running", r["out"], stop)
+
+    def test_upper_case_radio_verb_refused_while_streaming(self):
+        self.cli.send(SUB, 2, {"stream": "subghz.raw", "on": True})
+        self.assertIsNotNone(self.cli.reply(2, ACK))
+        for i, c in enumerate(("RF RX 433920000", "subghz mfcodes list;;subghz rx")):
+            self.cli.send(3, 30 + i, {"cmd": c})
+            busy = self.cli.reply(30 + i, ERR)
+            self.assertIsNotNone(busy, c)
+            self.assertEqual(409, busy["d"]["code"])
 
     def test_lora_recv_answers_ping_and_ends_on_stop(self):
         t0 = time.time()

@@ -14,7 +14,11 @@ This file:
   - mutates the overflow guard and the trailing-garbage check to prove they are load-bearing;
   - statically checks rf_commands.cpp: no std::sto* call is left, every numeric argument of the
     three transmit callbacks is parsed through clinum before initRfModule(), and txp/keeloqtx
-    report a failed encode/RMT transmit instead of returning success.
+    report a failed encode/RMT transmit instead of returning success;
+  - batch 18 (F03 remainder): `tone`/`beep` (sound_commands.cpp) and `screen color hex/rgb`
+    (screen_commands.cpp) parse through clinum before any side effect (tone 0..20000 Hz,
+    0..10000 ms; color 24-bit hex, rgb 0..255 per channel), and no std::sto* call is left in
+    src/core/serial_commands/ or src/companion/.
 
 Requires a C++ compiler. Run: python3 tools/test_firmware_cli_number.py
 """
@@ -28,6 +32,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = ROOT / "src/core/serial_commands/cli_number.h"
 RF_CMDS = ROOT / "src/core/serial_commands/rf_commands.cpp"
+SOUND_CMDS = ROOT / "src/core/serial_commands/sound_commands.cpp"
+SCREEN_CMDS = ROOT / "src/core/serial_commands/screen_commands.cpp"
+THROWING = r"std::sto(u?l{1,2}|i|f|d|l)\s*\("
 CXX = os.environ.get("CXX", "c++")
 
 DRIVER = r'''
@@ -89,6 +96,24 @@ int main() {
     // Small maximum (d > max must not underflow the guard).
     check(!clinum::parseU32("5", 0, 0, v), "max 0 rejects 5");
     v = 9; check(clinum::parseU32("0", 0, 0, v) && v == 0u, "max 0 accepts 0");
+
+    // tone/beep (sound_commands.cpp): frequency 0..20000 Hz, duration 0..10000 ms; the CLI
+    // defaults are "500" (the old "500UL" only worked because stoul took the numeric prefix).
+    v = 7; check(clinum::parseU32("500", 0, 20000, v) && v == 500u, "tone default 500");
+    check(!clinum::parseU32("500UL", 0, 20000, v), "old '500UL' default would be rejected");
+    check(legacyStoul("500UL") == 0, "legacy stoul read '500UL' as 500");
+    check(!clinum::parseU32("abc", 0, 20000, v), "tone text rejected (stoul threw)");
+    check(!clinum::parseU32("20001", 0, 20000, v), "tone above 20 kHz rejected");
+    check(!clinum::parseU32("10001", 0, 10000, v), "tone duration above 10 s rejected");
+    // screen color hex (screen_commands.cpp): 24-bit, "0x" optional.
+    v = 7; check(clinum::parseHexU32("ff00ff", 0xFFFFFF, v) && v == 0xFF00FFu, "color ff00ff");
+    v = 7; check(clinum::parseHexU32("0xFFFFFF", 0xFFFFFF, v) && v == 0xFFFFFFu, "color 0xFFFFFF");
+    check(!clinum::parseHexU32("zz", 0xFFFFFF, v), "color zz rejected (stoul threw)");
+    check(!clinum::parseHexU32("01000000", 0xFFFFFF, v), "color above 24 bits rejected");
+    check(!clinum::parseHexU32("ffffffffffffffffffff", 0xFFFFFF, v), "20 hex digits rejected (stoul out_of_range)");
+    // screen color rgb: each channel 0..255, whole token (atoi took "12abc" as 12).
+    check(!clinum::parseU32("12abc", 0, 255, v), "rgb prefix rejected");
+    check(!clinum::parseU32("256", 0, 255, v), "rgb 256 rejected");
 
     std::printf("checks=%d failures=%d\n", checks, failures);
     return failures == 0 ? 0 : 1;
@@ -154,7 +179,7 @@ class RfCliCallbacks(unittest.TestCase):
 
     def test_no_throwing_conversion_left(self):
         code = "\n".join(l for l in self.SRC.splitlines() if not l.strip().startswith("//"))
-        self.assertNotRegex(code, r"std::sto(u?l{1,2}|i|f|d)\s*\(")
+        self.assertNotRegex(code, THROWING)
 
     def _assert_parsed_before_init(self, name, args):
         body = function_body(self.SRC, name)
@@ -202,6 +227,85 @@ class RfCliCallbacks(unittest.TestCase):
             body = function_body(self.SRC, name)
             self.assertRegex(body, r"bool sent = " + re.escape(call), f"{name} ignores the TX result")
             self.assertIn("return sent;", body, f"{name} reports success regardless of the TX result")
+
+
+def callback_body(src, name):
+    m = re.search(r"uint32_t\s+" + re.escape(name) + r"\s*\(cmd \*c\)\s*\{", src)
+    if not m:
+        raise AssertionError(f"{name} not found")
+    depth, i = 1, m.end()
+    while depth:
+        depth += {"{": 1, "}": -1}.get(src[i], 0)
+        i += 1
+    return src[m.end():i - 1]
+
+
+def code_only(text):
+    return "\n".join(l for l in text.splitlines() if not l.strip().startswith("//"))
+
+
+def sound_screen_problems(sound, screen):
+    """Static F03 contract for tone/beep and screen color; returns the list of violations."""
+    out = []
+    for name, text in (("sound_commands.cpp", sound), ("screen_commands.cpp", screen)):
+        if re.search(THROWING, code_only(text)):
+            out.append(f"{name}: throwing std::sto* conversion left")
+    tone = callback_body(sound, "toneCallback")
+    parse = tone.find('toneArgU32(strFreq, "frequency", TONE_CLI_MAX_HZ')
+    parse_d = tone.find('toneArgU32(strDur, "duration", TONE_CLI_MAX_MS')
+    side = min(i for i in (tone.find("bruceConfig.soundEnabled = true"), tone.find("_tone(")) if i >= 0)
+    if parse < 0 or parse_d < 0 or not (parse < side and parse_d < side):
+        out.append("toneCallback: frequency/duration not parsed through clinum before touching sound")
+    if "TONE_CLI_MAX_HZ = 20000;" not in sound or "TONE_CLI_MAX_MS = 10000;" not in sound:
+        out.append("tone bounds changed")
+    if 'toneCmd.addPosArg("frequency", "500");' not in sound or 'toneCmd.addPosArg("duration", "500");' not in sound:
+        out.append("tone defaults are not '500' (the old '500UL' is rejected by the whole-token parser)")
+    hexcb = callback_body(screen, "hexColorCallback")
+    p = hexcb.find("clinum::parseHexU32(strValue.c_str(), 0xFFFFFF, value)")
+    if p < 0 or p > hexcb.find("bruceConfig.priColor"):
+        out.append("hexColorCallback: not parsed through clinum::parseHexU32 before applying")
+    rgb = callback_body(screen, "rgbColorCallback")
+    for ch in ("strRed", "strGreen", "strBlue"):
+        if f"clinum::parseU32({ch}.c_str(), 0, 255," not in rgb:
+            out.append(f"rgbColorCallback: {ch} not parsed whole-token 0..255")
+    return out
+
+
+class SoundScreenCliCallbacks(unittest.TestCase):
+    """F03 remainder (batch 18): tone/beep and screen color used std::stoul."""
+
+    def test_contract(self):
+        found = sound_screen_problems(SOUND_CMDS.read_text(), SCREEN_CMDS.read_text())
+        self.assertEqual([], found, "\n".join(found))
+
+    def test_base_sources_fail(self):
+        # The pre-batch-18 callbacks (std::stoul) are detected.
+        base_sound = SOUND_CMDS.read_text().replace(
+            'uint32_t frequency = 0, duration = 0;', 'unsigned long frequency = std::stoul(strFreq.c_str());')
+        self.assertTrue(sound_screen_problems(base_sound, SCREEN_CMDS.read_text()))
+        base_screen = SCREEN_CMDS.read_text().replace(
+            "clinum::parseHexU32(strValue.c_str(), 0xFFFFFF, value)", "0; value = std::stoul(strValue.c_str(), nullptr, 16)")
+        self.assertTrue(sound_screen_problems(SOUND_CMDS.read_text(), base_screen))
+
+    def test_tone_parse_after_side_effect_is_detected(self):
+        src = SOUND_CMDS.read_text()
+        moved = src.replace("    bool soundEnabled = bruceConfig.soundEnabled;\n    bruceConfig.soundEnabled = true;\n", "")
+        moved = moved.replace("    uint32_t frequency = 0, duration = 0;\n",
+                              "    bruceConfig.soundEnabled = true;\n    uint32_t frequency = 0, duration = 0;\n")
+        self.assertTrue(sound_screen_problems(moved, SCREEN_CMDS.read_text()))
+
+
+class NoThrowingConversionInCliOrCompanion(unittest.TestCase):
+    """No std::stoi/stoul/stoull/stof/stod left in the CLI callbacks or companion handlers (F03)."""
+
+    def test_none_left(self):
+        hits = []
+        for folder in ("src/core/serial_commands", "src/companion"):
+            for f in sorted((ROOT / folder).glob("*.[ch]*")):
+                for n, line in enumerate(f.read_text().splitlines(), 1):
+                    if not line.strip().startswith("//") and re.search(THROWING, line):
+                        hits.append(f"{f.relative_to(ROOT)}:{n}: {line.strip()}")
+        self.assertEqual([], hits, "\n".join(hits))
 
 
 if __name__ == "__main__":

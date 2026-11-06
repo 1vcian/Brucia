@@ -29,6 +29,11 @@ JVM test (`WifiSpamTextTest`) mirroring `BleSpamTextTest`.
 `karma_stop` / `responder_stop` guards mirroring `brucegotchi_stop`, so a stop reaching an idle
 device answers "not running" instead of starting a run; a static host test
 (`tools/test_companion_wifi_dispatch.py`) fails if any app stop verb can fall into a start handler.
+Batch 18 generalized this to every dispatcher (`tools/test_companion_dispatch_stops.py`). The Wi-Fi
+verbs that were bare prefixes (`evil_portal_start`, `wifi_disconnect`, `wifi_status`,
+`wifi_get_mac`, `responder`, `karma`, `brucegotchi`, `jam_detect`) are now matched exactly, so
+`evil_portal_start_x` or `wifi_status_stop` is not read as that command. `jam_detect_stop` on an
+idle device answers "not running" instead of opening a detection window.
 (b) The beacon-spam UI now shows the device's real SSID count from each reply (falling back to the
 requested count only when a reply lacks it). (c) The Evil-Portal deauth sub-text no longer claims
 the client joins the fake AP. (d) Firmware `monStart` now clamps the lock channel to 1..13 to match

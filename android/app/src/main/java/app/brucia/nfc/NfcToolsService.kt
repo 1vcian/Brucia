@@ -48,15 +48,39 @@ class NfcToolsService(
 
     /**
      * Local check matching the firmware (nfc.cpp runNfcNdefPush): it refuses a URL over 99 bytes,
-     * a text over 96 and any payload over 200 (it used to truncate them silently), and the command
-     * is one line. Null when the payload can be sent.
+     * a text over 96 and any payload over 200 (it used to truncate them silently), a contact whose
+     * vCard record exceeds the PN532's 126-byte NDEF limit (ndef_contact.h), and the command is
+     * one line. Null when the payload can be sent.
      */
     fun ndefPayloadProblem(type: String, p: String): String? {
         if (p.isEmpty()) return "Enter a payload first."
         if (p.any { it == '\n' || it == '\r' }) return "Use a single line (contact: Name;+phone)."
         val max = when (type) { "url" -> NDEF_MAX_URL_BYTES; "text" -> NDEF_MAX_TEXT_BYTES; else -> NDEF_MAX_PAYLOAD_BYTES }
         val bytes = p.toByteArray(Charsets.UTF_8).size
-        return if (bytes > max) "Too long for the device: $bytes bytes, max $max for $type." else null
+        if (bytes > max) return "Too long for the device: $bytes bytes, max $max for $type."
+        if (type == "contact") {
+            val record = contactRecordBytes(p)
+            if (record > NDEF_MAX_CONTACT_RECORD_BYTES) {
+                return "Contact too long for the device: $record-byte record, max $NDEF_MAX_CONTACT_RECORD_BYTES " +
+                    "(shorten the name or number)."
+            }
+        }
+        return null
+    }
+
+    /**
+     * Size of the text/vcard record the firmware builds for a `Name[;+phone]` contact
+     * (src/companion/ndef_contact.h): 13 bytes of record header and type, then
+     * `BEGIN:VCARD\r\nVERSION:3.0\r\nFN:<name>\r\n[TEL:<phone>\r\n]END:VCARD\r\n` in UTF-8.
+     */
+    fun contactRecordBytes(payload: String): Int {
+        val blank = { c: Char -> c == ' ' || c == '\t' || c == '\r' || c == '\n' }
+        val p = payload.trim(blank)
+        val semi = p.indexOf(';')
+        val name = if (semi < 0) p else p.substring(0, semi).trim(blank)
+        val tel = if (semi < 0) "" else p.substring(semi + 1).trim(blank)
+        val vcard = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:$name\r\n" + (if (tel.isEmpty()) "" else "TEL:$tel\r\n") + "END:VCARD\r\n"
+        return NDEF_CONTACT_RECORD_OVERHEAD + vcard.toByteArray(Charsets.UTF_8).size
     }
 
     /** Read a masked / read-only EMV card: `nfc_emv_read`. */
@@ -98,6 +122,10 @@ class NfcToolsService(
         const val NDEF_MAX_URL_BYTES = 99
         const val NDEF_MAX_TEXT_BYTES = 96
         const val NDEF_MAX_PAYLOAD_BYTES = 200
+        /** PN532 target mode serves at most 126 bytes of NDEF (kNdefMaxLen 128 - 2); ndef_contact.h. */
+        const val NDEF_MAX_CONTACT_RECORD_BYTES = 126
+        /** Ndef::mimeRecord header (3) + "text/vcard" (10). */
+        const val NDEF_CONTACT_RECORD_OVERHEAD = 13
 
         /** nfc_emv_read and nfc_write_uid block on the reader with no firmware bound: long guard. */
         const val UNBOUNDED_TIMEOUT_MS = 650_000L

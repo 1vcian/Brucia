@@ -6,5 +6,7 @@
 #include "structs.h"
 #include <vector>
 void rf_raw_emit_draw(void *parameter);
-void rf_raw_emit(RawRecording &recorded, bool &returnToMenu);
+// Returns whether the radio was initialized for TX (the emit runs as before either way; Bruce's
+// own caller ignores the result, the companion replay reports it).
+bool rf_raw_emit(RawRecording &recorded, bool &returnToMenu);
 #endif

@@ -33,7 +33,7 @@ TESTS = [
     "TftProtocolTest", "SubGhzDecoderTest", "SubGhzEncoderTest", "NdefBuilderTest", "DeviceFileReaderTest", "DownloadIOTest", "ReleaseCatalogTest", "AwaitReplyTest", "FirmwareImageTest", "UpdateHttpTest", "HttpWireTest", "RecordingBufferTest",
     "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
     "StreamRotationTest", "ParkedLeavesTest", "DeviceOutputsTest",
-    "FrameBudgetTest", "HandshakeParserTest", "PcapReaderTest", "SubFileTest",
+    "FrameBudgetTest", "HandshakeParserTest", "PcapReaderTest", "SubFileTest", "DeBruijnTxTest",
     "SlipReceiverTest", "CliReplyLimitTest",
 ]
 # Test-only files without a test class (compiled, not run).
@@ -51,6 +51,7 @@ SOURCES = [
     "audio/RecordingBuffer.kt",
     "files/FileList.kt", "remote/TftProtocol.kt", "nfc/NdefBuilder.kt",
     "subghz/OokProtocols.kt", "subghz/DecodedSignal.kt", "subghz/SubGhzDecoder.kt", "subghz/SubGhzEncoder.kt",
+    "subghz/DeBruijn.kt", "subghz/DeBruijnTx.kt",
     "audio/Dtmf.kt", "audio/Fft.kt", "audio/Goertzel.kt", "audio/Oscilloscope.kt", "audio/Sstv.kt",
     "session/CommandRunner.kt", "session/StreamSubscriptions.kt", "ui/ParkedLeaves.kt", "device/DeviceOutputs.kt",
     "wifi/CaptureWorkflow.kt", "wifi/CaptureDescriptor.kt",

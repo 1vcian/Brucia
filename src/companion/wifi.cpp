@@ -807,7 +807,8 @@ bool dispatchWifiCommand(const CommandRequest &request) {
 
         // Brucia: phone-driven Evil Portal (captive-portal / evil twin). The device
         // runs the fake AP + DNS + web server; captured creds stream as EVENT evil.cred.
-        if (cmdStr.startsWith("evil_portal_start")) {
+        // Exact verb (bare or with arguments): "evil_portal_start_x" is not this command.
+        if (cmdStr == "evil_portal_start" || cmdStr.startsWith("evil_portal_start ")) {
 #if !defined(LITE_VERSION)
             // args after the command token (may be empty -> default SSID)
             String a = cmdStr.length() > 18 ? cmdStr.substring(18) : "";
@@ -863,13 +864,13 @@ bool dispatchWifiCommand(const CommandRequest &request) {
             break;
         }
 
-        if (cmdStr.startsWith("wifi_disconnect")) {
+        if (cmdStr == "wifi_disconnect" || cmdStr.startsWith("wifi_disconnect ")) {
             wifiDisconnect();
             companionAckMsg(id, true, "disconnected");
             break;
         }
 
-        if (cmdStr.startsWith("wifi_status")) {
+        if (cmdStr == "wifi_status" || cmdStr.startsWith("wifi_status ")) {
             String out = WiFi.isConnected() ? ("connected " + WiFi.SSID() + " " + WiFi.localIP().toString())
                                             : String("disconnected");
             companionAckMsg(id, true, out.c_str());
@@ -879,7 +880,7 @@ bool dispatchWifiCommand(const CommandRequest &request) {
         // Wi-Fi MAC parity (Bruce "Change MAC"):
         //   wifi_get_mac            -> ACK current STA MAC
         //   wifi_set_mac <mac|random> -> set + persist the STA MAC
-        if (cmdStr.startsWith("wifi_get_mac")) {
+        if (cmdStr == "wifi_get_mac" || cmdStr.startsWith("wifi_get_mac ")) {
             companionAckMsg(id, true, WiFi.macAddress().c_str());
             break;
         }
@@ -919,7 +920,7 @@ bool dispatchWifiCommand(const CommandRequest &request) {
             break;
         }
 
-        if (cmdStr.startsWith("responder")) {
+        if (cmdStr == "responder" || cmdStr.startsWith("responder ")) {
 #if !defined(LITE_VERSION)
             int rsecs = cmdStr.length() > 10 ? cmdStr.substring(10).toInt() : 0;
             if (rsecs < 5) rsecs = 60;
@@ -949,7 +950,7 @@ bool dispatchWifiCommand(const CommandRequest &request) {
             break;
         }
 
-        if (cmdStr.startsWith("karma")) {
+        if (cmdStr == "karma" || cmdStr.startsWith("karma ")) {
 #if !defined(LITE_VERSION)
             int ksecs = cmdStr.length() > 6 ? cmdStr.substring(6).toInt() : 0;
             if (ksecs < 5) ksecs = 60;
@@ -973,7 +974,7 @@ bool dispatchWifiCommand(const CommandRequest &request) {
             break;
         }
 
-        if (cmdStr.startsWith("brucegotchi")) {
+        if (cmdStr == "brucegotchi" || cmdStr.startsWith("brucegotchi ")) {
 #if !defined(LITE_VERSION)
             int gsecs = cmdStr.length() > 12 ? cmdStr.substring(12).toInt() : 0;
             if (gsecs < 5) gsecs = 30;
@@ -994,7 +995,15 @@ bool dispatchWifiCommand(const CommandRequest &request) {
             break;
         }
 
-        if (cmdStr.startsWith("jam_detect")) {
+        // Idle stop guard, as for karma/responder/brucegotchi: while jam_detect runs, its stop is
+        // consumed by companionPollStop inside jam_detect_run; one reaching an idle device must not
+        // start a new detection window.
+        if (cmdStr == "jam_detect_stop") {
+            companionAckMsg(id, true, "not running");
+            break;
+        }
+
+        if (cmdStr == "jam_detect" || cmdStr.startsWith("jam_detect ")) {
 #if !defined(LITE_VERSION)
             int secs = cmdStr.length() > 11 ? cmdStr.substring(11).toInt() : 0;
             if (secs < 1) secs = 5;

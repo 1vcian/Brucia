@@ -64,6 +64,33 @@ class NfcToolsServiceTest {
         assertEquals("nfc_ndef_push url https://" + "a".repeat(91), runner.cmds.single())
     }
 
+    @Test fun contactRecordSizeMatchesTheFirmwareVcard() {
+        val s = NfcToolsService(CoroutineScope(Dispatchers.Unconfined), runner) { connected }
+        // Same numbers as tools/test_radio_guards.py NDEF_DRIVER (src/companion/ndef_contact.h).
+        assertEquals(13 + 45, s.contactRecordBytes("Ann"))
+        assertEquals(126, s.contactRecordBytes("a".repeat(71)))
+        assertEquals(127, s.contactRecordBytes("a".repeat(72)))
+        assertEquals(126, s.contactRecordBytes("a".repeat(50) + " ; " + "1".repeat(15)))
+        assertEquals(s.contactRecordBytes("Ann"), s.contactRecordBytes("Ann;"))
+        assertNull(s.ndefPayloadProblem("contact", "a".repeat(71)))
+        assertEquals(
+            "Contact too long for the device: 127-byte record, max 126 (shorten the name or number).",
+            s.ndefPayloadProblem("contact", "a".repeat(72)),
+        )
+        // UTF-8 bytes count, like the firmware's String length.
+        assertNotNull(s.ndefPayloadProblem("contact", "\u00e9".repeat(36)))
+        assertNull(s.ndefPayloadProblem("contact", "\u00e9".repeat(35)))
+    }
+
+    @Test(timeout = 5_000) fun pushNdefRefusesAContactOverThePn532Record() = runVirtual {
+        val s = svc()
+        s.pushNdef("contact", "Ada Lovelace;" + "+".repeat(60))
+        assertEquals(false, s.ndefBusy.value)
+        assertTrue(s.ndefStatus.value.startsWith("Contact too long for the device:"))
+        delay(20)
+        assertTrue(runner.calls.isEmpty())
+    }
+
     @Test(timeout = 5_000) fun readEmvTextsAndCommand() = runVirtual {
         val s = svc()
         s.readEmv()

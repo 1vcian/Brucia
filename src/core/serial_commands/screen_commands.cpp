@@ -1,4 +1,5 @@
 #include "screen_commands.h"
+#include "cli_number.h" // clinum::parseU32/parseHexU32 (safe, no-throw numeric args, backlog F03)
 #include "core/settings.h"
 #include "core/utils.h" // time
 #include <globals.h>
@@ -37,16 +38,15 @@ uint32_t rgbColorCallback(cmd *c) {
     strGreen.trim();
     strBlue.trim();
 
-    int r = atoi(strRed.c_str());
-    int g = atoi(strGreen.c_str());
-    int b = atoi(strBlue.c_str());
-
-    if (r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255) {
+    // Whole-token 0..255 per channel (atoi took "12abc" as 12 and text as 0).
+    uint32_t r = 0, g = 0, b = 0;
+    if (!clinum::parseU32(strRed.c_str(), 0, 255, r) || !clinum::parseU32(strGreen.c_str(), 0, 255, g) ||
+        !clinum::parseU32(strBlue.c_str(), 0, 255, b)) {
         serialDevice->println("Invalid color: " + strRed + " " + strGreen + " " + strBlue);
         return false;
     }
 
-    uint16_t hexColor = tft.color565(r, g, b);
+    uint16_t hexColor = tft.color565((uint8_t)r, (uint8_t)g, (uint8_t)b);
     bruceConfig.priColor = hexColor; // change global var, dont save in config
     return true;
 }
@@ -66,9 +66,10 @@ uint32_t hexColorCallback(cmd *c) {
         return false;
     }
 
-    uint32_t value = static_cast<uint32_t>(std::stoul(strValue.c_str(), nullptr, 16));
-
-    if (value > 0xFFFFFF) {
+    // std::stoul threw on non-hex text ("screen color hex zz") and an over-wide value, aborting the
+    // device (backlog F03; no catch on the companion routing path). Whole token, 24-bit max.
+    uint32_t value = 0;
+    if (!clinum::parseHexU32(strValue.c_str(), 0xFFFFFF, value)) {
         serialDevice->println("Invalid color: " + strValue);
         return false;
     }

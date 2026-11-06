@@ -858,7 +858,9 @@ bool dispatchAudioCommand(const CommandRequest &request) {
         }
 
         //   speaker_volume <0-100>  (persists bruceConfig.soundVolume)
-        if (cmdStr.startsWith("speaker_volume")) {
+        // Exact verb: "speaker_volume_stop" is not a volume (it set 100%), it falls through and is
+        // refused by the CLI as an unknown command.
+        if (cmdStr == "speaker_volume" || cmdStr.startsWith("speaker_volume ")) {
             int v = cmdStr.length() > 15 ? cmdStr.substring(15).toInt() : 100;
             if (v < 0) v = 0;
             if (v > 100) v = 100;

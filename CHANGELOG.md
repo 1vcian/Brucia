@@ -7,6 +7,42 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Stops, results and parsers (batch 18, software only; firmware changes need a build and the
+  hardware checks H16-H19 in `docs/audit/radio.md`):
+  - A stop could start the operation it named. Several companion commands were matched by a bare
+    prefix, so `ir_jammer_stop` started an IR jam window, `ble_ibeacon_stop` an iBeacon broadcast,
+    `jam_detect_stop` a detection window and `speaker_volume_stop` set the volume to 100 %;
+    `evil_portal_start_x` started the portal. Every companion verb is now matched exactly; those
+    stops answer "not running" on an idle device and other unknown words are refused by the CLI.
+    A new host test replays the dispatch order of every dispatcher (full and LITE builds).
+  - Honest transmit results: `subghz_tx_raw` and `subghz_replay` report whether anything was sent
+    (and how many replay repeats); TV-B-Gone and the IR jammer answer `ok:false` with 0 codes.
+  - `ble_ibeacon` refuses a malformed UUID (firmware and app); `ble_hid_begin` reports a BLE init
+    or advertising failure instead of "advertising"; an NDEF contact over the PN532's 126-byte
+    record is refused before the reader starts (firmware and app).
+  - While Listen/Spectrum owns the CC1101, a radio command spelled in upper case or hidden in a
+    later `;;`/newline segment (both run by the Bruce CLI) is refused with `ERR 409` too.
+  - Leaving the Spam hub also stops the Wi-Fi beacon spam loop.
+  - CLI numbers (backlog F03 remainder): `tone`/`beep` and `screen color hex/rgb` reject malformed
+    or out-of-range numbers with a reason instead of aborting the device (`std::stoul` threw).
+    No throwing conversion is left in the CLI callbacks or companion handlers.
+- De Bruijn sweep now actually transmits (batch 18, app-side only; no firmware change). The single-
+  code `subghz tx` path still cannot carry a sweep and is still refused with a reason, but the
+  device's existing raw-timing companion command `subghz_tx_raw <freqKHz> <te> <csv durations>`
+  (src/companion/subghz.cpp) can: a new pure planner `subghz/DeBruijnTx.kt` expands
+  `DeBruijn.sequence(n)` to signed edge durations in the firmware RAW convention (positive us = HIGH,
+  negative = LOW, in sequence order; rf_encoder.cpp rf_tx_durations), linearizes the cyclic sequence
+  (appends the first n-1 bits) and splits it into OVERLAPPING bursts (overlap n-1 bits) each under
+  the companion frame budget, so every n-bit code is sent intact, including windows straddling a cut.
+  A new service `subghz/DeBruijnTxService.kt` streams the bursts sequentially with honest progress
+  ("burst 3/12..."), a real per-burst result and a final summary, and stops cleanly on Stop or
+  disconnect (sends nothing further). Orders are capped at 16 (`MAX_TX_ORDER`); larger orders are
+  refused as impractical to stream, never silently truncated. No new transmit capability beyond the
+  existing `subghz_tx_raw`. Hardware verification against an owned receiver is pending (soak running);
+  see the De Bruijn owner check in `docs/audit/radio.md` - it is the only step that proves it opens
+  anything. Tests: `DeBruijnTxTest` (coverage/overlap/budget/sign-vector/rejection/determinism plus a
+  remove-the-overlap mutation check) and `DeBruijnTxServiceTest` (exact burst sequence, Stop/
+  disconnect mid-stream, nothing sent when rejected/offline, progress/summary text).
 - Radio features audit (batch 17, software only; firmware changes need a build and the hardware
   checks in `docs/audit/radio.md`):
   - RF CLI numbers (backlog F03): `subghz tx`, `subghz txp`, `subghz keeloqtx` and `RfSend` no longer

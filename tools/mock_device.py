@@ -95,7 +95,7 @@ LITE_OMITTED_FEATURES = {"mifare_keycheck": False, "ir_cmds": False, "ble_gatt":
 LITE_501 = (
     (lambda c: c.startswith("mifare_keycheck "), "mifare_keycheck not available in this (lite) build"),
     (lambda c: c == "ir_rx" or c == "ir_tvbgone" or c.startswith("ir_tvbgone ") or c.startswith("ir_tx_raw ")
-     or c.startswith("ir_jammer"), "ir companion commands not available in this (lite) build"),
+     or c == "ir_jammer" or c.startswith("ir_jammer "), "ir companion commands not available in this (lite) build"),
     (lambda c: c.startswith("ble_gatt_connect ") or c.startswith("ble_gatt_read "),
      "ble_gatt not available in this (lite) build"),
     (lambda c: c == "diag", "diag not available in this (lite) build"),
@@ -308,18 +308,34 @@ def rf_tx_reject_reason(cmd):
     return None
 
 
+# `*_stop` verbs the firmware answers with "not running" when nothing runs (exact-match guards
+# placed before each operation's own handler; tools/test_companion_dispatch_stops.py).
+IDLE_STOPS = ("responder_stop", "karma_stop", "brucegotchi_stop", "jam_detect_stop", "ir_jammer_stop",
+              "ble_ibeacon_stop")
+
+
 SUBGHZ_RADIO_VERBS = ("rx", "tx", "txp", "scan", "tx_from_file", "tx_from_buffer", "keeloqtx")
 
 
 def subghz_needs_radio(cmd):
     """Mirrors src/companion/subghz_busy.h subghzCommandNeedsRadio(): companion subghz_* commands,
-    RfSend and the CLI rf/subghz radio verbs drive the CC1101 themselves (mfcodes does not)."""
-    parts = cmd.split()
-    if not parts:
-        return False
-    if parts[0].startswith("subghz_") or parts[0] == "RfSend":
-        return True
-    return parts[0] in ("rf", "subghz") and len(parts) > 1 and parts[1] in SUBGHZ_RADIO_VERBS
+    RfSend and the CLI rf/subghz radio verbs drive the CC1101 themselves (mfcodes does not). Case
+    insensitive (SimpleCLI is), every newline / ";;" segment counts, quotes/backslashes ignored."""
+    rf_composite = bare_radio_verb = False
+    for seg in re.split(r"\r|\n|;;", cmd):
+        words = seg.replace('"', "").replace("\\", "").lower().split(" ")
+        words = [w for w in words if w]
+        if not words:
+            continue
+        if words[0].startswith("subghz_") or words[0] == "rfsend":
+            return True
+        if words[0] in ("rf", "subghz"):
+            rf_composite = True
+            if len(words) > 1 and words[1] in SUBGHZ_RADIO_VERBS:
+                return True
+        elif words[0] in SUBGHZ_RADIO_VERBS:
+            bare_radio_verb = True
+    return rf_composite and bare_radio_verb
 
 
 class MockDevice:
@@ -728,7 +744,11 @@ class MockDevice:
                 self._storage(fd, mid, cmd)
             elif cmd.startswith("script_run "):
                 self._script_run(fd, mid, cmd[len("script_run "):], stop)
-            elif cmd.startswith("jam_detect"):
+            elif cmd in IDLE_STOPS:
+                # Idle stop guards (wifi.cpp / infrared.cpp / bluetooth.cpp): a stop reaching an idle
+                # device answers "not running" and never starts the operation.
+                self._send(fd, ACK, mid, {"ok": True, "out": "not running"})
+            elif cmd == "jam_detect" or cmd.startswith("jam_detect "):
                 secs = cmd[len("jam_detect"):].strip()
                 self._blocking_op(fd, mid, min(max(int(secs) if secs.isdigit() else 5, 1), 120), stop)
             elif cmd.startswith("wifi_handshake") or cmd.startswith("wifi_pmkid"):
