@@ -37,6 +37,13 @@ feature logic            (wardriving, ir, rf, ... — never touches the wire)
   (see [Inbound frame capacity](#inbound-frame-capacity-rx_max)); hosts resync on
   device frames as described in [Resynchronisation](#resynchronisation-device--host).
   (COBS may be added later for self-synchronizing streams.)
+  On the device the whole emission of one frame (its length prefix, payload and flush) is
+  serialized by a recursive mutex in `writeFrame()` (`src/companion/protocol.cpp`), so a stream
+  EVENT emitted from another task can never interleave its bytes with a response and desync the
+  length prefix. Each frame is also written in full: `Serial.write` may accept only part of a
+  buffer under host backpressure (HWCDC/USBCDC honour the Arduino short-write contract), so the
+  device loops on the return value (`writeAll`, bounded) rather than truncating the prefix or
+  payload. Every device frame goes through that one writer.
 - **Payload**: a JSON object (v0 baseline; parsed with ArduinoJson on the
   device). A compact binary encoding (MessagePack on the ESP via ArduinoJson,
   CBOR on Android) may replace JSON later behind the same envelope — bump the

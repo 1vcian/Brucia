@@ -7,6 +7,28 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Companion frames are now emitted atomically and completely (backlog F23; firmware change, needs a
+  build and a clean hardware re-soak). `writeFrame()` had two framing-integrity defects behind the
+  2026-11-06 soak corruption (stray non-frame bytes, an undecodable frame, a tx/rx counter mismatch;
+  the app resynced, no crash or leak):
+  - Cross-task interleave: the length prefix, payload and flush were written with no lock, so a
+    stream EVENT (wifi.sta, wifi.probe, subghz.raw, ...) emitted from another task could interleave
+    its bytes with a response. A recursive FreeRTOS mutex now wraps the whole emission, so two tasks
+    can never interleave. No emitter runs in an ISR (the RMT and Wi-Fi promiscuous callbacks only
+    queue/ring-buffer; frames are emitted later from the loop), so blocking on the mutex is safe.
+  - Partial writes: `Serial.write(buf, len)` is not guaranteed to accept all `len` bytes - the
+    ESP32-S3 USB-Serial-JTAG path (HWCDC) and the TinyUSB path (USBCDC) return a short count under
+    host backpressure (Arduino Stream::write contract; the classic-ESP32 UART path always writes
+    all). The code ignored both `Serial.write` return values, so a short write truncated the length
+    prefix or the payload and desynced the stream even with a single writer. A new bounded `writeAll`
+    loops on the return value, writing the remainder with a 1 ms yield up to a 2 s per-frame deadline
+    so a vanished host cannot wedge the companion loop; a frame that still cannot be completed is left
+    torn (link already dead) and is not counted in `tx_frames`.
+  The wire format is unchanged. Host test `tools/test_firmware_frame_lock.py` compiles the real
+  `writeFrame`/`writeAll` and proves (a) two concurrent writers never interleave with the lock and do
+  interleave once it is removed, and (b) a sink that accepts only a few bytes per write still yields
+  the complete framed stream with `writeAll` but a truncated one once it is reduced to the pre-fix
+  single write.
 - Stops, results and parsers (batch 18, software only; firmware changes need a build and the
   hardware checks H16-H19 in `docs/audit/radio.md`):
   - A stop could start the operation it named. Several companion commands were matched by a bare

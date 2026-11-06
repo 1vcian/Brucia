@@ -332,6 +332,61 @@ with a 3072-byte chunk, streams clean, heap stable). Soak hw-acceptance-20261105
 reboot (uptime 189 -> 1389 s). Leaks below about 13 KB/h are not ruled out; a 4-hour soak would
 bring the limit to 2 KB/h. script_run and the CLI fail-fast items need the app.
 
+### Soak runs that surfaced it (2026-11-06)
+
+- 6h45 on batch 16 firmware 7abe1143 (00:30-06:15, 811 intervals): FAIL, 9 findings in two
+  clusters (~04:01, ~04:05); otherwise clean. No reboot, heap 102,899->101,195 B (no leak),
+  p99 max 62 ms. Report soak-20261105T2330Z-7abe1143/.
+- 30 min on batch 18 release firmware f50c03ac, idle host (06:22-06:52): FAIL, 10 findings -
+  same ~2 undecodable frames despite 13x less traffic, which ruled out host load and pointed to
+  the writeFrame causes below. Report soak-20261106T0622Z-f50c03ac/.
+- Re-soak after the fix (both causes): PENDING; it is the remaining gate for 0.1.6.
+
+### Hardware soak 2026-11-06 - FINDING (companion frame write race, backlog F23)
+
+A companion soak with wifi.probe/wifi.sta/subghz.raw active surfaced a framing-integrity defect
+(no crash, no leak; the app resynced): about 2 undecodable frames per run, stray bytes between
+frames, a link counter mismatch, one lost ping, and - the tell - a battery-PONG fragment embedded
+inside another frame. Two independent root causes in `writeFrame()` (`src/companion/protocol.cpp`),
+both fixed on this branch so one re-soak covers both:
+
+1. PARTIAL WRITES (likely the primary cause; it corrupts even with a single writer). `writeFrame`
+   ignored the return of both `Serial.write` calls, and `Serial.write(buf,len)` is NOT guaranteed to
+   accept all `len` bytes. In the pinned arduino-esp32 3.3.9 core the ESP32-S3 USB-Serial-JTAG path
+   (HWCDC - the port `Serial` uses on the T-Embed) returns a short count under sustained host
+   backpressure: `HWCDC::write` (HWCDC.cpp ~L540-623) breaks with `size = so_far` after ~20*100 ms of
+   a stalled host and its own comment says "the caller sees a short write (Arduino's Stream::write
+   contract)"; it also returns 0 if the tx_lock is not taken within tx_timeout_ms (100). The TinyUSB
+   path `USBCDC::write` (USBCDC.cpp L395+) likewise returns `so_far` on disconnect/timeout. (The
+   classic-ESP32 UART path used by m5stack-core4mb is safe: `HardwareSerial::write` -> `uartWriteBuf`
+   -> `uart_write_bytes`, which blocks until all bytes are buffered.) A short write truncates the
+   length prefix or payload -> stray bytes, an undecodable frame and a tx/rx counter mismatch.
+   FIX: a new bounded `writeAll(buf,len,deadline)` loops on the return value writing only the
+   remainder, with a 1 ms yield up to a 2 s per-frame deadline (`COMPANION_TX_FRAME_MS`) so a vanished
+   host cannot wedge the companion loop; a frame that still cannot complete is left torn (the link is
+   already dead) and is not counted in `tx_frames`.
+2. CROSS-TASK INTERLEAVE. The length prefix, payload and flush were written with no lock, so a stream
+   EVENT emitted from another task could interleave its `Serial.write` bytes with a response and
+   desync the length. (In this tree every emitter happens to run on the companion loop task - the RMT
+   ISR and the esp_wifi promiscuous callbacks only queue/ring-buffer, and the `*Service()` emitters
+   run from the loop - but nothing enforced that single-task invariant.) FIX: a recursive FreeRTOS
+   mutex `g_frameLock` (static init, null-safe fallback for very early boot) now wraps the whole
+   emission - the two writes and the flush, nothing else. Recursive so a nested emission on the same
+   task cannot self-deadlock. No emitter runs in an ISR, so blocking on the mutex is safe.
+
+The wire format is unchanged. Evidence, host-side only: `tools/test_firmware_frame_lock.py` compiles
+the real `writeFrame`/`writeAll` and proves, with a mutation for each fix: two threads give 0
+interleaved frames with the lock and 7812 once it is stripped; and a sink that accepts only a few
+bytes per write yields the complete framed stream with `writeAll` but a truncated one once `writeAll`
+is reduced to the pre-fix single write. Plus static checks that the lock wraps both writes and the
+flush, that `writeAll` loops on the return and is bounded, and that `writeFrame`/`writeAll` hold the
+only `Serial.write` in `src/companion`. A clean hardware re-soak (0 undecodable frames, 0 noise bytes,
+counters exact) now gates BOTH fixes and is the remaining gate for the 0.1.6 release.
+
+- [ ] T-Embed CC1101 re-soak after flashing this fix: `python3 tools/hw_acceptance.py --port <port>
+      --soak 20 --streams wifi.probe,wifi.sta,subghz.raw`; expect 0 findings, no noise bytes, no
+      undecodable frames, counters exact. This gates 0.1.6 (mutex + partial-write fix).
+
 ### Batch 15 (SOAK) - passive soak mode for hw_acceptance.py, software only
 
 `tools/hw_acceptance.py --soak <minutes>` (backlog S08, physical part): intervals of PINGs,

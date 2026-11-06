@@ -12,7 +12,10 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / "src/companion/protocol.cpp").read_text()
 start = source.index("static uint8_t rxHeader[4];")
-end = source.index("static void writeFrame", start)
+# Only the frame READER (resetFrameReader + readFrame) is compiled here; stop before the
+# g_frameLock declaration that precedes writeFrame so this test does not pull in the FreeRTOS
+# recursive-mutex symbols (those are exercised by tools/test_firmware_frame_lock.py instead).
+end = source.index("static SemaphoreHandle_t g_frameLock", start)
 shim = r'''
 #include "diag_core.h"
 using namespace brucia::companion;
