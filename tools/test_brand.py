@@ -223,6 +223,16 @@ class FirmwareMacroTest(unittest.TestCase):
                             ("src/main.cpp", "BRUCIA_REPO_URL")):
             self.assertIn(needle, (ROOT / rel).read_text(), rel)
 
+    def test_app_store_endpoint_comes_only_from_brand_json(self):
+        # The Bruce community store host is third-party; its URL lives in brand.json only.
+        host = brand.load()["upstream"]["app_store_url"].split("/")[2]
+        settings = (ROOT / "src/core/settings.cpp").read_text()
+        self.assertIn("http.begin(BRUCIA_UPSTREAM_APP_STORE_URL)", settings)
+        hits = [str(p.relative_to(ROOT)) for p in (ROOT / "src").rglob("*")
+                if p.is_file() and host in p.read_text(errors="ignore")]
+        self.assertEqual([], hits)
+        self.assertIn("Install Bruce App Store", (ROOT / "src/core/menu_items/ConfigMenu.cpp").read_text())
+
 
 class LinkScannerTest(unittest.TestCase):
     def test_no_hardcoded_links_outside_central_config_and_allowlist(self):

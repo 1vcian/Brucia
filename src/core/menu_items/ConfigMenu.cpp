@@ -37,7 +37,7 @@ void ConfigMenu::optionsMenu() {
 
 #if !defined(LITE_VERSION)
         if (!appStoreInstalled()) {
-            localOptions.push_back({"Install App Store", []() { installAppStoreJS(); }});
+            localOptions.push_back({"Install Bruce App Store", []() { installAppStoreJS(); }});
         }
 #endif
 

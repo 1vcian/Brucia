@@ -21,6 +21,13 @@ that offloads computation to the phone. Format loosely follows
     instead of switching to raw mode against a device still in companion mode.
   - Audio: FM audio now releases an async melody (song/RTTTL) and DTMF too, in both directions, so
     FM, speaker and microphone never fight over the I2S pins (fixes a gap in the 0.1.7 FM owner fix).
+  - LoRa: disconnecting while a receive-stop was still queued no longer lets that stop reach the
+    next device connected; a new receive is not blocked afterwards.
+  - Remote: a failed start (device did not confirm leaving companion mode) no longer leaves the
+    mirror watchdog running; retries, Stop and disconnect end it.
+- App Store: the menu entry is now "Install Bruce App Store" and shows, before installing, that it
+  is the Bruce community store on a third-party host whose apps download over plain HTTP. The
+  store address is now set in `brand.json` like the other links.
 
 - New IR power spam (authorized use only): `ir_power_spam` blasts the power-off codes for TVs,
   projectors, audio and more - both regions (NA + EU) and the universal parsed + raw tables - and

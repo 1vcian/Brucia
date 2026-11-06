@@ -1695,7 +1695,10 @@ bool appStoreInstalled() {
 }
 
 #include <HTTPClient.h>
+// Installs the Bruce community App Store script (third-party host, BRUCIA_UPSTREAM_APP_STORE_URL in
+// brand.json). Brucia has no store of its own; the Bruce JS apps run unchanged on the same interpreter.
 void installAppStoreJS() {
+    displayInfo("Bruce community App Store: third-party host, apps download over plain HTTP", true);
 
     if (!WiFi.isConnected()) { wifiConnectMenu(WIFI_STA); }
     if (!WiFi.isConnected()) {
@@ -1724,11 +1727,11 @@ void installAppStoreJS() {
     }
 
     HTTPClient http;
-    http.begin("https://ghp.iceis.co.uk/service/appstore/");
+    http.begin(BRUCIA_UPSTREAM_APP_STORE_URL);
     int httpCode = http.GET();
     if (httpCode != 200) {
         http.end();
-        displayWarning("Failed to download App Store", true);
+        displayWarning("Failed to download Bruce App Store", true);
         return;
     }
 
@@ -1741,7 +1744,7 @@ void installAppStoreJS() {
     http.end();
     file.close();
 
-    displaySuccess("App Store installed", true);
+    displaySuccess("Bruce App Store installed", true);
     displaySuccess("Goto JS Interpreter -> Tools -> App Store", true);
 }
 #endif

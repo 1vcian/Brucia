@@ -4,6 +4,126 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## App Store source (Bruce community store) — 2026-11-07
+
+Finding: "Install App Store" downloads `App Store.js` from the Bruce community store
+(`ghp.iceis.co.uk`, third-party host). That script then fetches its catalog and every app over
+plain `http://ghp.iceis.co.uk` without an integrity check, and the apps run in the JS
+interpreter. This is the only runtime Bruce endpoint in the firmware; the other Bruce
+references are credits and links already in `brand.json`.
+
+Change: the store is kept (Bruce JS apps run unchanged), but its URL now lives in
+`brand.json` (`upstream.app_store_url` -> `BRUCIA_UPSTREAM_APP_STORE_URL`). The menu entry
+reads "Install Bruce App Store", and a notice before install names the third-party host and
+the plain-HTTP downloads.
+
+- Compilation: `pio run -e lilygo-t-embed-cc1101 -e m5stack-cardputer` **SUCCESS**.
+  `python3 -m unittest discover -s tools -p 'test_*.py'`: **306 OK** (new
+  `test_app_store_endpoint_comes_only_from_brand_json`).
+- Flash: NOT RUN for this change (the 2026-11-07 flash below is d2e24911 firmware).
+- Hardware: NOT RUN. Owed: menu label, notice, install over Wi-Fi, store opens from
+  JS Interpreter -> Tools.
+
+## F32 LoRa teardown + F34 Remote watchdog fixes, reflash — 2026-11-07
+
+Tree: HEAD `d2e24911` plus uncommitted app changes (`LoraService.abandon`, `RemoteRun`,
+ViewModel wiring, tests). Firmware sources are identical to `d2e24911`. `VERSION` 0.1.7.
+Not released. The three levels below are separate claims; one does not imply the next.
+
+Independent review 2026-11-07: F32 teardown and F34 watchdog fixes accepted for the
+reviewed software paths; phone acceptance remains NOT RUN. Fresh command:
+`cd android && ./gradlew --offline :app:testDebugUnitTest --tests '*RemoteRunTest' --tests '*RemoteLinkGateTest' --tests '*LoraServiceTest' --tests '*IrPowerSpamServiceTest' --tests '*JamDetectServiceTest' --tests '*StopAllSequenceTest' --rerun`
+executed **46 tests in 6 suites**, zero failures/errors/skips (compilation reused
+up-to-date outputs). Independent held-dispatcher probe
+`python3 .codex_tmp/review-f32-f34-20261107/probe.py` also passes: queued LoRa stop
+cancelled before its sender starts, no write to replacement B; IR/Jam controls and
+F26 timeout withholding still pass. Source hashes/output retained beside that probe.
+The reviewer verified the full upload log hash below, four successful data-hash
+checks and exit 0; current local firmware.bin SHA256 matches the artifact hash
+recorded in that log. Boot capture reaches setup-end/first-mainMenu. These are
+artifact/log checks, not a new flash or phone test; no device was opened by the reviewer.
+
+**1. Compilation and host tests (PASS)**
+
+- Fix F32: `LoraService.abandon()` cancels a receive-stop not yet written and lifts its
+  fence; disconnect uses it (`Entry("lora", stop, abandon)`), explicit Stop receive still
+  uses `stopReceive()` and keeps its write. Fix F34: `remote/RemoteRun` runs one Remote
+  attempt as one job; the mirror watchdog is launched as its child only after a confirmed
+  `companion_exit`, ends with the mirror loop, and Stop/disconnect cancel both. The
+  separate `remoteWatchdogJob` is gone.
+- New regressions: `LoraServiceTest` (queued stop + disconnect + replacement link B -> no
+  write to B, new receive allowed; explicit stopReceive still writes to A; fence holds until
+  written or abandoned), `RemoteRunTest` (3 failed exits + Stop -> 0 watchdogs ever started;
+  failed then successful -> exactly 1 until Stop; restart during pending exit or mirror -> never
+  more than 1; disconnect during pending exit with late ACK -> none; mirror end -> watchdog
+  ends), `RemoteLinkGateTest.watchdogIsOwnedByTheRemoteAttempt` (source wiring).
+- Mutation check: with `abandon()` reduced to `stop()` and the watchdog launched outside
+  the attempt, the LoRa/RemoteRun suites fail (7 of 19); restored afterwards.
+- `./gradlew --offline :app:testDebugUnitTest`: **1120 tests, 0 failures/errors/skips**.
+  Focused: RemoteRun 5, RemoteLinkGate 6, LoraService 14, IrPowerSpam 6, JamDetect 6,
+  StopAllSequence 9, all PASS. Debug unit-test compile only; not a signed release APK build.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **305 tests OK**.
+- `pio run -e lilygo-t-embed-cc1101`: **SUCCESS**. `firmware.bin` sha256
+  `de4d1818c0e1d8d3b758bf252277b89b88a2bc63b9baa8ee426aac8127c23a36`. Cardputer not rebuilt
+  (no firmware source change since d2e24911).
+
+**2. Flash (SUCCESS)**
+
+- Device on `/dev/cu.usbmodem2101`: USB 303A:1001 "USB JTAG/serial debug unit", esptool
+  reports ESP32-S3 (QFN56) rev v0.2, embedded PSRAM 8MB, 16MB flash, MAC
+  `8c:bf:ea:8a:a4:78` = the T-Embed CC1101 used in earlier verified runs.
+- `pio run -e lilygo-t-embed-cc1101 -t upload --upload-port /dev/cu.usbmodem2101`: SUCCESS,
+  exit 0; bootloader @0x0, partitions @0x8000, boot_app0 @0xe000, app 4327392 bytes @0x10000,
+  "Hash of data verified" for all four. This supersedes the failed d2e24911 upload above.
+- Complete log (local, gitignored): `hw-acceptance-reports/flash-20261106-235930-d2e24911-tembed.log`
+  (402 lines, sha256 `ea17822b16577ce12cd7008a7adc2de3e84b9d31dd268896ee31581d26e000de`);
+  passive boot capture: `...tembed.boot-full.log` next to it.
+
+**3. Hardware verification (boot only; feature acceptance NOT RUN)**
+
+- Passive serial read (no bytes sent, DTR/RTS low): ROM boot `SPI_FAST_FLASH_BOOT`, RAMLOG
+  stages through `setup-end` (8566 ms) and `first-mainMenu`. Known benign: theme file
+  missing -> default theme. The boot screen version string is TFT-only and was not read;
+  firmware identity rests on the verified hash of this build.
+- NOT RUN on phone/device: F32 (LoRa receive -> Stop all/Remote -> USB unplug -> reconnect,
+  no stray `stop` on the new link), F34 (rejected/lost companion_exit, retry, Stop, disconnect;
+  mirror recovers after a device reboot only in a successful session), plus every earlier
+  open device check (IR blast, FM owner, Remote leave/rotation, Stop-all ordering, F23).
+  These app-side fixes need the matching APK on a phone; none was installed in this run.
+- Release gate: **closed**. F32/F34 are fixed at host level only until the phone checks pass.
+
+## Commit d2e24911 review — 2026-11-06
+
+Read-only code review; only review records updated. No upload, serial-port open,
+device command, commit, push or release. The reported failed upload cannot be
+classified from compilation success. The raw upload log was not found among the
+reviewed repository reports. `/dev/cu.usbmodem2101` was visible during this review;
+enumeration alone establishes neither the running firmware nor a successful flash.
+
+Fresh verification:
+
+- `cd android && ./gradlew --offline :app:testDebugUnitTest --tests '*IrPowerSpamServiceTest' --tests '*StopAllSequenceTest' --tests '*LoraServiceTest' --tests '*JamDetectServiceTest' --tests '*RemoteLinkGateTest' --rerun`:
+  **37 tests PASS**, 5 XML suites, zero failures/errors/skips; test task executed.
+  Compilation reused up-to-date outputs. The full 1111-test and board-build claims
+  below remain implementation evidence, not fresh checks by this review.
+- `python3 -m unittest tools.test_radio_guards`: **37 tests PASS**, 5.337 s.
+- `python3 .codex_tmp/review-d2e24911/probe.py`: real services with a held coroutine
+  dispatcher and simulated transport. **LoRa failure reproduced:** queue its stop,
+  call teardown `stop()`, select link B, resume the sender -> old stop targets B.
+  **IR and JamDetect controls PASS:** the queued stop is cancelled. **F26 PASS:**
+  still-busy timeout reports failure and does not execute remaining device stops.
+  Source hashes and output retained in that ignored directory's `result.json`.
+
+F34 CODE finding: unsuccessful companion_exit returns from remoteJob but leaves the
+separately launched watchdog alive; retry overwrites its handle. Test failed start,
+retry, Stop and disconnect with zero orphan watchdogs. The ACK gate itself is now
+present; the current source-level test does not verify this cleanup. FM song/RTTTL/
+DTMF release and async-song cleanup changes are present; no physical FM check here.
+
+F32/F34 remain partially open despite passing tests. The upload status for this
+revision is FAILED/UNVERIFIED as reported, not “flashed”; older passive results
+must retain their original firmware identity.
+
 ## Integration and IR follow-up review — 2026-11-06
 
 Reviewed the F25-F31 changes and new IR service. During the review another session
@@ -45,7 +165,8 @@ cessation or universal device coverage.
 
 ## Follow-up fixes F26/F32/F33/F34 + FM owner (A3) — 2026-11-06
 
-Second review of integration `1db4b4d8` / release 0.1.7 found five real gaps; all fixed here.
+Implementation follow-up to integration `1db4b4d8` / release 0.1.7. The original
+five paths were changed; the independent d2e24911 review above retains F32/F34 gaps.
 
 - `./gradlew :app:testDebugUnitTest`: **1111 tests, 0 failures**. New/changed: `IrPowerSpamServiceTest`
   (restart fenced until the stop is written; teardown cancels an unsent stop), `StopAllSequenceTest`
@@ -55,10 +176,14 @@ Second review of integration `1db4b4d8` / release 0.1.7 found five real gaps; al
 - `python3 -m unittest discover -s tools -p 'test_*.py'`: **305 tests PASS**. `test_radio_guards.py`
   checks the IR strict parse (reject before pin/driver, range, nonnumeric) and the FM owner for
   song/RTTTL/DTMF plus the async-song stop in `speakerOutputRelease`.
-- Firmware: `pio run -e lilygo-t-embed-cc1101 -e m5stack-cardputer` SUCCESS; T-Embed flashed.
+- Firmware builds reported SUCCESS: T-Embed CC1101 and Cardputer. The attempted
+  upload of this revision FAILED mid-transfer according to the implementation
+  handoff and commit message; device de-enumerated. Successful flash and on-device
+  acceptance of this revision remain UNVERIFIED.
 - Limits: F32/F34/F26 are host/source level (the full VM and the firmware poll are not executed on
   device); the IR blast and FM owner still need an on-device check (transmit / no Si4713 here). The
-  earlier passive device results (busy SUB-409, idle stops) still hold.
+  earlier passive device results (busy SUB-409, idle stops) are historical evidence
+  for their tested firmware, not acceptance of this revision after a failed upload.
 
 ## IR power spam (new feature) — 2026-11-06
 
