@@ -340,7 +340,10 @@ bring the limit to 2 KB/h. script_run and the CLI fail-fast items need the app.
 - 30 min on batch 18 release firmware f50c03ac, idle host (06:22-06:52): FAIL, 10 findings -
   same ~2 undecodable frames despite 13x less traffic, which ruled out host load and pointed to
   the writeFrame causes below. Report soak-20261106T0622Z-f50c03ac/.
-- Re-soak after the fix (both causes): PENDING; it is the remaining gate for 0.1.6.
+- Re-soak after the fix (commit 010c0adc, both causes), 40 min / 80 intervals on the T-Embed,
+  2026-11-06 08:46-09:26: PASS, 0 findings - link counters exact (rx +3762, tx +4322), no noise,
+  no undecodable frames, no rejects, no reboot, heap flat (23 B/h), p99 4.19 ms. Report
+  soak-20261106T0846Z-010c0adc-fix/. The 0.1.6 gate is cleared.
 
 ### Hardware soak 2026-11-06 - FINDING (companion frame write race, backlog F23)
 
