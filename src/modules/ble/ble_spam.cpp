@@ -2467,7 +2467,7 @@ bool runIbeaconBounded(uint32_t durationMs, const char *name, const char *uuid, 
     generateRandomMac(macAddr);
     // Address change is checked: a failed MAC set means the iface is not ready; bail before init.
     if (esp_iface_mac_addr_set(macAddr, ESP_MAC_BT) != ESP_OK) return false;
-    if (!BLEDevice::init(name && name[0] ? name : "Bruce iBeacon")) return false;
+    if (!BLEDevice::init(name && name[0] ? name : "Brucia iBeacon")) return false;
     vTaskDelay(5 / portTICK_PERIOD_MS);
     if (esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER) != ESP_OK) {
         BLEDevice::deinit();

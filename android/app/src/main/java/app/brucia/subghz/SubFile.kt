@@ -190,24 +190,35 @@ object SubFile {
      * txp path is used, otherwise there is no USB push and TX is unavailable.
      */
     fun transmitCommand(sig: SubSignal, repeat: Int = 10): String? {
-        // The firmware splits the command on spaces and converts frequency/key with std::stoul /
-        // std::stoull, which throw (aborting the device) on text or out-of-range values. File-supplied
-        // fields are checked here: uint32 frequency, a single-token name, at most 64 bits of hex key.
+        // The firmware splits the command on spaces and rejects (since F03; older builds threw and
+        // aborted) a number that is not a whole token or is out of range. File-supplied fields are
+        // checked here so a bad file never reaches the device: uint32 frequency, a single-token name,
+        // at most 64 bits of hex key, bits 1..64, te 0..65535 us, repeat 0..1000.
         if (sig.frequencyHz !in 1..0xFFFFFFFFL) return null
+        if (repeat !in 0..TX_MAX_REPEAT) return null
         if (!sig.isRaw) {
-            if (sig.keyHex.isEmpty() || sig.bits <= 0) return null
+            if (sig.keyHex.isEmpty() || sig.bits !in 1..TX_MAX_BITS) return null
             if (!TX_KEY.matches(sig.keyHex)) return null
             val name = OokProtocols.byAnyName(sig.protocol)?.canonical ?: sig.protocol
             if (name.isEmpty() || name.any { it.isWhitespace() }) return null
             val te = if (sig.te > 0) sig.te else 0
-            return "subghz txp $name ${sig.frequencyHz} ${sig.bits} ${sig.keyHex} $te $repeat"
+            if (te > TX_MAX_TE_US) return null
+            // The firmware counts every hex digit (max 16): drop zero padding beyond that.
+            val key = if (sig.keyHex.length <= 16) sig.keyHex else sig.keyHex.trimStart('0').ifEmpty { "0" }
+            return "subghz txp $name ${sig.frequencyHz} ${sig.bits} $key $te $repeat"
         }
         // RAW: try to recover a fixed protocol from the timings.
         val decoded = SubGhzDecoder.decode(sig.rawAbs())
             .firstOrNull { it.classification == "fixed" } ?: return null
+        if (decoded.bits !in 1..TX_MAX_BITS || decoded.teMicros !in 0..TX_MAX_TE_US) return null
         val name = OokProtocols.byAnyName(decoded.flipperProtocol)?.canonical ?: decoded.protocol
         return "subghz txp $name ${sig.frequencyHz} ${decoded.bits} ${decoded.codeHex} ${decoded.teMicros} $repeat"
     }
+
+    /** Firmware `subghz txp` bounds (src/core/serial_commands/rf_commands.cpp, RF_CLI_MAX_*). */
+    const val TX_MAX_BITS = 64
+    const val TX_MAX_TE_US = 65535
+    const val TX_MAX_REPEAT = 1000
 
     /** Hex key the firmware's stoull accepts without overflow: up to 64 significant bits. */
     private val TX_KEY = Regex("0*[0-9A-Fa-f]{1,16}")

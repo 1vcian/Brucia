@@ -18,13 +18,16 @@ import org.junit.Test
  * the composition (Activity-scoped ViewModel), so these tests pin what a rotation relies on.
  */
 class NetworkScanSessionTest {
+    private companion object { val SUBNET = (1..254).map { "10.0.0.$it" } }
+
 
     /** Fake subnet scan on the virtual clock: one host probed every [stepMs], [up] report a port. */
     private class FakeScanner(val total: Int = 4, val stepMs: Long = 100, val up: Set<Int> = setOf(3, 1)) {
         var calls = 0
         var lateProgress: ((Int, Int) -> Unit)? = null
         var lateHost: ((ScanHost) -> Unit)? = null
-        val fn: suspend (String, (Int, Int) -> Unit, (ScanHost) -> Unit) -> Unit = { base, onProgress, onHost ->
+        val fn: suspend (List<String>, (Int, Int) -> Unit, (ScanHost) -> Unit) -> Unit = { hosts, onProgress, onHost ->
+            val base = hosts.first().substringBeforeLast('.') + "."
             calls++
             lateProgress = onProgress; lateHost = onHost
             // Report hosts out of order (as the parallel probes do) to check the sorting.
@@ -46,7 +49,7 @@ class NetworkScanSessionTest {
         val session = NetworkScanSession(s, fake.fn)
         assertEquals(NetworkScanState(), session.state.value)
 
-        assertTrue(session.start("10.0.0."))
+        assertTrue(session.start(SUBNET))
         assertTrue(session.state.value.scanning)
         assertTrue(session.isRunning)
 
@@ -67,11 +70,11 @@ class NetworkScanSessionTest {
     @Test fun startWhileRunningIsIgnoredSoARecreatedScreenCannotDuplicateTheScan() = scoped { s ->
         val fake = FakeScanner()
         val session = NetworkScanSession(s, fake.fn)
-        assertTrue(session.start("10.0.0."))
+        assertTrue(session.start(SUBNET))
         clock.advanceBy(150)
         // The recreated screen observes the same session: state is still there, a second start is refused.
         val mid = session.state.value
-        assertFalse(session.start("10.0.0."))
+        assertFalse(session.start(SUBNET))
         assertEquals(mid, session.state.value)
         clock.advanceBy(1_000)
         assertEquals(1, fake.calls)
@@ -80,7 +83,7 @@ class NetworkScanSessionTest {
 
     @Test fun finishedResultsStayUntilReset() = scoped { s ->
         val session = NetworkScanSession(s, FakeScanner().fn)
-        session.start("10.0.0.")
+        session.start(SUBNET)
         clock.advanceBy(1_000)
         val done = session.state.value
         clock.advanceBy(60_000)
@@ -92,7 +95,7 @@ class NetworkScanSessionTest {
     @Test fun stopKeepsHostsAndLateCallbacksOfTheStoppedRunAreIgnored() = scoped { s ->
         val fake = FakeScanner(total = 10, up = setOf(10, 9, 2))
         val session = NetworkScanSession(s, fake.fn)
-        session.start("10.0.0.")
+        session.start(SUBNET)
         clock.advanceBy(250)
         session.stop()
         val stopped = session.state.value
@@ -107,7 +110,7 @@ class NetworkScanSessionTest {
         assertEquals(stopped, session.state.value)
 
         // A new scan starts from scratch and the old run still cannot touch it.
-        assertTrue(session.start("10.0.0."))
+        assertTrue(session.start(SUBNET))
         oldHost(ScanHost("10.0.0.8", emptyList()))
         assertEquals(emptyList<ScanHost>(), session.state.value.hosts)
         clock.advanceBy(5_000)
@@ -118,7 +121,7 @@ class NetworkScanSessionTest {
     @Test fun resetDuringAScanCancelsIt() = scoped { s ->
         val fake = FakeScanner()
         val session = NetworkScanSession(s, fake.fn)
-        session.start("10.0.0.")
+        session.start(SUBNET)
         clock.advanceBy(150)
         session.reset()
         clock.advanceBy(5_000)
@@ -127,17 +130,17 @@ class NetworkScanSessionTest {
     }
 
     @Test fun failingScanKeepsResultsAndClearsTheScanningFlag() = scoped { s ->
-        val session = NetworkScanSession(s) { base, onProgress, onHost ->
-            delay(50); onProgress(1, 254); onHost(ScanHost("${base}5", emptyList()))
+        val session = NetworkScanSession(s) { hosts, onProgress, onHost ->
+            delay(50); onProgress(1, hosts.size); onHost(ScanHost(hosts[4], emptyList()))
             error("network down")
         }
-        session.start("10.0.0.")
+        session.start(SUBNET)
         clock.advanceBy(100)
         assertFalse(session.state.value.scanning)
         assertFalse(session.isRunning)
         assertEquals(1, session.state.value.progress)
         assertEquals(listOf("10.0.0.5"), session.state.value.hosts.map { it.ip })
-        assertTrue(session.start("10.0.0."))
+        assertTrue(session.start(SUBNET))
     }
 
     @Test fun ipKeySortsByLastOctet() {

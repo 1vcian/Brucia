@@ -36,12 +36,12 @@ object BuiltinFeatures {
                 FeatureDescriptor("org.brucia.subghz.rf", 2, "RF", "Capture, decode and replay sub-GHz signals", "cc1101"),
             )),
             FeatureCategory("Radio", "Radio", listOf(
-                FeatureDescriptor("org.brucia.radio.fm", 14, "FM", "Broadcast audio over the FM transmitter", "fm"),
+                FeatureDescriptor("org.brucia.radio.fm", 14, "FM", "Si4713 FM transmitter control; digital audio routing unverified on hardware", "fm"),
                 FeatureDescriptor("org.brucia.radio.lora", 22, "LoRa", "Configure, send and receive LoRa packets", "lora"),
             )),
             FeatureCategory("2.4GHz", "2.4G", listOf(
                 FeatureDescriptor("org.brucia.24ghz.nrf24", 13, "NRF24", "2.4GHz scanner, ESB sniffer and MouseJack", "nrf24"),
-                FeatureDescriptor("org.brucia.24ghz.espnow", 32, "ESP-NOW", "Broadcast a short message over ESP-NOW (any ESP32)"),
+                FeatureDescriptor("org.brucia.24ghz.espnow", 32, "ESP-NOW", "Broadcast a short message over ESP-NOW (no extra module)"),
             )),
             FeatureCategory("NFC", "NFC", listOf(
                 FeatureDescriptor("org.brucia.nfc.nfc", 3, "NFC", "Read, emulate and attack NFC tags", "nfc"),

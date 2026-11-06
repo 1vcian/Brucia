@@ -17,8 +17,8 @@ data class MitmTxn(
     val host: String,
     val path: String,
     val status: Int,             // -1 until a response is seen
-    val reqBytes: Int,
-    val respBytes: Int,
+    val reqBytes: Long,          // full body size as relayed (the preview may be a prefix)
+    val respBytes: Long,
     val durationMs: Long,
     val decrypted: Boolean,      // true = TLS was terminated and content logged
     val note: String,            // e.g. error, or "CONNECT tunnel (not decrypted)"
@@ -26,6 +26,9 @@ data class MitmTxn(
     val respHeaders: String,
     val reqPreview: String,
     val respPreview: String,
+    /** The logged request/response body is only the first bytes of a larger body that was streamed through. */
+    val reqTruncated: Boolean = false,
+    val respTruncated: Boolean = false,
 ) {
     val url: String get() = "$scheme://$host$path"
 }

@@ -91,13 +91,13 @@ object SessionReport {
                 val ssid = if (p.ssid.isBlank()) "(broadcast)" else p.ssid
                 sb.append("- ").append(p.mac)
                     .append(" (").append(vendorOf(p.mac) ?: "unknown vendor").append(")")
-                    .append(" seeks \"").append(ssid).append("\"")
+                    .append(" seeks \"").append(mdCell(ssid)).append("\"")
                     .append(", rssi ").append(p.rssi).append(", x").append(p.count).append('\n')
             }
         }
 
         val handshakeLines = buildList {
-            d.handshakeInfo?.let { add("Captured/loaded: $it") }
+            d.handshakeInfo?.let { add("Captured/loaded: ${mdCell(it)}") }
             d.crackResult?.let { add("Crack result: $it") }
         }
         if (handshakeLines.isNotEmpty()) {
@@ -108,7 +108,7 @@ object SessionReport {
         if (d.subghz.isNotEmpty()) {
             sb.append("\n## Sub-GHz signals (").append(d.subghz.size).append(")\n\n")
             for (s in d.subghz) {
-                sb.append("- ").append(s.protocol)
+                sb.append("- ").append(mdCell(s.protocol))
                     .append(" [").append(s.classification).append("]")
                     .append(", ").append(s.bits).append(" bits, key ").append(s.codeHex)
                     .append(", TE ").append(s.teMicros).append("us, x").append(s.repeats)
@@ -124,7 +124,7 @@ object SessionReport {
             for (b in d.ble.sortedByDescending { it.rssi }) {
                 sb.append("- ").append(b.mac)
                     .append(" (").append(vendorOf(b.mac) ?: "unknown vendor").append(")")
-                    .append(" \"").append(b.name.ifBlank { "(no name)" }).append("\"")
+                    .append(" \"").append(mdCell(b.name.ifBlank { "(no name)" })).append("\"")
                     .append(", rssi ").append(b.rssi).append('\n')
             }
         }
@@ -278,6 +278,10 @@ object SessionReport {
         }
     }
 
-    /** Escape the characters that would break a Markdown table cell. */
-    private fun mdCell(s: String): String = s.replace("|", "\\|").replace("\n", " ")
+    /**
+     * Escape the characters that would break a Markdown table cell or list item. Device-reported
+     * text (SSIDs, BLE names) is attacker-chosen: a newline in it would start a new heading or
+     * table row in the shared report.
+     */
+    internal fun mdCell(s: String): String = s.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 }

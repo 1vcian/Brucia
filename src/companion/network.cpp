@@ -110,8 +110,15 @@ static void runLoraRecv(const String &argsIn, uint32_t id) {
     if (secs > 120) secs = 120; // bound the listen window
     uint32_t end = millis() + (uint32_t)secs * 1000;
     int count = 0;
+    bool stopped = false;
     while ((int32_t)(millis() - end) < 0) {
         if (check(EscPress)) break;
+        // The app's Stop sends `stop`; without this poll the device stayed blocked for the whole
+        // window (up to 120 s) with PINGs unanswered, so the app's link watchdog declared a restart.
+        if (companionPollStop()) {
+            stopped = true;
+            break;
+        }
         String data;
         float rssi = 0, snr = 0;
         if (lora_companion_poll(data, rssi, snr) == 1) {
@@ -130,7 +137,7 @@ static void runLoraRecv(const String &argsIn, uint32_t id) {
         }
     }
     char out[48];
-    snprintf(out, sizeof(out), "received %d packet(s)", count);
+    snprintf(out, sizeof(out), "received %d packet(s)%s", count, stopped ? " (stopped)" : "");
     companionAckMsg(id, true, out);
 }
 #else  // !COMPANION_HAS_LORA

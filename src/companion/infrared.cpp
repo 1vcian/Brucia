@@ -28,6 +28,10 @@ static void runIrTvbgone(const String &argsIn, uint32_t id) {
     region.trim();
     region.toLowerCase();
     bool useEU = region.startsWith("eu");
+    if (!irTxPinReady()) { // no pin menu in companion mode (nobody at the device)
+        companionAckMsg(id, false, "IR TX pin not configured");
+        return;
+    }
     // Cap the whole blast so the command stays bounded even if the full table is large.
     uint16_t sent = runTvBGoneHeadless(useEU, 60000);
     String out = "TV-B-Gone done (" + String(sent) + " codes)";
@@ -102,6 +106,10 @@ static void runIrTxRaw(const String &argsIn, uint32_t id) {
         sendErr(id, 400, "no durations");
         return;
     }
+    if (!irTxPinReady()) { // no pin menu in companion mode (nobody at the device)
+        companionAckMsg(id, false, "IR TX pin not configured");
+        return;
+    }
     // sendRawCommand() parses a space-separated list; accept comma-separated from the phone.
     csv.replace(",", " ");
     sendRawCommand(khz, csv, true); // true = headless (no on-screen "Sending.." UI)
@@ -140,6 +148,12 @@ bool dispatchInfraredCommand(const CommandRequest &request) {
 
         // Brucia: phone-driven, time-bounded IR jammer (abortable bursts).
         if (cmdStr.startsWith("ir_jammer")) {
+#ifdef COMPANION_HAS_IR
+            if (!irTxPinReady()) { // no pin menu in companion mode (nobody at the device)
+                companionAckMsg(id, false, "IR TX pin not configured");
+                break;
+            }
+#endif
             int secs = cmdStr.length() > 10 ? cmdStr.substring(10).toInt() : 0;
             uint32_t n = ir_jammer_headless(secs);
             char buf[32];

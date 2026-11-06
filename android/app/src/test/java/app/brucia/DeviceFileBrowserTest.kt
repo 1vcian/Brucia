@@ -117,6 +117,64 @@ class DeviceFileBrowserTest {
         assertEquals("Connect the device over USB first.", s.captureList.value)
     }
 
+    @Test(timeout = 5_000) fun pathsWithSpacesOrSeparatorsAreQuotedForSimpleCli() = runVirtual {
+        val s = svc()
+        // Unquoted, SimpleCLI split "/My Files" into two words (unknown argument: nothing listed)
+        // and ";;" into a second CLI command.
+        s.list("/My Files")
+        answer(0, true, "a b.txt\t3\n")
+        assertEquals(listOf(FileEntry("a b.txt", false, 3)), s.entries.value)
+        s.remove("/My Files/a b.txt")
+        answer(1, true, "File removed")
+        assertEquals("File removed", s.changeStatus.value)
+        answer(2, true, "")
+        s.mkdir("/x;;storage remove /keep")
+        answer(3, false, "Error creating directory")
+        assertEquals("Error creating directory", s.changeStatus.value)
+        answer(4, true, "")
+        s.list("-dash")
+        answer(5, true, "")
+        assertEquals(
+            listOf("storage list \"/My Files\"", "storage remove \"/My Files/a b.txt\"", "storage list \"/My Files\"",
+                "storage mkdir \"/x;;storage remove /keep\"", "storage list \"/My Files\"", "storage list \"-dash\""),
+            runner.cmds,
+        )
+        // Plain paths stay as before.
+        assertEquals("storage list /BrucePCAP", DeviceFileBrowser.listCommand("/BrucePCAP"))
+    }
+
+    @Test(timeout = 5_000) fun pathsSimpleCliCannotCarryAreRefusedLocally() = runVirtual {
+        val s = svc()
+        s.list("/say \"hi\"")
+        settle()
+        assertTrue(s.listStatus.value.contains("cannot be sent"))
+        s.remove("/a\\b"); s.mkdir("/tab\there"); s.remove("/trailing ")
+        settle()
+        assertTrue(s.changeStatus.value.contains("cannot be sent"))
+        assertTrue(runner.calls.isEmpty())
+        assertFalse(s.loading.value)
+    }
+
+    @Test(timeout = 5_000) fun aListingCutByTheReplyLimitSaysSoAndDropsThePartialLine() = runVirtual {
+        val s = svc()
+        s.list("/big")
+        // 200 complete lines, then the capture limit cut "last.bin\t4096" to "last.bin\t40".
+        val lines = (0 until 200).joinToString("") { "file_%03d.bin\t%d\n".format(it, it) }
+        var out = lines + "last.bin\t4096\n"
+        while (out.toByteArray().size < 3500) out += "pad_${out.length}.bin\t1\n"
+        out = String(out.toByteArray().copyOf(3500))
+        assertFalse(out.endsWith("\n"))
+        answer(0, true, out)
+        assertTrue(s.listStatus.value.startsWith("The device's reply limit (3500 bytes) cut this listing"))
+        val partial = out.substring(out.lastIndexOf('\n') + 1).substringBefore('\t')
+        assertTrue(s.entries.value.none { it.name == partial })
+        assertTrue(s.entries.value.size >= 200)
+        // A complete short listing clears the notice.
+        s.list("/big")
+        answer(1, true, ROOT)
+        assertEquals("", s.listStatus.value)
+    }
+
     private companion object {
         const val ROOT = "a.txt\t12\nBrucePCAP\t<DIR>\n"
     }

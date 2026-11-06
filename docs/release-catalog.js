@@ -4,13 +4,17 @@
    - size/digest absent or null: allowed (older releases), reported as unverified;
    - present but malformed (size not an integer in 1..limit, digest not exactly
      "sha256:" + 64 lowercase hex): the asset is not offered (it still counts for ambiguity);
-   - mismatch after download: hard failure, nothing reaches the flasher. */
+   - mismatch after download: hard failure, nothing reaches the flasher.
+   Repository links come from brand.js (generated from brand.json); assets are accepted from the
+   current repository and the BruciaDev/Brucia names listed there, so the BruciaDev -> Brucia rename
+   (docs/LAUNCH.md) keeps working. */
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory();
-  else root.BruciaReleases = factory();
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./brand.js"));
+  else root.BruciaReleases = factory(root.BruciaBrand);
+})(typeof globalThis !== "undefined" ? globalThis : this, function (brand) {
   "use strict";
-  var DOWNLOAD_PREFIX = "https://github.com/1vcian/BruciaDev/releases/download/";
+  if (!brand || !Array.isArray(brand.accepted_download_prefixes)) throw new Error("brand.js must load before release-catalog.js");
+  var DOWNLOAD_PREFIXES = brand.accepted_download_prefixes.slice();
   var APK_MAX_BYTES = 128 * 1024 * 1024;
   var FIRMWARE_MAX_BYTES = 16 * 1024 * 1024;
   /* Returns null when a present value is malformed. */
@@ -36,7 +40,8 @@
       if (!asset || typeof asset.name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(asset.name)) return;
       // No URL normalization: only the exact spelling GitHub publishes is accepted.
       var url = asset.browser_download_url;
-      if (typeof url !== "string" || url !== DOWNLOAD_PREFIX + release.tag_name + "/" + asset.name) return;
+      var suffix = release.tag_name + "/" + asset.name;
+      if (typeof url !== "string" || !DOWNLOAD_PREFIXES.some(function (prefix) { return url === prefix + suffix; })) return;
       if (/\.apk$/i.test(asset.name)) {
         if (apkSeen) throw new Error("Ambiguous APK assets");
         apkSeen = true;
@@ -93,5 +98,6 @@
     return asset.sha256 ? "SHA-256 verified" : "unverified (release lists no SHA-256 digest)";
   }
   return { parse: parse, manifest: manifest, verify: verify, fetchVerified: fetchVerified, label: label,
-    APK_MAX_BYTES: APK_MAX_BYTES, FIRMWARE_MAX_BYTES: FIRMWARE_MAX_BYTES };
+    APK_MAX_BYTES: APK_MAX_BYTES, FIRMWARE_MAX_BYTES: FIRMWARE_MAX_BYTES,
+    RELEASES_API: brand.releases_api, DOWNLOAD_PREFIXES: DOWNLOAD_PREFIXES };
 });

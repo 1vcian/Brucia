@@ -24,7 +24,7 @@ object VulnRules {
         // --- OpenSSH ---
         Rule("ssh", Regex("(?i)OpenSSH_([0-6]\\.|7\\.[0-3])\\b"),
             VulnHit("OpenSSH<7.4", "OpenSSH < 7.4: user-enum / legacy CVEs", "medium", "https://www.openssh.com/security.html")),
-        Rule("ssh", Regex("(?i)OpenSSH_(8\\.[0-9]|9\\.[0-7])\\b"),
+        Rule("ssh", Regex("(?i)OpenSSH_(8\\.[5-9]|9\\.[0-7])\\b"),
             VulnHit("CVE-2024-6387", "OpenSSH 'regreSSHion' RCE affects 8.5-9.7", "high", cve("CVE-2024-6387"))),
         // --- vsftpd backdoor ---
         Rule("ftp", Regex("(?i)vsftpd 2\\.3\\.4"),

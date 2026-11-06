@@ -9,13 +9,13 @@ import org.junit.Test
 class ReleaseCatalogTest {
     private fun asset(name: String, tag: String = "v0.2", host: String = "github.com") =
         JSONObject().put("name", name).put("browser_download_url",
-            "https://$host/1vcian/BruciaDev/releases/download/$tag/$name")
+            BrandLinks.DOWNLOAD_PREFIX.replace("https://github.com/", "https://$host/") + "$tag/$name")
     private fun release(vararg assets: JSONObject) = JSONObject().put("tag_name", "v0.2")
         .put("body", "Release notes").put("assets", JSONArray(assets.toList())).toString()
 
     @Test fun rejectsMismatchedPathsPortsAndAmbiguousBoards() {
         val name = "Bruce-lilygo-t-embed-cc1101.bin"
-        val base = "https://github.com/1vcian/BruciaDev/releases/download/v0.2/"
+        val base = "${BrandLinks.DOWNLOAD_PREFIX}v0.2/"
         for (url in listOf(base + "Bruce-other.bin", base + "nested/" + name,
             base + name + "?download=1", base + name + "#other",
             base.replace("github.com", "github.com:8443") + name,
@@ -49,7 +49,7 @@ class ReleaseCatalogTest {
     // Same inputs as tools/test_site_release.cjs: app and website accept exactly one URL spelling.
     @Test fun acceptsOnlyTheExactCanonicalAssetUrl() {
         val name = "Bruce-lilygo-t-embed-cc1101.bin"
-        val canonical = "https://github.com/1vcian/BruciaDev/releases/download/v0.2/$name"
+        val canonical = "${BrandLinks.DOWNLOAD_PREFIX}v0.2/$name"
         for (url in listOf(canonical.replace("github.com", "GitHub.com"), canonical.replace("https:", "HTTPS:"),
             canonical.replace("github.com", "github.com:443"), "$canonical?", "$canonical#", " $canonical",
             canonical.replace("v0.2/", "v0.2/x/../"), canonical.replace("v0.2/", "v0.2/x/%2e%2e/"))) {

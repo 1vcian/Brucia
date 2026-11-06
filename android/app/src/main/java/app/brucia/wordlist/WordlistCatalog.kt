@@ -1,5 +1,7 @@
 package app.brucia.wordlist
 
+import app.brucia.BrandLinks
+
 /**
  * Real wordlists the app can download to phone storage on demand - rockyou and the
  * common SecLists password lists. These are far too large to bundle in the APK, but
@@ -29,7 +31,7 @@ object WordlistCatalog {
         DownloadableWordlist(
             name = "rockyou.txt",
             title = "rockyou.txt",
-            url = "https://github.com/1vcian/BruciaDev/releases/download/wordlists/rockyou.txt",
+            url = "${BrandLinks.DOWNLOAD_PREFIX}wordlists/rockyou.txt",
             approxBytes = 139_921_507L,
             entries = "14.3M",
             description = "The classic real-world password dump - the standard WPA wordlist",
@@ -37,7 +39,7 @@ object WordlistCatalog {
         DownloadableWordlist(
             name = "top-1M.txt",
             title = "SecLists top 1M",
-            url = "https://github.com/1vcian/BruciaDev/releases/download/wordlists/top-1M.txt",
+            url = "${BrandLinks.DOWNLOAD_PREFIX}wordlists/top-1M.txt",
             approxBytes = 8_755_171L,
             entries = "1M",
             description = "One million most common passwords (fast, high hit rate)",
@@ -45,7 +47,7 @@ object WordlistCatalog {
         DownloadableWordlist(
             name = "top-100k.txt",
             title = "SecLists top 100k",
-            url = "https://github.com/1vcian/BruciaDev/releases/download/wordlists/top-100k.txt",
+            url = "${BrandLinks.DOWNLOAD_PREFIX}wordlists/top-100k.txt",
             approxBytes = 828_498L,
             entries = "100k",
             description = "Quick pass of the 100k most common passwords",
@@ -53,7 +55,7 @@ object WordlistCatalog {
         DownloadableWordlist(
             name = "top-10k.txt",
             title = "Top 10k",
-            url = "https://github.com/1vcian/BruciaDev/releases/download/wordlists/top-10k.txt",
+            url = "${BrandLinks.DOWNLOAD_PREFIX}wordlists/top-10k.txt",
             approxBytes = 80_456L,
             entries = "10k",
             description = "The 10k most common passwords for a very fast first try",

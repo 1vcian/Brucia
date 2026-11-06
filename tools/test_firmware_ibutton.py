@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compile the Arduino-free iButton core (src/modules/others/ibutton_core.cpp) on the host
 with a C++ driver and run it: id parse/format, Dallas/Maxim CRC8, pin rule, ROM read retries
-against a fake 1-Wire bus. No ESP32 or PlatformIO installation required.
+and the headless verified write (presence before writing, 8-byte read-back) against a fake
+1-Wire bus. No ESP32 or PlatformIO installation required.
 """
 import os
 from pathlib import Path
@@ -166,8 +167,44 @@ int main() {
         check(ibuttonReadRom(b, id, 20, true, 100) == IBUTTON_CANCELLED && b.retries == 1, "cancel mid retry");
     }
 
+    // Headless write: presence first, then the write, then a read-back of all 8 bytes.
+    struct WriteCtx { FakeBus *bus; int calls; int resetsAtWrite; };
+    auto doWrite = [](void *c) { auto *w = static_cast<WriteCtx *>(c); w->calls++; w->resetsAtWrite = w->bus->resets; };
+    {   // no key ever: nothing is written (the old path wrote blind and replied "written")
+        FakeBus b; b.presence = {false}; b.roms = {GOOD};
+        WriteCtx w{&b, 0, -1}; bool written = true;
+        check(ibuttonWriteVerified(b, GOOD.data(), doWrite, &w, 100, 30, &written) == IBUTTON_NO_KEY, "write no key");
+        check(w.calls == 0 && !written && b.resets == 100 && b.reads == 0, "write no key wrote nothing");
+    }
+    {   // key arrives on the 4th reset, read-back matches
+        FakeBus b; b.presence = {false, false, false, true}; b.roms = {GOOD};
+        WriteCtx w{&b, 0, -1}; bool written = false;
+        check(ibuttonWriteVerified(b, GOOD.data(), doWrite, &w, 100, 30, &written) == IBUTTON_SUCCESS, "write verified");
+        check(w.calls == 1 && written && w.resetsAtWrite == 4 && b.writes == std::vector<uint8_t>{0x33}, "write after presence, then read rom");
+    }
+    {   // a key answers with other bytes: not a writable blank / write did not take
+        FakeBus b; b.presence = {true}; b.roms = {GOOD}; // asked for BAD's bytes, key still says GOOD
+        WriteCtx w{&b, 0, -1}; bool written = false;
+        check(ibuttonWriteVerified(b, BAD.data(), doWrite, &w, 5, 30, &written) == IBUTTON_FAILURE && written, "write mismatch");
+    }
+    {   // an id with a bad CRC byte is verified byte for byte (read-back reports CRC_ERROR)
+        FakeBus b; b.presence = {true}; b.roms = {BAD};
+        WriteCtx w{&b, 0, -1}; bool written = false;
+        check(ibuttonWriteVerified(b, BAD.data(), doWrite, &w, 5, 30, &written) == IBUTTON_SUCCESS && written, "write bad-crc id verified");
+    }
+    {   // key removed right after the write: unverified, reported as no key with written=true
+        FakeBus b; b.presence = {true, false}; b.roms = {GOOD};
+        WriteCtx w{&b, 0, -1}; bool written = false;
+        check(ibuttonWriteVerified(b, GOOD.data(), doWrite, &w, 5, 30, &written) == IBUTTON_NO_KEY && written && b.reads == 0, "write then gone");
+    }
+    {   // cancel before presence: nothing written
+        FakeBus b; b.presence = {true}; b.roms = {GOOD}; b.cancelAt = 0;
+        WriteCtx w{&b, 0, -1}; bool written = true;
+        check(ibuttonWriteVerified(b, GOOD.data(), doWrite, &w, 5, 30, &written) == IBUTTON_CANCELLED && w.calls == 0 && !written, "write cancel");
+    }
+
     if (failures) { std::printf("Firmware iButton FAIL (%d/%d checks failed)\n", failures, checks); return 1; }
-    std::printf("Firmware iButton PASS (%d checks: parse/format, CRC8, pin rule, ROM read retries)\n", checks);
+    std::printf("Firmware iButton PASS (%d checks: parse/format, CRC8, pin rule, ROM read retries, verified write)\n", checks);
     return 0;
 }
 '''

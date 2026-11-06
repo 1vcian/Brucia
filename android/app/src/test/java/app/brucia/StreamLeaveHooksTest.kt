@@ -18,7 +18,7 @@ class StreamLeaveHooksTest {
         "setSubghz", "stopSpectrum", "stopSubghzJammer", "stopRfCapture", "setBleScan", "gattStop",
         "stopIbeacon", "stopMicPcm", "stopPhoneMic", "pauseRecording", "sstvTransmitStop", "stopDtmfDecode",
         "stopStationSniff", "stopProbeSniff", "stopMonitor", "setWardriving", "stopIrJammer", "stopNrf24",
-        "stopLoraRecv", "fmStop", "stopWids", "stopArpSpoof", "stopSweep", "stopTimeline",
+        "stopLoraRecv", "fmStop", "stopWids", "stopArpSpoof", "stopSweep", "stopTimeline", "stopBleSpam",
     )
 
     private val sources = File("src/main/java").walkTopDown()
@@ -66,7 +66,8 @@ class StreamLeaveHooksTest {
     fun streamToolsStopTheirStreamsInLeaveEffect() {
         // Screen file to a stop call its LeaveEffect must contain.
         val expected = mapOf(
-            "MainActivity.kt" to listOf("vm.setSubghz(false)", "vm.setBleScan(false)", "vm.stopStationSniff()", "vm.stopMonitor()"),
+            "MainActivity.kt" to listOf("vm.setSubghz(false)", "vm.setBleScan(false)", "vm.stopStationSniff()", "vm.stopMonitor()",
+                "vm.stopBleSpam()"),
             "AudioScreens.kt" to listOf("vm.stopMicPcm()", "vm.pauseRecording()"),
             "BugSweepScreen.kt" to listOf("stopSweep()"),
             "RfTimelineScreen.kt" to listOf("vm.setBleScan(false)"),

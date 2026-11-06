@@ -288,7 +288,7 @@ void drawWebUiScreen(bool mode_ap) {
 
     if (mode_ap) {
         tft.setCursor(padX, currentY);
-        tft.print("Net: BruceNet/brucenet");
+        tft.print("Net: " + bruceConfig.wifiAp.ssid + "/" + bruceConfig.wifiAp.pwd);
         currentY += LH * FP + 6;
     }
 

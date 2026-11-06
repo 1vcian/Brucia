@@ -1,4 +1,5 @@
 ﻿#include "ST25R3916.h"
+#include <brucia_identity.h>
 #if !defined(LITE_VERSION)
 
 // ST25R3916 via RFAL fork (lewisxhe/ST25R3916-fork + NFC-RFAL-fork).
@@ -474,7 +475,7 @@ bool ST25R3916::_buildLoadedNdefMessage(std::vector<uint8_t> &ndefOut) {
     if (st25ExtractNdefMessageFromPageDump(strAllPages, ndefOut)) return true;
     if (st25BuildNdefMessageFromStruct(ndefMessage, ndefOut)) return true;
 
-    std::vector<uint8_t> uriPayload = Ndef::urlNdefAbbrv("https://bruce.computer");
+    std::vector<uint8_t> uriPayload = Ndef::urlNdefAbbrv(BRUCIA_SITE_URL);
     ndefOut = Ndef::newMessage(uriPayload);
     return !ndefOut.empty();
 }
@@ -3065,8 +3066,8 @@ void ST25R3916::_buildT4TFiles() {
         memcpy(&rec[4], ndefMessage.payload, ndefMessage.payloadSize);
         rl = (uint16_t)(4 + ndefMessage.payloadSize);
     } else {
-        // Default: URI "https://bruce.computer".
-        const char *url = "bruce.computer";
+        // Default: URI BRUCIA_SITE_URL ("https://" prefix code + host/path).
+        const char *url = BRUCIA_SITE_HOSTPATH;
         uint8_t ul = (uint8_t)strlen(url);
         rec[0] = 0xD1;
         rec[1] = 0x01;

@@ -7,6 +7,7 @@
  */
 
 #include "gps_tracker.h"
+#include <brucia_identity.h>
 #include "core/display.h"
 #include "core/mykeyboard.h"
 #include "core/sd_functions.h"
@@ -166,7 +167,7 @@ void GPSTracker::add_initial_file_data(File file) {
     file.println("<?xml-stylesheet type=\"text/xsl\" href=\"details.xsl\"?>");
     file.println("<gpx");
     file.println("  version=\"1.1\"");
-    file.println("  creator=\"Bruce Firmware\"");
+    file.println("  creator=\"" BRUCIA_NAME "\"");
     file.println("  xmlns=\"http://www.topografix.com/GPX/1/1\"");
     file.println("  xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"");
     file.println(
@@ -174,15 +175,15 @@ void GPSTracker::add_initial_file_data(File file) {
     );
     file.println(">");
     file.println("  <metadata>");
-    file.println("    <name>Bruce GPS Tracker</name>");
-    file.println("    <desc>GPS Tracker using Bruce Firmware</desc>");
-    file.println("    <link href=\"https://bruce.computer\">");
-    file.println("      <text>Bruce Website</text>");
+    file.println("    <name>" BRUCIA_NAME " GPS Tracker</name>");
+    file.println("    <desc>GPS Tracker using " BRUCIA_NAME " firmware</desc>");
+    file.println("    <link href=\"" BRUCIA_SITE_URL "\">");
+    file.println("      <text>" BRUCIA_NAME " website</text>");
     file.println("    </link>");
     file.println("  </metadata>");
     file.println("  <trk>");
-    file.println("    <name>Bruce Route</name>");
-    file.println("    <desc>GPS route captured by Bruce firmware</desc>");
+    file.println("    <name>" BRUCIA_NAME " Route</name>");
+    file.println("    <desc>GPS route captured by " BRUCIA_NAME " firmware</desc>");
     file.println("    <trkseg>");
 }
 

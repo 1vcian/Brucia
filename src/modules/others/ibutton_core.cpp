@@ -83,3 +83,25 @@ IButtonResult ibuttonReadRom(
     }
     return anyPresence ? IBUTTON_CRC_ERROR : IBUTTON_NO_KEY;
 }
+
+IButtonResult ibuttonWriteVerified(
+    IButtonBus &bus, const uint8_t id[8], void (*writeId)(void *ctx), void *ctx, int attempts,
+    uint32_t retryDelayMs, bool *written
+) {
+    if (written) *written = false;
+    bool present = false;
+    for (int attempt = 0; attempt < attempts && !present; attempt++) {
+        if (bus.cancelled()) return IBUTTON_CANCELLED;
+        present = bus.reset();
+        if (!present) bus.delayMs(retryDelayMs);
+    }
+    if (!present) return IBUTTON_NO_KEY;
+    writeId(ctx);
+    if (written) *written = true;
+    uint8_t back[8];
+    IButtonResult r = ibuttonReadRom(bus, back, attempts, false, retryDelayMs);
+    if (r == IBUTTON_NO_KEY || r == IBUTTON_CANCELLED) return IBUTTON_NO_KEY;
+    for (int i = 0; i < 8; i++)
+        if (back[i] != id[i]) return IBUTTON_FAILURE;
+    return IBUTTON_SUCCESS;
+}

@@ -116,6 +116,23 @@ class SubFileTest {
             SubFile.transmitCommand(key("Somfy", "FFFFFFFFFFFFFFFF", freq = 868_350_000L), repeat = 3))
     }
 
+    @Test fun transmitRefusesValuesOutsideTheFirmwareTxpBounds() {
+        // F03: the firmware rejects bits outside 1..64, te above 65535 us and repeat above 1000
+        // (bits > 64 shift a 64-bit key out of range; huge te/repeat only fail the encoder's
+        // allocation). The app refuses such a file instead of sending a command that fails.
+        assertNull(SubFile.transmitCommand(key("Princeton", "A5A", bits = 65)))
+        assertNull(SubFile.transmitCommand(key("Princeton", "A5A", bits = 100_000)))
+        assertNull(SubFile.transmitCommand(key("Princeton", "A5A").copy(te = 65_536)))
+        assertNull(SubFile.transmitCommand(key("Princeton", "A5A"), repeat = 1001))
+        assertNull(SubFile.transmitCommand(key("Princeton", "A5A"), repeat = -1))
+        // Zero padding beyond 16 hex digits is dropped (the firmware rejects > 16 digits).
+        assertEquals("subghz txp Princeton 433920000 24 A5A 0 10",
+            SubFile.transmitCommand(key("Princeton", "0".repeat(20) + "A5A")))
+        // Bounds are inclusive.
+        assertEquals("subghz txp Princeton 433920000 64 A5A 65535 1000",
+            SubFile.transmitCommand(key("Princeton", "A5A", bits = 64).copy(te = 65_535), repeat = 1000))
+    }
+
     @Test fun parsedFlipperKeyFileTransmitsWithCanonicalName() {
         val sig = SubFile.parse("""
             Filetype: Flipper SubGhz Key File

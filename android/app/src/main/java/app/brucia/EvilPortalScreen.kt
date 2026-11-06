@@ -203,7 +203,7 @@ internal fun EvilPortalScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.weight(1f)) {
                         Text("Deauth clients (evil twin)", color = cs.onSurface)
-                        Text("Disconnect devices from the real AP so they join this one.",
+                        Text("Also send deauth frames to the real AP's clients. Whether a client then reconnects, and to which AP, is up to the client and is not verified here.",
                             style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
                     Switch(checked = deauth, enabled = !active, onCheckedChange = { deauth = it })

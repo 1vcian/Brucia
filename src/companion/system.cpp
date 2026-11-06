@@ -36,12 +36,14 @@ static void runEspnowSend(const String &args, uint32_t id) {
     if ((int)text.length() >= ESP_DATA_SIZE) text = text.substring(0, ESP_DATA_SIZE - 1);
 
     static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    // ESP-NOW needs the Wi-Fi driver STARTED. In companion mode the radio may be off or left in
-    // AP mode by another feature, so force STA (this calls esp_wifi_start) before init. Without
-    // this, esp_now_init() fails and the broadcast silently goes nowhere (reported: "doesn't
-    // work"). WiFi.disconnect(false) drops any stale STA association but keeps the driver up.
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect(false);
+    // ESP-NOW needs the Wi-Fi driver STARTED with the STA interface (the peer uses WIFI_IF_STA).
+    // Start it only when needed and never take the radio from its current owner: forcing STA used to
+    // shut down a running Evil Portal AP (the app still showed it running) and WiFi.disconnect()
+    // dropped the device's own network join. Radio off -> STA; AP only -> AP+STA (the AP stays up);
+    // STA / AP+STA -> unchanged (ESP-NOW sends on the current channel).
+    wifi_mode_t mode = WiFi.getMode();
+    if (mode == WIFI_MODE_NULL) WiFi.mode(WIFI_STA);
+    else if (mode == WIFI_MODE_AP) WiFi.enableSTA(true);
     esp_err_t initRes = esp_now_init();
     // ESP_OK on first init; ESP_ERR_ESPNOW_EXIST means it was already up (fine). Anything else is
     // a real failure (usually the Wi-Fi driver not running) - report it honestly instead of
@@ -70,7 +72,8 @@ static void runEspnowSend(const String &args, uint32_t id) {
     strncpy(msg.data, text.c_str(), ESP_DATA_SIZE - 1);
     esp_err_t res = esp_now_send(bcast, (uint8_t *)&msg, sizeof(msg));
     if (res == ESP_OK) {
-        String out = "broadcast " + String((int)text.length()) + " bytes via ESP-NOW";
+        // ESP_OK means queued for a broadcast: there is no ACK for broadcast frames.
+        String out = "queued " + String((int)text.length()) + " bytes for ESP-NOW broadcast (delivery not confirmed)";
         companionAckMsg(id, true, out.c_str());
     } else {
         companionAckMsg(id, false, esp_err_to_name(res));
@@ -198,8 +201,26 @@ static void runIButtonWrite(const String &arg, uint32_t id) {
         sendErr(id, 400, "usage: ibutton_write <idhex> (16 hex chars)");
         return;
     }
-    if (ibutton_write_headless(a) == IBUTTON_SUCCESS) companionAckMsg(id, true, "written");
-    else companionAckMsg(id, false, "invalid id (need 16 hex chars)");
+    bool written = false;
+    switch (ibutton_write_headless(a, &written)) {
+        case IBUTTON_SUCCESS: companionAckMsg(id, true, "written and verified"); break;
+        case IBUTTON_NO_KEY:
+            companionAckMsg(
+                id,
+                false,
+                written ? "written, but no key answered the read-back: read it to check"
+                        : "no iButton on the probe: touch a writable blank, then write (nothing written)"
+            );
+            break;
+        default:
+            companionAckMsg(
+                id,
+                false,
+                written ? "read-back differs: not a writable blank, or the write did not take"
+                        : "invalid id (need 16 hex chars)"
+            );
+            break;
+    }
 }
 #endif // !LITE_VERSION
 

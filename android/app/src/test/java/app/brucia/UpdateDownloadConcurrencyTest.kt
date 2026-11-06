@@ -227,7 +227,7 @@ class UpdateDownloadConcurrencyTest {
     private fun releaseBody(tag: String, apk: ByteArray): String = JSONObject().put("tag_name", tag).put("assets", JSONArray(listOf(
         JSONObject().put("name", "Brucia.apk").put("size", apk.size)
             .put("digest", "sha256:" + AssetIntegrity.hex(AssetIntegrity.sha256Of(apk)))
-            .put("browser_download_url", "https://github.com/1vcian/BruciaDev/releases/download/$tag/Brucia.apk")))).toString()
+            .put("browser_download_url", "${BrandLinks.DOWNLOAD_PREFIX}$tag/Brucia.apk")))).toString()
 
     @Test(timeout = 10_000) fun refreshDuringDownloadDoesNotSwapUrlOrIntegrity() = runBlocking {
         val v2 = bytes(150_000, 10)

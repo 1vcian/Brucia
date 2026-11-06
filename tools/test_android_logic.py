@@ -3,7 +3,8 @@
 
 Reads already installed Maven artifacts from GRADLE_USER_HOME (default ~/.gradle).
 No downloads. This is a subset of Android tests, not an APK/lint/UI verification.
-Only BuildConfig.VERSION_NAME is supplied as a generated host constant.
+Only BuildConfig.VERSION_NAME and the brand.json fields (BRAND_*, as Gradle generates them)
+are supplied as generated host constants.
 """
 import json
 import argparse
@@ -33,7 +34,7 @@ TESTS = [
     "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
     "StreamRotationTest", "ParkedLeavesTest", "DeviceOutputsTest",
     "FrameBudgetTest", "HandshakeParserTest", "PcapReaderTest", "SubFileTest",
-    "SlipReceiverTest",
+    "SlipReceiverTest", "CliReplyLimitTest",
 ]
 # Test-only files without a test class (compiled, not run).
 TEST_HELPERS = ["DeviceJson", "VirtualTime"]
@@ -55,7 +56,7 @@ SOURCES = [
     "wifi/CaptureWorkflow.kt", "wifi/CaptureDescriptor.kt",
     "wifi/HandshakeParser.kt", "wifi/WpaCracker.kt", "wifi/Pmkid.kt",
     "wifi/PcapReader.kt", "wifi/PcapWriter.kt", "wifi/Dot11Frame.kt", "subghz/SubFile.kt",
-    "update/EspProtocol.kt",
+    "update/EspProtocol.kt", "BrandLinks.kt",
 ]
 
 
@@ -75,7 +76,12 @@ def main():
         tmp = Path(tmp)
         config = tmp / "BuildConfig.kt"
         version = (ROOT / "VERSION").read_text().strip()
-        config.write_text("package app.brucia\nobject BuildConfig { const val VERSION_NAME = " + json.dumps(version) + " }\n")
+        brand = json.loads((ROOT / "brand.json").read_text())
+        fields = {"VERSION_NAME": version, "BRAND_NAME": brand["name"], "BRAND_GITHUB_OWNER": brand["github_owner"],
+                  "BRAND_GITHUB_REPO": brand["github_repo"], "BRAND_SITE_URL": brand["site_url"],
+                  "BRAND_ACCEPTED_RELEASE_REPOS": ",".join(brand["accepted_release_repos"])}
+        config.write_text("package app.brucia\nobject BuildConfig {\n" + "".join(
+            f"    const val {key} = {json.dumps(value)}\n" for key, value in fields.items()) + "}\n")
         production = ROOT / "android/app/src/main/java/app/brucia"
         tests = ROOT / "android/app/src/test/java/app/brucia"
         sources = [str(production / name) for name in SOURCES]

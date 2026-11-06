@@ -121,7 +121,7 @@ private fun NetworkScanSample(
     hosts: List<ScanHost> = sampleHosts,
 ) {
     NetworkScanContent(
-        base = "192.168.1.", localIp = "192.168.1.57", hosts = hosts,
+        subnet = "192.168.1.0/24", localIp = "192.168.1.57", hosts = hosts,
         scanning = false, progress = if (hosts.isEmpty()) 0 else 254, total = 254, lanStatus = lan,
     )
 }

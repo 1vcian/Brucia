@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const catalog = require('../docs/release-catalog.js');
+const brand = require('../docs/brand.js');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -23,8 +24,10 @@ async function idle() {
   throw new Error('page script did not become idle');
 }
 
+// Release URLs come from docs/brand.js (generated from brand.json), never from literals here.
 function asset(name, tag = 'v0.2', host = 'github.com') {
-  return { name, browser_download_url: `https://${host}/1vcian/BruciaDev/releases/download/${tag}/${name}` };
+  const prefix = brand.download_prefix.replace('https://github.com/', `https://${host}/`);
+  return { name, browser_download_url: `${prefix}${tag}/${name}` };
 }
 test('same-release assets map to the exact board and canonical T-Embed alias', () => {
   const release = catalog.parse({ tag_name: 'v0.2', assets: [
@@ -91,7 +94,7 @@ async function page(response, images = {}) {
     document: { getElementById(id) { return nodes[id]; } },
     window: { addEventListener(name, callback) { listeners[name] = callback; } },
     BruciaReleases: catalog, URL: ObjectURL, Blob, crypto: trackedCrypto, navigator: { serial: {} },
-    fetch: async (url) => url.startsWith('https://api.github.com/') ? response
+    fetch: async (url) => url === brand.releases_api ? response
       : (images[url] || { ok: false, status: 404 })
   });
   await idle();
@@ -257,4 +260,28 @@ test('integrity: malformed digest or size rejects the asset instead of downgradi
   assert.equal(parseAssets(sized('Brucia.apk', catalog.APK_MAX_BYTES + 1)).apk, null);
   assert.throws(() => parseAssets(sized(FIRMWARE, 3, 'md5:x'), asset('Bruce-lilygo-t-embed-cc1101.bin')), /Ambiguous/);
   assert.throws(() => parseAssets(sized('a.apk', 0), asset('b.apk')), /Ambiguous/);
+});
+
+test('brand: catalog accepts the current and launch repository names and nothing else', () => {
+  const repoBase = brand.repo_url.slice(0, brand.repo_url.lastIndexOf('/') + 1);
+  assert.equal(catalog.RELEASES_API, brand.releases_api);
+  assert.ok(brand.accepted_download_prefixes.includes(brand.download_prefix));
+  for (const prefix of brand.accepted_download_prefixes) {
+    const release = catalog.parse({ tag_name: 'v0.2', assets: [
+      { name: 'brucia-t-embed-cc1101.bin', browser_download_url: `${prefix}v0.2/brucia-t-embed-cc1101.bin` }] });
+    assert.deepEqual(Object.keys(release.boards), ['lilygo-t-embed-cc1101'], prefix);
+  }
+  for (const bad of [`${repoBase}SomeOtherRepo/releases/download/`, `${brand.upstream_repo_url}/releases/download/`]) {
+    const release = catalog.parse({ tag_name: 'v0.2', assets: [
+      { name: 'Bruce-t-embed-cc1101.bin', browser_download_url: `${bad}v0.2/Bruce-t-embed-cc1101.bin` }] });
+    assert.deepEqual(Object.keys(release.boards), [], bad);
+  }
+});
+
+test('brand: website pages load brand.js before the scripts that read it', () => {
+  const index = fs.readFileSync(path.join(__dirname, '../docs/index.html'), 'utf8');
+  assert.ok(index.indexOf('src="brand.js"') >= 0 && index.indexOf('src="brand.js"') < index.indexOf('src="release-catalog.js"'));
+  assert.ok(index.includes('fetch(BruciaReleases.RELEASES_API'));
+  const wiki = fs.readFileSync(path.join(__dirname, '../docs/wiki/index.html'), 'utf8');
+  assert.ok(wiki.indexOf('src="../brand.js"') >= 0 && wiki.indexOf('src="../brand.js"') < wiki.indexOf('src="wiki.js"'));
 });

@@ -5,7 +5,7 @@
 #include "helpers_js.h"
 
 JSValue native_getDeviceName(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
-    const char *deviceName = bruceConfig.wifiAp.ssid != NULL ? bruceConfig.wifiAp.ssid.c_str() : "Bruce";
+    const char *deviceName = bruceConfig.wifiAp.ssid != NULL ? bruceConfig.wifiAp.ssid.c_str() : "Brucia";
     return JS_NewString(ctx, deviceName);
 }
 

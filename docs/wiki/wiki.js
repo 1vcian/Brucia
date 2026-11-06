@@ -7,8 +7,9 @@
 (function () {
   "use strict";
 
-  var RAW_BASE = "https://raw.githubusercontent.com/1vcian/BruciaDev/main/wiki/";
-  var WIKI_BASE = "https://github.com/1vcian/BruciaDev/wiki/";
+  // Repository links come from ../brand.js (generated from brand.json, see docs/LAUNCH.md).
+  var RAW_BASE = window.BruciaBrand.raw_wiki_base;
+  var WIKI_BASE = window.BruciaBrand.github_wiki_url;
 
   // route slug -> { title, file, wiki (github wiki page name) }
   // nav order follows wiki/_Sidebar.md

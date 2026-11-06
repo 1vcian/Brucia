@@ -39,6 +39,12 @@ struct IRCode {
 
 // Custom IR
 void sendIRCommand(IRCode *code, bool hideDefaultUI = false);
+// Brucia: protocols sendIRCommand() transmits for a parsed (address/command) code. Any other name is
+// silently ignored there, so callers that report a result check this first.
+bool irParsedProtocolSupported(const String &protocol);
+// Brucia: the configured IR TX pin is one of IR_TX_PINS. checkIrTxPin() opens an on-device pin menu
+// otherwise; companion/headless callers check this first and refuse instead of blocking on it.
+bool irTxPinReady();
 void sendRawCommand(uint16_t frequency, String rawData, bool hideDefaultUI = false);
 void sendNECCommand(String address, String command, bool hideDefaultUI = false);
 void sendNECextCommand(String address, String command, bool hideDefaultUI = false);

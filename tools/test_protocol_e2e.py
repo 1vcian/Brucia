@@ -21,7 +21,7 @@ import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mock_device import LinkCounters, MockDevice, diag_reply  # noqa: E402  (shared diag shape + counters)
+from mock_device import LinkCounters, MockDevice, diag_reply, rf_tx_reject_reason  # noqa: E402  (shared diag shape + counters)
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_KEYS = ("scrOn", "ledOn", "scrBright")
@@ -185,14 +185,13 @@ def mock_serve(master, stop):
                     out({"v": 0, "t": ACK, "id": mid, "d": {"ok": True, "size": len(content), "crc32": zlib.crc32(content) & 0xFFFFFFFF}})
                 elif cmd.startswith("wifi_handshake") or cmd.startswith("wifi_pmkid"):
                     out({"v": 0, "t": ACK, "id": mid, "d": {"ok": True, "out": "mock capture", "desc": e2e_capture_descriptor(cmd)}})
-                elif cmd.startswith("subghz tx ") or cmd.startswith("rf tx "):
-                    # Single-code RF tx: mirror the firmware's safe key parse (rfhex::parseKey64).
-                    # A De Bruijn sweep key is far longer than 16 hex digits -> reject (ok:False),
-                    # never a false "sent" and never a crash.
-                    key = cmd.split()[2] if len(cmd.split()) > 2 else ""
-                    ok_key = bool(key) and len(key) <= 16 and all(c in "0123456789abcdefABCDEF" for c in key)
-                    out({"v": 0, "t": ACK, "id": mid, "d": {"ok": ok_key,
-                         "out": ("ok:" + cmd) if ok_key else "invalid key: expected up to 16 hex digits (one 64-bit code)\n"}})
+                elif cmd.split()[:2] in (["subghz", "tx"], ["rf", "tx"], ["subghz", "txp"], ["rf", "txp"]):
+                    # Single-code RF tx: mirror the firmware's safe parse (rfhex::parseKey64 for the
+                    # key, clinum::parseU32 for the numbers). A De Bruijn sweep key or a malformed
+                    # number is rejected (ok:False), never a false "sent" and never a crash.
+                    reason = rf_tx_reject_reason(cmd)
+                    out({"v": 0, "t": ACK, "id": mid, "d": {"ok": reason is None,
+                         "out": ("ok:" + cmd) if reason is None else reason}})
                 else:
                     out({"v": 0, "t": ACK, "id": mid, "d": {"ok": True, "out": "ok:" + cmd}})
             elif t == SUB:
@@ -478,6 +477,26 @@ def main():
     checks.append(("subghz tx over-long key rejected (no false sent)",
                    bad_tx is not None and bad_tx["d"].get("ok") is False and "invalid key" in bad_tx["d"].get("out", "")))
     checks.append(("device responsive after rejected tx", after_tx is not None and diag_valid(after_tx["d"])))
+    # F03: malformed / out-of-range numbers in the RF transmit commands are rejected with an error
+    # ACK naming the argument (the firmware's std::stoul used to throw and abort), and the device
+    # answers the next command.
+    bad_numbers = [
+        (16, "subghz tx 445533 abc 174 10", "invalid frequency"),
+        (17, "subghz tx 445533 433920000 174 99999999999999999999", "invalid count"),
+        (18, "subghz txp Princeton 433920000 100 445533 350 10", "invalid bits"),
+        (19, "subghz txp Princeton 433920000 24 445533 -5 10", "invalid te"),
+    ]
+    for mid, text, expect in bad_numbers:
+        send(CMD, mid, {"cmd": text})
+        rej = await_reply(mid, ACK)
+        checks.append((f"F03 rejects: {text}", rej is not None and rej["d"].get("ok") is False
+                       and expect in rej["d"].get("out", "")))
+    send(CMD, 20, {"cmd": "subghz txp Princeton 433920000 24 445533 350 10"})
+    good_txp = await_reply(20, ACK)
+    send(CMD, 21, {"cmd": "diag"})
+    after_num = await_reply(21, ACK)
+    checks.append(("subghz txp valid command accepted", good_txp is not None and good_txp["d"].get("ok") is True))
+    checks.append(("device responsive after rejected numbers", after_num is not None and diag_valid(after_num["d"])))
 
     stop.set()
     ser.close()

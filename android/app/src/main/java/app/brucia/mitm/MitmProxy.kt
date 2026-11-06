@@ -1,12 +1,12 @@
 package app.brucia.mitm
 
 import android.content.Context
-import android.app.Application
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import kotlin.concurrent.thread
@@ -22,8 +23,9 @@ import kotlin.concurrent.thread
 /**
  * On-phone HTTP(S) intercepting proxy (Burp / mitmproxy style), the "offload" role.
  *
- * - Plain HTTP (absolute-form request): parsed, forwarded upstream, response relayed,
- *   full transaction logged.
+ * - Plain HTTP (absolute-form request): parsed, forwarded upstream, response relayed.
+ *   Bodies of any size stream through ([HttpRelay]); the log keeps headers and the first
+ *   [BodyCapture.PREVIEW_MAX] bytes of each body, marked when truncated.
  * - HTTPS (CONNECT): TLS is terminated with a per-host leaf certificate signed by the
  *   Brucia MITM CA, the decrypted request is forwarded to the real upstream over TLS,
  *   and the decrypted request/response are logged. If the TLS handshake with the client
@@ -33,8 +35,17 @@ import kotlin.concurrent.thread
  * AUTHORIZED USE ONLY: run this against devices and networks you own or are explicitly
  * authorized to test.
  */
-class MitmProxy(context: Context, private val port: Int) {
-    private val ctx = context.applicationContext as Application
+class MitmProxy internal constructor(
+    private val port: Int,
+    private val bindAddress: InetAddress?,
+    private val serverContextFor: (String) -> SSLContext,
+) {
+    /** The production proxy: listens on all interfaces (LAN clients), leaves signed by the Brucia CA. */
+    constructor(context: Context, port: Int) : this(port, null, run {
+        val app = context.applicationContext
+        val f: (String) -> SSLContext = { host -> MitmCa.serverContextFor(app, host) }
+        f
+    })
 
     @Volatile private var running = false
     private var server: ServerSocket? = null
@@ -42,8 +53,10 @@ class MitmProxy(context: Context, private val port: Int) {
     private val connections = ConcurrentHashMap.newKeySet<Socket>()
     private val upstreamFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
 
+    /** Port actually bound (differs from the requested one when that was 0). */
+    val localPort: Int get() = server?.localPort ?: -1
+
     private companion object {
-        const val PREVIEW_MAX = 4096
         const val CLIENT_TIMEOUT_MS = 60_000
         const val UPSTREAM_CONNECT_MS = 15_000
         const val UPSTREAM_READ_MS = 30_000
@@ -53,7 +66,7 @@ class MitmProxy(context: Context, private val port: Int) {
         val s = ServerSocket()
         try {
             s.reuseAddress = true
-            s.bind(InetSocketAddress(port))
+            s.bind(InetSocketAddress(bindAddress, port))
         } catch (error: Exception) { runCatching { s.close() }; throw error }
         server = s
         running = true
@@ -107,7 +120,7 @@ class MitmProxy(context: Context, private val port: Int) {
         client.use {
             val cin = BufferedInputStream(client.getInputStream())
             val cout = BufferedOutputStream(client.getOutputStream())
-            val first = runCatching { readRequest(cin) }.getOrNull() ?: return
+            val first = runCatching { HttpWire.readRequestHead(cin) }.getOrNull() ?: return
             if (first.method == "CONNECT") {
                 handleConnect(client, cout, first)
             } else {
@@ -118,16 +131,16 @@ class MitmProxy(context: Context, private val port: Int) {
 
     // ---- Plain HTTP (absolute-form request target) --------------------------------
 
-    private fun handlePlainHttp(cin: InputStream, cout: OutputStream, firstReq: HttpRequest) {
-        var req: HttpRequest? = firstReq
+    private fun handlePlainHttp(cin: InputStream, cout: OutputStream, firstReq: RequestHead) {
+        var req: RequestHead? = firstReq
         while (req != null) {
-            val keepAlive = processPlain(req, cout)
+            val keepAlive = processPlain(req, cin, cout)
             if (!keepAlive) break
-            req = runCatching { readRequest(cin) }.getOrNull()
+            req = runCatching { HttpWire.readRequestHead(cin) }.getOrNull()
         }
     }
 
-    private fun processPlain(req: HttpRequest, cout: OutputStream): Boolean {
+    private fun processPlain(req: RequestHead, cin: InputStream, cout: OutputStream): Boolean {
         val started = System.currentTimeMillis()
         val target = parseAbsoluteTarget(req.target)
         if (target == null) {
@@ -139,22 +152,23 @@ class MitmProxy(context: Context, private val port: Int) {
             failed = { e -> errorTxn(started, req.method, "http", host, path, "Upstream error: ${e.message}") },
             onFailure = false,
         ) { log ->
+            var reusable = false
             withUpstream(Socket()) { up ->
                 up.connect(InetSocketAddress(host, portNum), UPSTREAM_CONNECT_MS)
                 up.soTimeout = UPSTREAM_READ_MS
-                exchange(
-                    log, started, "http", host, req.method, path, req,
+                reusable = exchange(
+                    log, started, "http", host, path, req, cin,
                     up.getInputStream(), BufferedOutputStream(up.getOutputStream()),
                     cout, decrypted = true,
                 )
             }
-            keepAlive(req.version, req.headers)
+            reusable && keepAlive(req.version, req.headers)
         }
     }
 
     // ---- HTTPS (CONNECT + TLS termination) ----------------------------------------
 
-    private fun handleConnect(client: Socket, cout: OutputStream, connect: HttpRequest) {
+    private fun handleConnect(client: Socket, cout: OutputStream, connect: RequestHead) {
         val hp = connect.target.split(":")
         val host = hp[0]
         val portNum = hp.getOrNull(1)?.toIntOrNull() ?: 443
@@ -170,7 +184,7 @@ class MitmProxy(context: Context, private val port: Int) {
         }
 
         val serverSock = try {
-            val sslCtx = MitmCa.serverContextFor(ctx, host)
+            val sslCtx = serverContextFor(host)
             val s = sslCtx.socketFactory.createSocket(client, host, portNum, true) as SSLSocket
             try { s.useClientMode = false; s.startHandshake(); s }
             catch (error: Exception) { runCatching { s.close() }; throw error }
@@ -188,82 +202,88 @@ class MitmProxy(context: Context, private val port: Int) {
         serverSock.use {
             val tin = BufferedInputStream(serverSock.inputStream)
             val tout = BufferedOutputStream(serverSock.outputStream)
-            var req = runCatching { readRequest(tin) }.getOrNull()
+            var req = runCatching { HttpWire.readRequestHead(tin) }.getOrNull()
             while (req != null) {
-                val keepAlive = processHttps(host, portNum, req, tout)
+                val keepAlive = processHttps(host, portNum, req, tin, tout)
                 if (!keepAlive) break
-                req = runCatching { readRequest(tin) }.getOrNull()
+                req = runCatching { HttpWire.readRequestHead(tin) }.getOrNull()
             }
         }
     }
 
-    private fun processHttps(host: String, portNum: Int, req: HttpRequest, tout: OutputStream): Boolean {
+    private fun processHttps(host: String, portNum: Int, req: RequestHead, tin: InputStream, tout: OutputStream): Boolean {
         val started = System.currentTimeMillis()
         return RequestLog().run(
             failed = { e -> errorTxn(started, req.method, "https", host, req.target, "Upstream TLS error: ${e.message}") },
             onFailure = false,
         ) { log ->
             val up = upstreamFactory.createSocket() as SSLSocket
+            var reusable = false
             withUpstream(up) {
                 up.connect(InetSocketAddress(host, portNum), UPSTREAM_CONNECT_MS)
                 up.soTimeout = UPSTREAM_READ_MS
                 // Validate both trust chain and hostname of the real upstream.
                 up.sslParameters = up.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
                 up.startHandshake()
-                exchange(
-                    log, started, "https", host, req.method, req.target, req,
+                reusable = exchange(
+                    log, started, "https", host, req.target, req, tin,
                     up.inputStream, BufferedOutputStream(up.outputStream),
                     tout, decrypted = true,
                 )
             }
-            keepAlive(req.version, req.headers)
+            reusable && keepAlive(req.version, req.headers)
         }
     }
 
     // ---- Shared request/response exchange + logging -------------------------------
 
+    /**
+     * Stream the request (head + body from [clientIn]) upstream and the response back to
+     * [clientOut]; bodies of any size pass through, the log keeps a bounded prefix of each.
+     * Returns whether the client connection can carry another request.
+     */
     private fun exchange(
         log: RequestLog,
         started: Long,
         scheme: String,
         host: String,
-        method: String,
         path: String,
-        req: HttpRequest,
+        req: RequestHead,
+        clientIn: InputStream,
         upIn: InputStream,
         upOut: OutputStream,
         clientOut: OutputStream,
         decrypted: Boolean,
-    ) {
-        // Forward request upstream (origin-form, Accept-Encoding stripped for readable bodies).
-        upOut.write(buildRequest(method, path, req.version, req.headers, req.body))
-        upOut.flush()
-
-        val resp = readResponse(BufferedInputStream(upIn), method)
-
-        // Relay response to the client.
-        clientOut.write(buildResponse(resp.version, resp.status, resp.reason, resp.headers, resp.body))
-        clientOut.flush()
+    ): Boolean {
+        val reqBody = BodyCapture()
+        HttpRelay.forwardRequest(req, path, clientIn, upOut, reqBody)
+        val upstream = BufferedInputStream(upIn)
+        val resp = HttpWire.readResponseHead(upstream, req.method)
+        val respBody = BodyCapture()
+        val reusable = HttpRelay.relayResponse(resp, upstream, clientOut, req.version, respBody)
 
         log.log(
             MitmTxn(
                 timeMs = started,
-                method = method,
+                method = req.method,
                 scheme = scheme,
                 host = host,
                 path = path,
                 status = resp.status,
-                reqBytes = req.body.size,
-                respBytes = resp.body.size,
+                reqBytes = reqBody.total,
+                respBytes = respBody.total,
                 durationMs = System.currentTimeMillis() - started,
                 decrypted = decrypted,
                 note = "",
                 reqHeaders = headersToString(req.headers),
                 respHeaders = headersToString(resp.headers),
-                reqPreview = preview(req.body),
-                respPreview = preview(resp.body),
+                reqPreview = reqBody.preview(),
+                respPreview = respBody.preview(),
+                reqTruncated = reqBody.truncated,
+                respTruncated = respBody.truncated,
             ),
         )
+        return reusable
     }
 
     private fun errorTxn(
@@ -274,49 +294,7 @@ class MitmProxy(context: Context, private val port: Int) {
         decrypted = false, note = note, reqHeaders = "", respHeaders = "", reqPreview = "", respPreview = "",
     )
 
-    // ---- HTTP parsing / serialization --------------------------------------------
-
-    private fun readRequest(ins: InputStream): HttpRequest? = HttpWire.readRequest(ins)
-    private fun readResponse(ins: InputStream, method: String): HttpResponse = HttpWire.readResponse(ins, method)
-
-    private fun buildRequest(
-        method: String, path: String, version: String,
-        headers: List<Pair<String, String>>, body: ByteArray,
-    ): ByteArray {
-        val sb = StringBuilder()
-        sb.append(method).append(' ').append(path).append(' ').append(version).append("\r\n")
-        for ((k, v) in headers) {
-            if (k.equals("Proxy-Connection", true)) continue
-            if (k.equals("Transfer-Encoding", true)) continue
-            if (k.equals("Content-Length", true)) continue
-            if (k.equals("Accept-Encoding", true)) continue // ask upstream for plaintext
-            sb.append(k).append(": ").append(v).append("\r\n")
-        }
-        if (body.isNotEmpty() || hasBodyMethod(method)) sb.append("Content-Length: ").append(body.size).append("\r\n")
-        sb.append("\r\n")
-        return sb.toString().toByteArray(Charsets.ISO_8859_1) + body
-    }
-
-    private fun buildResponse(
-        version: String, status: Int, reason: String,
-        headers: List<Pair<String, String>>, body: ByteArray,
-    ): ByteArray {
-        val sb = StringBuilder()
-        sb.append(version).append(' ').append(status)
-        if (reason.isNotEmpty()) sb.append(' ').append(reason)
-        sb.append("\r\n")
-        for ((k, v) in headers) {
-            if (k.equals("Transfer-Encoding", true)) continue
-            if (k.equals("Content-Length", true)) continue
-            sb.append(k).append(": ").append(v).append("\r\n")
-        }
-        sb.append("Content-Length: ").append(body.size).append("\r\n")
-        sb.append("\r\n")
-        return sb.toString().toByteArray(Charsets.ISO_8859_1) + body
-    }
-
-    private fun hasBodyMethod(method: String) =
-        method.equals("POST", true) || method.equals("PUT", true) || method.equals("PATCH", true)
+    // ---- Helpers ------------------------------------------------------------------
 
     private fun header(headers: List<Pair<String, String>>, name: String): String? =
         headers.firstOrNull { it.first.equals(name, true) }?.second
@@ -340,14 +318,4 @@ class MitmProxy(context: Context, private val port: Int) {
 
     private fun headersToString(headers: List<Pair<String, String>>): String =
         headers.joinToString("\n") { "${it.first}: ${it.second}" }
-
-    private fun preview(body: ByteArray): String {
-        if (body.isEmpty()) return ""
-        val slice = if (body.size > PREVIEW_MAX) body.copyOf(PREVIEW_MAX) else body
-        val text = String(slice, Charsets.UTF_8)
-        // Mark as binary if it has many non-printable, non-whitespace bytes.
-        val nonPrintable = text.count { it.code < 9 || (it.code in 14..31) }
-        val head = if (nonPrintable > text.length / 10) "[binary body, ${body.size} bytes]" else text
-        return if (body.size > PREVIEW_MAX) "$head\n... [truncated, ${body.size} bytes total]" else head
-    }
 }

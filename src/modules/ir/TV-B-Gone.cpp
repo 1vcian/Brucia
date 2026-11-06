@@ -119,14 +119,20 @@ void quickflashLEDx(uint8_t x) {
     }
 }
 
-void checkIrTxPin() {
+bool irTxPinReady() {
     const std::vector<std::pair<String, int>> pins = IR_TX_PINS;
-    int count = 0;
     for (auto pin : pins) {
-        if (pin.second == bruceConfigPins.irTx) count++;
+        if (pin.second == bruceConfigPins.irTx) return true;
     }
-    if (count > 0) return;
-    else gsetIrTxPin(true);
+    return false;
+}
+
+void checkIrTxPin() {
+    if (irTxPinReady()) return;
+    // Brucia: nobody is at the device in companion mode, so the pin menu would block the link
+    // forever. Companion/CLI-in-companion callers refuse earlier via irTxPinReady(); never open it.
+    if (g_companionActive) return;
+    gsetIrTxPin(true);
 }
 
 // Mutex setup - one-time initialization

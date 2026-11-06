@@ -162,6 +162,8 @@ void showDeviceInfo() {
 
     area.addLine(BRUCIA_PRODUCT_NAME " " + String(BRUCE_VERSION));
     area.addLine(BRUCIA_UPSTREAM_CREDIT);
+    area.addLine("Source: " BRUCIA_REPO_DISPLAY);
+    area.addLine("Upstream: " BRUCIA_UPSTREAM_REPO_DISPLAY);
     area.addLine("EEPROM size: " + String(EEPROMSIZE));
     area.addLine("");
     area.addLine("[MEMORY]");

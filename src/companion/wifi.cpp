@@ -401,8 +401,10 @@ void monStart(int channel, const char *bssidStr) {
             monBssidFilter = true;
         }
     }
-    // Channel: lock to the requested one, or start a slow hop from channel 1.
-    if (channel >= 1 && channel <= 14) {
+    // Channel: lock to the requested one (2.4 GHz channels 1..13, matching the app and
+    // PROTOCOL.md), or start a slow hop from channel 1 for any out-of-range/absent value. An
+    // out-of-range channel never throws: it simply falls through to hop mode.
+    if (channel >= 1 && channel <= 13) {
         monChannel = (uint8_t)channel;
         monLockChannel = true;
     } else {
@@ -909,6 +911,14 @@ bool dispatchWifiCommand(const CommandRequest &request) {
         // Brucegotchi (Pwnagotchi parity): headless, time-bounded WPA-handshake
         // collector. brucegotchi <secs> -> ACK handshakes=<n>. AUTHORIZED USE ONLY.
         // Responder (LLMNR/NBT-NS poisoning). responder <secs>. Needs Wi-Fi joined. AUTHORIZED USE.
+        // A stop arriving when nothing is running (same reasoning as brucegotchi_stop below): the
+        // running case is consumed by companionPollStop inside responder_run, so here the device is
+        // idle. Checked before the startsWith() so "responder_stop" is not misread as a new run.
+        if (cmdStr == "responder_stop") {
+            companionAckMsg(id, true, "not running");
+            break;
+        }
+
         if (cmdStr.startsWith("responder")) {
 #if !defined(LITE_VERSION)
             int rsecs = cmdStr.length() > 10 ? cmdStr.substring(10).toInt() : 0;
@@ -931,6 +941,14 @@ bool dispatchWifiCommand(const CommandRequest &request) {
         }
 
         // Karma (evil-twin probe-response lure). karma <secs> -> run headless. AUTHORIZED USE.
+        // Idle stop guard, as for responder/brucegotchi: a karma_stop reaching an idle device must
+        // not be misread by the startsWith("karma") handler as a new run. While karma runs, the stop
+        // is consumed by companionPollStop inside karma_run_headless instead.
+        if (cmdStr == "karma_stop") {
+            companionAckMsg(id, true, "not running");
+            break;
+        }
+
         if (cmdStr.startsWith("karma")) {
 #if !defined(LITE_VERSION)
             int ksecs = cmdStr.length() > 6 ? cmdStr.substring(6).toInt() : 0;

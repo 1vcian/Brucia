@@ -57,7 +57,7 @@ void pix_qrcode() {
     String data0 = "0014BR.GOV.BCB.PIX01" + key_length + key;
 
     String pix_code = "00020126" + String(data0.length()) + data0 + "52040000530398654" + amount_length +
-                      amount + "5802BR5909Bruce PIX6014Rio de Janeiro62070503***6304";
+                      amount + "5802BR5910Brucia PIX6014Rio de Janeiro62070503***6304";
     String crc = calculate_crc(pix_code);
 
     return qrcode_display(pix_code + crc);

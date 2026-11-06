@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 6-11 auto backup. Everything else keeps being backed up; secrets stay on this phone:
+     the MITM CA private key (a restored copy could intercept any device that trusts the CA) and
+     the WiGLE API credentials. Keep in step with data_extraction_rules.xml. -->
+<full-backup-content>
+    <exclude domain="file" path="mitm/" />
+    <exclude domain="sharedpref" path="wigle.xml" />
+</full-backup-content>

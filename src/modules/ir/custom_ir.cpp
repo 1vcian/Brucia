@@ -285,6 +285,15 @@ void otherIRcodes() {
 
 // IR commands
 
+bool irParsedProtocolSupported(const String &protocol) {
+    static const char *const names[] = {"NEC",  "NECext", "RC5",    "RC5X",   "RC6",
+                                         "Samsung32", "SIRC", "SIRC15", "SIRC20", "Kaseikyo"};
+    for (const char *n : names) {
+        if (protocol.equalsIgnoreCase(n)) return true;
+    }
+    return false;
+}
+
 void sendIRCommand(IRCode *code, bool hideDefaultUI) {
     setup_ir_pin(bruceConfigPins.irTx, OUTPUT);
     // https://developer.flipper.net/flipperzero/doxygen/infrared_file_format.html
@@ -556,6 +565,11 @@ bool sendDecodedCommand(String protocol, String value, uint8_t bits, bool hideDe
     if (!hideDefaultUI) { displayTextLine("Sending.."); }
 
     if (hasACState(type)) {
+        // Brucia: the state buffer holds bits/8 bytes but the loop below stores one byte per "XX "
+        // group of `value`; a value longer than that (or bits < 8, e.g. a 280-bit code wrapped in the
+        // uint8_t `bits`) overflowed this stack array. Reject such a code instead of sending it.
+        const uint16_t stateLen = bits / 8;
+        if (stateLen == 0 || (value.length() + 2) / 3 > stateLen) return false;
         // need to send the state (still passed from value)
         uint8_t state[bits / 8] = {0};
         uint16_t state_pos = 0;

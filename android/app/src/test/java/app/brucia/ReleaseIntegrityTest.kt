@@ -20,7 +20,7 @@ class ReleaseIntegrityTest {
 
     private fun asset(name: String, size: Any? = 3, digest: Any? = "sha256:$abc"): JSONObject {
         val json = JSONObject().put("name", name)
-            .put("browser_download_url", "https://github.com/1vcian/BruciaDev/releases/download/v0.2/$name")
+            .put("browser_download_url", "${BrandLinks.DOWNLOAD_PREFIX}v0.2/$name")
         if (size != null) json.put("size", size)
         if (digest != null) json.put("digest", digest)
         return json

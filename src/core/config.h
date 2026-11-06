@@ -102,7 +102,7 @@ public:
     std::vector<QrCodeEntry> qrCodes = {
         {"Brucia AP", "WIFI:T:WPA;S:" BRUCIA_AP_SSID ";P:brucenet;;"},
         {"Brucia guide", BRUCIA_GUIDE_URL},
-        {"Bruce upstream", "https://bruce.computer"},
+        {BRUCIA_UPSTREAM_NAME " upstream", BRUCIA_UPSTREAM_SITE_URL},
         {"Rickroll",   "https://youtu.be/dQw4w9WgXcQ"      }
     };
 

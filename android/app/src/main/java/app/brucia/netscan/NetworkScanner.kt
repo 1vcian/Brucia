@@ -9,9 +9,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.InputStream
 import java.io.OutputStream
-import java.net.Inet4Address
 import java.net.InetSocketAddress
-import java.net.NetworkInterface
 import java.net.Socket
 
 /** One open service found on a host. */
@@ -33,7 +31,7 @@ data class ScanHost(
 data class VulnHit(val id: String, val title: String, val severity: String, val url: String)
 
 /**
- * Phone-side LAN scanner (an "nmap-lite"): finds live hosts on the local /24, TCP-connect scans a
+ * Phone-side LAN scanner (an "nmap-lite"): finds live hosts on the active Wi-Fi subnet (bounded to 254 hosts), TCP-connect scans a
  * curated port list, grabs banners for a few common services, extracts a version and flags likely
  * vulnerabilities from a curated heuristic rule set (links to CVE details). All on the phone - no
  * ESP needed - which is exactly the kind of recon Bruce/Flipper can't do on their own.
@@ -52,45 +50,22 @@ object NetworkScanner {
         27017 to "mongodb",
     )
 
-    /** The phone's own IPv4 + prefix length on the active (Wi-Fi) interface, or null. */
-    fun localIpv4(): Pair<String, Int>? {
-        try {
-            for (ni in NetworkInterface.getNetworkInterfaces()) {
-                if (!ni.isUp || ni.isLoopback) continue
-                for (ia in ni.interfaceAddresses) {
-                    val addr = ia.address
-                    if (addr is Inet4Address && !addr.isLoopbackAddress) {
-                        return addr.hostAddress!! to ia.networkPrefixLength.toInt()
-                    }
-                }
-            }
-        } catch (e: Exception) { app.brucia.BruciaLog.w("NetScan", "host scan failed", e) }
-        return null
-    }
-
-    /** The /24 base (e.g. 192.168.1.) of the phone's IPv4, or null if unavailable. */
-    fun subnet24(): String? {
-        val ip = localIpv4()?.first ?: return null
-        val p = ip.lastIndexOf('.')
-        return if (p > 0) ip.substring(0, p + 1) else null
-    }
-
     /**
-     * Scan the /24 of the phone's subnet. Reports hosts as they complete via [onHost] and overall
-     * progress via [onProgress] (done, total). Honors cancellation of the calling coroutine.
+     * Scan [hosts] (the plan from [app.brucia.net.WifiLanSelector.scanPlan]: the active Wi-Fi
+     * subnet, at most 254 hosts). Reports hosts as they complete via [onHost] and overall progress
+     * via [onProgress] (done, total). Honors cancellation of the calling coroutine.
      */
     suspend fun scan(
-        base: String,
+        hosts: List<String>,
         connectTimeoutMs: Int = 350,
         onProgress: (Int, Int) -> Unit = { _, _ -> },
         onHost: (ScanHost) -> Unit = {},
     ) = coroutineScope {
-        val total = 254
+        val total = hosts.size
         var done = 0
         val gate = Semaphore(64) // cap concurrent host scans
         val lock = Any()
-        for (h in 1..254) {
-            val ip = "$base$h"
+        for (ip in hosts) {
             launch(Dispatchers.IO) {
                 gate.withPermit {
                     val host = scanHost(ip, connectTimeoutMs)

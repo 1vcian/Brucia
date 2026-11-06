@@ -18,7 +18,7 @@ class ReleaseUpdateServiceTest {
         .put("tag_name", tag).put("body", "Notes $tag")
         .put("assets", JSONArray(names.map { name ->
             JSONObject().put("name", name).put("browser_download_url",
-                "https://github.com/1vcian/BruciaDev/releases/download/$tag/$name")
+                "${BrandLinks.DOWNLOAD_PREFIX}$tag/$name")
         })).toString()
 
     private fun full(tag: String) = body(tag, "Brucia.apk", "Bruce-lilygo-t-embed-cc1101.bin", "Bruce-m5stack-cardputer.bin")

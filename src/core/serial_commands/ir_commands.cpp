@@ -6,6 +6,14 @@
 #include <ArduinoJson.h>
 #include <globals.h>
 
+// Brucia: in companion mode an IR transmit with the TX pin outside IR_TX_PINS would open the
+// on-device pin menu (checkIrTxPin) and block the link; refuse with a reason instead.
+static bool irTxRefusedHeadless() {
+    if (!g_companionActive || irTxPinReady()) return false;
+    serialDevice->println("IR TX pin not configured");
+    return true;
+}
+
 uint32_t irCallback(cmd *c) {
     serialDevice->println("Turning off IR LED");
     digitalWrite(bruceConfigPins.irTx, LED_OFF);
@@ -56,6 +64,13 @@ uint32_t irTxCallback(cmd *c) {
         return false;
     }
 
+    // sendIRCommand() silently does nothing for any other parsed protocol: say so, no false success.
+    if (!irParsedProtocolSupported(protocol)) {
+        serialDevice->println("Unsupported IR protocol: " + protocol);
+        return false;
+    }
+    if (irTxRefusedHeadless()) return false;
+
     IRCode code;
     code.type = "parsed";
     code.protocol = protocol;
@@ -89,6 +104,8 @@ uint32_t irTxRawCallback(cmd *c) {
         serialDevice->println("Missing data samples");
         return false;
     }
+
+    if (irTxRefusedHeadless()) return false;
 
     IRCode code;
     code.type = "raw";
@@ -124,6 +141,7 @@ uint32_t irTxFileCallback(cmd *c) {
         serialDevice->println("File does not exist");
         return false;
     }
+    if (irTxRefusedHeadless()) return false;
 
     return txIrFile(fs, filepath, hideDefaultUI);
 }
@@ -185,6 +203,7 @@ uint32_t irSendCallback(cmd *c) {
     if (!args_json["Protocol"].isNull()) protocolStr = args_json["Protocol"].as<String>();
 
     if (!args_json["Bits"].isNull()) bits = args_json["Bits"].as<int>();
+    if (irTxRefusedHeadless()) return false;
 
     return sendDecodedCommand(protocolStr, dataStr, bits);
 }

@@ -119,8 +119,8 @@ All dual-use commands are headless, time-bounded, and for authorized testing onl
 | `fs_read <path>` | Stream a file as `DATA {stream:"file", seq, chunk}` base64 frames, then `ACK {ok, size}`. `ERR 404` if unavailable. |
 | `scr <0\|1>` | Display off / on (Lite mode). Auto-restores on silence/disconnect. |
 | `led <0\|1>` | Status LED off / on (Lite mode). Auto-restores on silence/disconnect. |
-| `clock_get` | Read the device RTC. |
-| `clock_set <epoch>` | Set the device RTC. |
+| `clock_get` | Read the device clock: local wall time, printed as ISO with a `Z` it does not mean. |
+| `clock_set <epoch>` | Set the device clock to `<epoch>` as is; Bruce keeps local wall time, so the app sends its local time as an epoch. |
 
 ### Wi-Fi
 
@@ -185,7 +185,7 @@ All dual-use commands are headless, time-bounded, and for authorized testing onl
 |---|---|
 | `script_run <js source>` | Run a BruceJS script headless and return its output (dropped on lite builds). |
 | `ibutton_read` | Read a 1-Wire iButton (RW1990). |
-| `ibutton_write <idhex>` | Emulate / write an iButton id (16 hex chars). |
+| `ibutton_write <idhex>` | Write an iButton id (16 hex chars) onto an RW1990 blank: waits about 3 s for a key, writes, reads back. `ok` only when the read-back matches (`written and verified`); otherwise `no iButton on the probe ...`, `written, but no key answered the read-back ...` or `read-back differs ...`. |
 | `speaker_tone <freqHz> <ms>` | Play a tone on the onboard I2S speaker. |
 | `speaker_play <path>` | Play an audio file on the onboard I2S speaker. |
 | `mic_record <secs 1..30>` | Record the onboard microphone to a WAV on SD. |

@@ -21,7 +21,8 @@ object ReleaseCatalog {
 
     /** GitHub release metadata nests about four levels; Android's org.json recursion is unbounded. */
     private const val MAX_DEPTH = 32
-    private const val DOWNLOAD_PREFIX = "https://github.com/1vcian/BruciaDev/releases/download/"
+    /** Current repository plus the BruciaDev/Brucia names from brand.json (rename migration). */
+    private val DOWNLOAD_PREFIXES: List<String> get() = app.brucia.BrandLinks.ACCEPTED_DOWNLOAD_PREFIXES
 
     fun parse(body: String): Release {
         requireBoundedNesting(body)
@@ -42,7 +43,7 @@ object ReleaseCatalog {
             if (!Regex("[A-Za-z0-9][A-Za-z0-9._-]*").matches(name)) continue
             // No URL normalization: only the exact spelling GitHub publishes is accepted.
             val url = asset.opt("browser_download_url") as? String ?: continue
-            if (url != "$DOWNLOAD_PREFIX$tag/$name") continue
+            if (DOWNLOAD_PREFIXES.none { url == "$it$tag/$name" }) continue
             if (name.endsWith(".apk", true)) {
                 require(!apkSeen) { "Ambiguous APK assets" }
                 apkSeen = true

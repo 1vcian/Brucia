@@ -69,6 +69,10 @@ private:
     PN532 *_rfid;
     Adafruit_PN532 *nfc = nullptr;
     bool _cancelled = false;
+    // Brucia companion: bound the "waiting for a card" loop (nobody at the device presses ESC) and
+    // let the app's `stop` end it. 0 / nullptr = the GUI behavior (wait until a card or ESC).
+    uint32_t _waitMs = 0;
+    bool (*_pollStop)() = nullptr;
     EMVCard read_emv_card();
     void display_emv(EMVCard card);
     void save_emv(const char *aid, const char *pan, const char *validfrom, const char *validto);
@@ -90,6 +94,11 @@ public:
     // "Visa PAN:453201******7654 exp:YY/MM". Returns false when no card is
     // present or the card can't be read.
     bool readMaskedSummary(String &out);
+    // Brucia companion: give up waiting for a card after waitMs, or when pollStop() returns true.
+    void setHeadlessWait(uint32_t waitMs, bool (*pollStop)()) {
+        _waitMs = waitMs;
+        _pollStop = pollStop;
+    }
 };
 
 #endif

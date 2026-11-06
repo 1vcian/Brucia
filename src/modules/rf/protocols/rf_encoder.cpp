@@ -121,7 +121,9 @@ bool rf_encode_protocol(
     std::vector<int> &out
 ) {
     out.clear();
-    if (def == nullptr || bits == 0) return false;
+    // A key is at most 64 bits: more would shift `data` by >= 64 (undefined) and size the reserve
+    // below from a file/CLI value (a .sub "Bit: 2000000000" threw std::length_error -> abort).
+    if (def == nullptr || bits == 0 || bits > 64) return false;
     int base = (te > 0) ? te : def->te;
     if (base <= 0) return false;
     if (repeat < 1) repeat = 1;

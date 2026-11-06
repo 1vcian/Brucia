@@ -787,7 +787,7 @@ private fun WigleUploadCard(vm: WardriveViewModel, hasData: Boolean) {
 
 /** Default fake-network name(s) pre-filled in the beacon-spam editor. */
 private val defaultBeaconSsids = listOf(
-    "1vcian.me/BruciaDev",
+    BrandLinks.SITE_DISPLAY,
 )
 
 /** Four zero-width characters, valid in an SSID but invisible, used to make same-looking names unique. */
@@ -833,7 +833,7 @@ private fun BeaconSpamCard(vm: WardriveViewModel, connected: Boolean) {
         Column(modifier = Modifier.padding(14.dp)) {
             Text("Beacon spam (fake networks)", fontWeight = FontWeight.SemiBold, color = cs.primary)
             Text(
-                "Broadcasts fake Wi-Fi networks so nearby clients see bogus SSIDs, continuously until you Stop. Type one SSID per line, and set how many fake APs to broadcast - each copy gets an invisible suffix so they all show the SAME visible name yet appear as that many separate networks (up to 256).",
+                "Broadcasts beacon frames advertising these Wi-Fi network names, continuously until you Stop. Whether a nearby device lists them depends on its Wi-Fi scanner and is not verified here. Type one SSID per line, and set how many fake APs to broadcast - each copy gets an invisible suffix so the bytes differ while the visible name stays the same (up to 256).",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
@@ -869,7 +869,7 @@ private fun BeaconSpamCard(vm: WardriveViewModel, connected: Boolean) {
                         val count = (copiesText.toIntOrNull() ?: 128).coerceIn(1, 256)
                         val list = beaconSsidVariants(bases, count)
                         vm.startBeaconSpam(list)
-                        Toast.makeText(context, "Beacon spam: ${list.size} fake networks (Stop to end)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Beacon spam: ${list.size} SSID(s) requested (Stop to end)", Toast.LENGTH_SHORT).show()
                     }
                 },
             ) { Text(if (active) "Stop beacon spam" else "Start beacon spam") }
@@ -2063,7 +2063,7 @@ internal fun HomeDashboard(
 
 /** Brucia is free and AGPL; tasteful support links that open in the browser. */
 private const val ALIEXPRESS_URL = "https://s.click.aliexpress.com/e/_c33qeCLh"
-private const val WIKI_URL = "https://1vcian.me/BruciaDev/wiki/"
+private val WIKI_URL = BrandLinks.WIKI_URL
 private const val SPONSOR_URL = "https://github.com/sponsors/1vcian"
 private const val DONATE_URL = "https://buymeacoffee.com/1vcian"
 private const val BTC_ADDRESS = "bc1qee8a06x886ng8ce6qy84l6u6x54jnjsesgqym7"
@@ -2119,13 +2119,19 @@ private fun SupportCard() {
  * composition's scope. Same "plain text" label the old setText(AnnotatedString) used.
  */
 @Composable
-private fun rememberTextCopier(): (String) -> Unit {
+private fun rememberTextCopier(sensitive: Boolean = false): (String) -> Unit {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    return remember(clipboard, scope) {
+    return remember(clipboard, scope, sensitive) {
         { text ->
             scope.launch {
-                clipboard.setClipEntry(ClipEntry(android.content.ClipData.newPlainText("plain text", text)))
+                val clip = android.content.ClipData.newPlainText("plain text", text)
+                // Android 13+ hides a sensitive clip from the copy preview and keyboard suggestions
+                // (the extra's value is ClipDescription.EXTRA_IS_SENSITIVE; older releases ignore it).
+                if (sensitive) clip.description.extras = android.os.PersistableBundle().apply {
+                    putBoolean("android.content.extra.IS_SENSITIVE", true)
+                }
+                clipboard.setClipEntry(ClipEntry(clip))
             }
         }
     }
@@ -2378,7 +2384,7 @@ private fun HelpDialog(onDismiss: () -> Unit) {
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
-                        try { context.startActivity(Intent(Intent.ACTION_VIEW, "https://1vcian.me/BruciaDev/wiki/".toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { app.brucia.BruciaLog.w("Help", "open wiki url", e) }
+                        try { context.startActivity(Intent(Intent.ACTION_VIEW, WIKI_URL.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) { app.brucia.BruciaLog.w("Help", "open wiki url", e) }
                     },
                 ) { Text("Open the wiki") }
                 Spacer(Modifier.height(16.dp))
@@ -2413,11 +2419,14 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var path by rememberSaveable { mutableStateOf("/") }
     val entries by vm.deviceEntries.collectAsState()
     val loading by vm.deviceListing.collectAsState()
+    val listStatus by vm.deviceListStatus.collectAsState()
+    val fileStatus by vm.deviceFileStatus.collectAsState()
     fun refresh() { if (connected) vm.listDir(path) }
     LaunchedEffect(path, connected) { refresh() }
 
     // Per-file action sheet, the in-app editor overlay, and the new-file/folder/template dialog.
     var selected by remember { mutableStateOf<app.brucia.files.FileEntry?>(null) }
+    var confirmDelete by remember { mutableStateOf<String?>(null) }
     // Retained (not saved: it holds the whole file): an open editor and its unsaved edits survive
     // a rotation or resize.
     var editor by rememberRetained { mutableStateOf<EditorState?>(null) }
@@ -2481,6 +2490,8 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         if (loading) Text("Loading...", color = cs.onSurfaceVariant)
+        if (listStatus.isNotBlank()) Text(listStatus, color = cs.error, style = MaterialTheme.typography.bodySmall)
+        if (fileStatus.isNotBlank()) Text(fileStatus, color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(entries) { e ->
                 Card(
@@ -2559,15 +2570,30 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     }
                     Spacer(Modifier.height(6.dp))
                     OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
-                        vm.deleteDeviceFile(full)
+                        confirmDelete = full
                         selected = null
-                        Toast.makeText(context, "Deleting ${sel.name}...", Toast.LENGTH_SHORT).show()
                     }) { Text("Delete") }
                     Spacer(Modifier.height(10.dp))
                     TextButton(modifier = Modifier.fillMaxWidth(), onClick = { selected = null }) { Text("Cancel") }
                 }
             }
         }
+    }
+
+    confirmDelete?.let { target ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = null
+                    vm.deleteDeviceFile(target)
+                    Toast.makeText(context, "Deleting ${target.substringAfterLast('/')}...", Toast.LENGTH_SHORT).show()
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
+            title = { Text("Delete from the device?") },
+            text = { Text("$target will be removed from the device storage. This cannot be undone.") },
+        )
     }
 
     // --- new file / folder / template dialog ---
@@ -3640,13 +3666,13 @@ private fun IrScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         enabled = connected,
                         onSend = {
                             vm.sendCommand(b.toCli())
-                            Toast.makeText(context, "Sent ${b.name}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Sending ${b.name} (device reply in the console)", Toast.LENGTH_SHORT).show()
                         },
                         onReplayRaw = if (b.raw) {
                             {
                                 val (khz, csv) = b.toTxRawArgs()
                                 vm.irTxRaw(khz, csv)
-                                Toast.makeText(context, "Replayed raw ${b.name}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Sending raw ${b.name} (device reply in the console)", Toast.LENGTH_SHORT).show()
                             }
                         } else null,
                     )
@@ -3681,7 +3707,7 @@ private fun IrRemote(
         lastName = b.name
         flashKey = key
         flashTick++
-        Toast.makeText(context, "Sent ${b.name}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Sending ${b.name} (device reply in the console)", Toast.LENGTH_SHORT).show()
     }
 
     Card(
@@ -3691,7 +3717,7 @@ private fun IrRemote(
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
-                if (flashKey != null) "Sent $lastName" else "${mapping.size} keys mapped",
+                if (flashKey != null) "Sending $lastName" else "${mapping.size} keys mapped",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (flashKey != null) cs.primary else cs.onSurfaceVariant,
             )
@@ -3938,7 +3964,7 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
                 onClick = { if (irJamming) vm.stopIrJammer() else vm.startIrJammer() },
             ) { Text(if (irJamming) "Stop IR jammer" else "IR jammer (flood IR)") }
             Text(
-                "Authorized use only. Floods IR so nearby receivers can't decode their remotes, in bursts, until you Stop.",
+                "Authorized use only. Emits IR noise in bursts until you Stop; whether a nearby receiver is disturbed is not verified.",
                 style = MaterialTheme.typography.bodySmall,
                 color = cs.onSurfaceVariant,
             )
@@ -3980,7 +4006,7 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
                             onClick = {
                                 val (khz, csv) = result.toTxRawArgs()
                                 vm.irTxRaw(khz, csv)
-                                Toast.makeText(context, "Replayed raw ${result.name}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Sending raw ${result.name} (device reply in the console)", Toast.LENGTH_SHORT).show()
                             },
                         ) { Text("Replay raw") }
                     }
@@ -4002,7 +4028,7 @@ private fun SubGhzBruteforceCard(vm: WardriveViewModel, connected: Boolean, freq
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(Modifier.padding(14.dp)) {
             Text("Brute force", fontWeight = FontWeight.SemiBold, color = cs.primary)
-            Text("Transmits every code of a fixed-code protocol on ${"%.2f".format(freqHz / 1_000_000.0)} MHz (gates/remotes you own). Authorized use only.",
+            Text("Transmits codes of a fixed-code protocol in sequence on ${"%.2f".format(freqHz / 1_000_000.0)} MHz for the chosen time (gates/remotes you own); it may end before every code is sent, and the reply reports how many were. Authorized use only.",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
             Text("Protocol", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
@@ -4333,7 +4359,12 @@ private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         // a LazyColumn here would be a nested same-axis scrollable).
         if (savedRf.isNotEmpty()) {
             Text("Saved signals (${savedRf.size})", color = cs.onSurfaceVariant)
-            savedRf.forEach { srf -> SavedRow(srf, onReplay = { vm.replaySaved(srf) }, onDelete = { vm.deleteSaved(srf.id) }) }
+            // Replay only captures stored with a replay command; others (a protocol `rf tx` cannot
+            // reproduce, or RAW) keep their text but offer no Replay that would send something else.
+            savedRf.forEach { srf ->
+                SavedRow(srf, onReplay = if (srf.payload.startsWith("rf tx")) ({ vm.replaySaved(srf) }) else null,
+                    onDelete = { vm.deleteSaved(srf.id) })
+            }
         }
         if (signals.isNotEmpty()) {
             Text("Decoded on phone (${signals.size})", color = cs.onSurfaceVariant)
@@ -4733,9 +4764,10 @@ private fun UtilitiesScreen() {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val copyText = rememberTextCopier()
-    fun copy(label: String, text: String) {
+    val copySecret = rememberTextCopier(sensitive = true)
+    fun copy(label: String, text: String, secret: Boolean = false) {
         if (text.isEmpty()) return
-        copyText(text)
+        if (secret) copySecret(text) else copyText(text)
         Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
     }
 
@@ -4785,7 +4817,7 @@ private fun UtilitiesScreen() {
             ) { Text("Generate") }
             if (result.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                ResultRow(result) { copy("Password", result) }
+                ResultRow(result) { copy("Password", result, secret = true) }
             }
         }
 
@@ -4905,7 +4937,7 @@ private fun UtilitiesScreen() {
                     )
                 }
                 Spacer(Modifier.height(8.dp))
-                ResultRow(payload) { copy("Wi-Fi string", payload) }
+                ResultRow(payload) { copy("Wi-Fi string", payload, secret = auth != "nopass") }
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -5051,7 +5083,7 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     ) { Text("Get time") }
                     Button(
                         enabled = connected,
-                        onClick = { vm.clockSet(System.currentTimeMillis() / 1000L) },
+                        onClick = { vm.clockSyncFromPhone() },
                         modifier = Modifier.weight(1f),
                     ) { Text("Sync from phone") }
                 }
@@ -5725,7 +5757,7 @@ private fun EspnowScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             StatusPill(connected)
         }
         Text(
-            "Broadcast a short message over ESP-NOW (2.4GHz). Any ESP32 running Bruce 'Connect' receive picks it up. Works on any ESP32 - no extra module.",
+            "Broadcast a short message over ESP-NOW (2.4GHz, no extra module). A Bruce device in 'Connect' receive mode on the same Wi-Fi channel may receive it; broadcasts are not acknowledged, so delivery is not confirmed.",
             style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
         )
         Spacer(Modifier.height(12.dp))
@@ -5762,6 +5794,20 @@ private fun EspnowScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Write an export (app external files dir, or internal files when no external storage is mounted:
+ * both FileProvider paths), keep only the newest few of its kind, and share it. A failure shows a
+ * message instead of crashing the app.
+ */
+private fun exportAndShare(context: android.content.Context, prefix: String, ext: String, mime: String, text: () -> String) {
+    try {
+        val dir = context.getExternalFilesDir(null) ?: context.filesDir
+        shareFile(context, app.brucia.report.ExportFiles.write(dir, prefix, ext, text()), mime)
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(context, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
     }
 }
 
@@ -5849,6 +5895,31 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val keyImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) { vm.importMifareKeys(uri); Toast.makeText(context, "Importing keys...", Toast.LENGTH_SHORT).show() }
     }
+    // Tag-overwriting actions ask first: "ndef" (rfid ndef writes the Brucia URL record onto the tag)
+    // and "erase" (rfid erase). Saveable so a rotation keeps the open dialog.
+    var confirmWrite by rememberSaveable { mutableStateOf("") }
+    if (confirmWrite.isNotEmpty()) {
+        val ndef = confirmWrite == "ndef"
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmWrite = "" },
+            confirmButton = {
+                TextButton(enabled = connected, onClick = {
+                    if (ndef) vm.nfcNdef() else vm.nfcErase()
+                    confirmWrite = ""
+                }) { Text(if (ndef) "Write" else "Erase", color = cs.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmWrite = "" }) { Text("Cancel") } },
+            title = { Text(if (ndef) "Write NDEF to the tag?" else "Erase the tag?") },
+            text = {
+                Text(
+                    if (ndef) "Overwrites the NDEF data on the tag on the reader with a URL record (the Brucia project URL). " +
+                        "It does not read the tag. Use Read tag to see what is on it."
+                    else "Erases the data on the tag on the reader. This cannot be undone.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -5892,7 +5963,7 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { vm.nfcEmulate(); Toast.makeText(context, "Emulating tag...", Toast.LENGTH_SHORT).show() }
                 ) { Text("Emulate tag") }
-                Text("Replay the last read tag - the device acts as that card.", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+                Text("Emulate the last read tag with the PN532. Partial: it reproduces the UID only in part and serves NDEF only, so a reader may not accept it.", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -5983,10 +6054,10 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.nfcSave() }) { Text("Save") }
-                    OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.nfcErase() }) { Text("Erase") }
+                    OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { confirmWrite = "erase" }) { Text("Erase...") }
                 }
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(enabled = connected, modifier = Modifier.fillMaxWidth(), onClick = { vm.nfcNdef() }) { Text("Read NDEF") }
+                OutlinedButton(enabled = connected, modifier = Modifier.fillMaxWidth(), onClick = { confirmWrite = "ndef" }) { Text("Write NDEF URL...") }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(enabled = last != null, modifier = Modifier.fillMaxWidth(), onClick = { analyze = true }) { Text("Analyze security") }
             }
@@ -6151,7 +6222,7 @@ private fun NfcNdefPushCard(
     val label = when (type) {
         "url" -> "URL (e.g. https://1vcian.me)"
         "text" -> "Text"
-        else -> "Contact (name,phone) or vCard"
+        else -> "Contact: Name;+phone"
     }
     Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -6340,6 +6411,8 @@ private fun BleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         if (vm.streamMayRun("ble.scan")) vm.setBleScan(false)
         vm.gattStop()
         vm.stopIbeacon(silent = true)
+        // The advertising burst loop otherwise keeps broadcasting with no visible Stop.
+        vm.stopBleSpam()
     }
 
     // Single scroll container: header, controls and the device list are all items of one
@@ -6610,6 +6683,9 @@ private fun SpamScreen(vm: WardriveViewModel, onConnect: () -> Unit, filter: Str
         "nfc" -> "NFC spam"
         else -> "Spam hub - grouped by transport"
     }
+    // Leaving the screen ends the BLE advertising burst loop (like the IR/Sub-GHz/NRF loops), so it
+    // never keeps broadcasting with no visible Stop. A rotation is not leaving (LeaveEffect).
+    if (showBle) LeaveEffect { vm.stopBleSpam() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -7270,7 +7346,7 @@ private fun EthernetScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text("Configuration", fontWeight = FontWeight.SemiBold, color = cs.primary)
-                    Text("Optional arguments passed to eth_config (leave blank for defaults / DHCP).", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text("eth_config arguments: dhcp, or static <ip> <gw> <mask> [dns]; blank means dhcp. The device brings the W5500 up with them, reports the link below and stops it again: the settings are a link test, not kept afterwards.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = configText,
@@ -7358,7 +7434,7 @@ private fun MacroScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(value = cmd, onValueChange = { cmd = it }, singleLine = true,
-                        label = { Text("Command (e.g. wifi_connect ...)") }, modifier = Modifier.weight(2f))
+                        label = { Text("Command (e.g. uptime)") }, modifier = Modifier.weight(2f))
                     OutlinedTextField(value = delayMs, onValueChange = { delayMs = it.filter { c -> c.isDigit() } }, singleLine = true,
                         label = { Text("Wait ms (0–60000)") }, modifier = Modifier.weight(1f))
                 }
@@ -7373,16 +7449,19 @@ private fun MacroScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("${i + 1}. ${s.cmd}  (${s.delayMs}ms)", modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurface)
+                            TextButton(enabled = i > 0, onClick = { steps = app.brucia.automation.Macro.moveStep(steps, i, -1) },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)) { Text("Up") }
                             OutlinedButton(onClick = { steps = steps.filterIndexed { j, _ -> j != i } },
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) { Text("x") }
                         }
                         Spacer(Modifier.height(4.dp))
                     }
                     Spacer(Modifier.height(6.dp))
+                    val saveName = name.trim().ifBlank { app.brucia.automation.Macro.defaultName(macros) }
                     Button(enabled = steps.isNotEmpty(), modifier = Modifier.fillMaxWidth(), onClick = {
-                        vm.saveMacro(app.brucia.automation.Macro(name.trim().ifBlank { "Macro ${macros.size + 1}" }, steps))
+                        vm.saveMacro(app.brucia.automation.Macro(saveName, steps))
                         name = ""; steps = emptyList()
-                    }) { Text("Save macro") }
+                    }) { Text(if (macros.any { it.name == saveName }) "Save (replaces \"$saveName\")" else "Save macro") }
                 }
             }
         }
@@ -7398,6 +7477,8 @@ private fun MacroScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                         Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(enabled = connected && !running, modifier = Modifier.weight(1f), onClick = { vm.runMacro(m) }) { Text("Run") }
+                            // Load it into the builder above; saving under the same name replaces it.
+                            OutlinedButton(onClick = { name = m.name; steps = m.steps }) { Text("Edit") }
                             OutlinedButton(onClick = { vm.deleteMacro(i) }) { Text("Delete") }
                         }
                     }
@@ -7481,7 +7562,7 @@ private fun FmScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 StatusPill(connected)
             }
-            Text("FM transmitter - broadcast audio over the air", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            Text("Si4713 FM transmitter (optional module). The digital audio routing to the Si4713 has not been verified on hardware.", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
         item { DeviceCard(device) }
         item {
@@ -7645,20 +7726,12 @@ private fun ReportScreen(vm: WardriveViewModel) {
             Button(
                 enabled = hasData,
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    val f = java.io.File(context.getExternalFilesDir(null), "brucia_report_${System.currentTimeMillis()}.md")
-                    f.writeText(report)
-                    shareFile(context, f, "text/markdown")
-                }
+                onClick = { exportAndShare(context, "brucia_report_", "md", "text/markdown") { report } }
             ) { Text("Generate report (.md)") }
             OutlinedButton(
                 enabled = hasData,
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    val f = java.io.File(context.getExternalFilesDir(null), "brucia_report_${System.currentTimeMillis()}.txt")
-                    f.writeText(report)
-                    shareFile(context, f, "text/plain")
-                }
+                onClick = { exportAndShare(context, "brucia_report_", "txt", "text/plain") { report } }
             ) { Text("Export .txt") }
         }
         Spacer(Modifier.height(12.dp))
@@ -7840,6 +7913,21 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
     // drives it. Both auto-restore if the connection drops, so it never stays dark. The state lives
     // in the ViewModel, so a rotation shows what the device is doing instead of resetting to on.
     val outputs by vm.deviceOutputs.collectAsState()
+    var confirmPower by remember { mutableStateOf<String?>(null) }
+    confirmPower?.let { action ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmPower = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmPower = null
+                    if (action == "reboot") vm.powerReboot() else vm.powerSleep()
+                }) { Text(if (action == "reboot") "Reboot" else "Sleep") }
+            },
+            dismissButton = { TextButton(onClick = { confirmPower = null }) { Text("Cancel") } },
+            title = { Text(if (action == "reboot") "Reboot the device?" else "Put the device to sleep?") },
+            text = { Text("The companion link drops; running device operations end.") },
+        )
+    }
     val screenOn = outputs.screenOn
     val ledOn = outputs.ledOn
 
@@ -7939,26 +8027,18 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
         Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.deviceCmd("i2c") }) { Text("I2C scan") }
-            OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.powerSleep() }) { Text("Sleep") }
-            OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { vm.powerReboot() }) { Text("Reboot") }
+            OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { confirmPower = "sleep" }) { Text("Sleep") }
+            OutlinedButton(enabled = connected, modifier = Modifier.weight(1f), onClick = { confirmPower = "reboot" }) { Text("Reboot") }
         }
         Spacer(Modifier.height(12.dp))
         Button(
             modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                val f = java.io.File(context.getExternalFilesDir(null), "brucia_report_${System.currentTimeMillis()}.md")
-                f.writeText(vm.buildReport())
-                shareFile(context, f, "text/markdown")
-            }
+            onClick = { exportAndShare(context, "brucia_report_", "md", "text/markdown") { vm.buildReport() } }
         ) { Text("Generate security report") }
         Spacer(Modifier.height(8.dp))
         Button(
             modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                val f = java.io.File(context.getExternalFilesDir(null), "brucia_session_${System.currentTimeMillis()}.json")
-                f.writeText(vm.buildSessionJson())
-                shareFile(context, f, "application/json")
-            }
+            onClick = { exportAndShare(context, "brucia_session_", "json", "application/json") { vm.buildSessionJson() } }
         ) { Text("Export session JSON") }
         Spacer(Modifier.height(12.dp))
         if (out.isNotEmpty()) {
@@ -7974,7 +8054,7 @@ private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLab
             Spacer(Modifier.height(12.dp))
         }
         Text(
-            "Brucia ${BuildConfig.VERSION_NAME} - AGPL-3.0 - authorized research only - github.com/1vcian/BruciaDev",
+            "${BrandLinks.NAME} ${BuildConfig.VERSION_NAME} - AGPL-3.0 - authorized research only - ${BrandLinks.REPO_DISPLAY}",
             style = MaterialTheme.typography.bodySmall,
             color = cs.onSurfaceVariant,
         )
@@ -8418,6 +8498,7 @@ private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
                     androidx.compose.material3.LinearProgressIndicator(
                         progress = { frac }, modifier = Modifier.fillMaxWidth(), color = cs.primary,
                     )
+                    TextButton(onClick = { vm.cancelAppDownload() }) { Text("Cancel download") }
                 }
 
                 Spacer(Modifier.height(6.dp))

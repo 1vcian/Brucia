@@ -28,6 +28,19 @@ class EspFlasher(private val io: SerialIo) {
      */
     enum class Verify { MATCH, MISMATCH, UNVERIFIED }
 
+    /** What the Updates screen shows for a finished write: (phase, message). */
+    object Outcome {
+        private const val REBOOT = "The device is rebooting into its menu - open \"Brucia App\" on the device to reconnect, then check Device info shows the new firmware."
+
+        fun of(verify: Verify): Pair<String, String> = when (verify) {
+            Verify.MATCH -> "done" to "Firmware flashed and verified (MD5 matches). $REBOOT"
+            Verify.UNVERIFIED -> "done" to "Firmware written but not verified (the device did not report MD5). $REBOOT"
+            // Not "flashed": the bytes read back are not the image, so it must not read as a success.
+            Verify.MISMATCH -> "error" to "Flash failed verification: the MD5 read back from the chip does not match " +
+                "the image, so the new firmware did not land intact. The device was reset; flash again (or use the web flasher if it does not start)."
+        }
+    }
+
     /** Abstraction over the serial port so the flow can be driven in tests. */
     interface SerialIo {
         fun write(bytes: ByteArray)
@@ -285,6 +298,14 @@ class EspFlasher(private val io: SerialIo) {
         io.setDtr(false); io.setRts(false) // out of reset
         sleep(100)
     }
+
+    /**
+     * Leave the ROM loader without writing anything: the same hard reset a finished or failed
+     * flash ends with. For an operation that rebooted the device into download mode and then
+     * stopped before [flash] (download failed, integrity or image check failed, cancelled), so the
+     * device restarts its current firmware instead of staying dark in the loader.
+     */
+    fun resetToApp() = hardReset()
 
     /** Hard reset into the application: pulse EN (RTS) with GPIO0 (DTR) released. */
     private fun hardReset() {

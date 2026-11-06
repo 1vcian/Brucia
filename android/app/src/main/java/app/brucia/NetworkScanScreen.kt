@@ -18,7 +18,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.brucia.netscan.NetworkScanViewModel
-import app.brucia.netscan.NetworkScanner
+import app.brucia.net.WifiLanSelector
 import app.brucia.netscan.ScanHost
 import app.brucia.netscan.VulnHit
 import app.brucia.net.LocalNetworkAccess
@@ -42,8 +42,10 @@ internal fun NetworkScanScreen() {
     val scope = rememberCoroutineScope()
     val lan = rememberLocalNetworkGate()
 
-    val base = remember { NetworkScanner.subnet24() }
-    val localIp = remember { NetworkScanner.localIpv4()?.first }
+    // The active Wi-Fi network only (not mobile data or a VPN), with its real prefix; re-read on Scan.
+    var wifi by remember { mutableStateOf(WifiLanSelector.current(context)) }
+    val plan = wifi.getOrNull()?.let { WifiLanSelector.scanPlan(it) }
+    val localIp = wifi.getOrNull()?.ip
     // Results and the running scan live in an Activity-scoped ViewModel: a rotation, window resize
     // or fold keeps them (and does not restart the scan); leaving the tool stops and clears it.
     val session = viewModel<NetworkScanViewModel>().session
@@ -54,21 +56,28 @@ internal fun NetworkScanScreen() {
     LeaveEffect { session.reset() }
 
     NetworkScanContent(
-        base = base,
+        subnet = plan?.takeIf { it.hosts.isNotEmpty() }?.label,
         localIp = localIp,
+        unavailable = wifi.exceptionOrNull()?.message ?: plan?.note ?: NO_HOSTS,
+        note = plan?.note,
         hosts = state.hosts,
         scanning = state.scanning,
         progress = state.progress,
         total = state.total,
         lanStatus = lan.status,
         onScan = {
-            if (base != null && !checking && !session.isRunning) {
-                checking = true
-                scope.launch {
-                    try {
-                        // Local network gate: permission (Android 17 + target 37) and an EPERM probe.
-                        if (lan.checkBeforeStart(localIp)) session.start(base)
-                    } finally { checking = false }
+            if (!checking && !session.isRunning) {
+                val fresh = WifiLanSelector.current(context)
+                wifi = fresh
+                val hosts = fresh.getOrNull()?.let { WifiLanSelector.scanPlan(it).hosts }.orEmpty()
+                if (hosts.isNotEmpty()) {
+                    checking = true
+                    scope.launch {
+                        try {
+                            // Local network gate: permission (Android 17 + target 37) and an EPERM probe.
+                            if (lan.checkBeforeStart(fresh.getOrNull()?.ip)) session.start(hosts)
+                        } finally { checking = false }
+                    }
                 }
             }
         },
@@ -82,13 +91,17 @@ internal fun NetworkScanScreen() {
     )
 }
 
+private const val NO_HOSTS = "Connect the phone to a Wi-Fi network to scan its subnet."
+
 /**
  * Stateless Network Scan page (rendered by [NetworkScanScreen] and by the screenshot tests).
- * [lanStatus] other than READY shows the local network reason card and disables Scan.
+ * [subnet] is the scanned subnet label (null: no usable Wi-Fi, [unavailable] says why); [note]
+ * says when a large subnet was bounded. [lanStatus] other than READY shows the local network
+ * reason card and disables Scan.
  */
 @Composable
 internal fun NetworkScanContent(
-    base: String?,
+    subnet: String?,
     localIp: String?,
     hosts: List<ScanHost>,
     scanning: Boolean,
@@ -101,6 +114,8 @@ internal fun NetworkScanContent(
     onOpenLanSettings: () -> Unit = {},
     onRetryLan: () -> Unit = {},
     onOpenUrl: (String) -> Unit = {},
+    unavailable: String = NO_HOSTS,
+    note: String? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     Column(
@@ -112,10 +127,9 @@ internal fun NetworkScanContent(
         Text("Discovers devices on your Wi-Fi, their open ports and service versions, and flags likely vulnerabilities (CVE links). Runs on the phone - no device needed. Authorized / own-network use only.",
             color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
 
-        if (base == null) {
+        if (subnet == null) {
             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
-                Text("Connect the phone to a Wi-Fi network to scan its subnet.",
-                    modifier = Modifier.padding(14.dp), color = cs.onSurfaceVariant)
+                Text(unavailable, modifier = Modifier.padding(14.dp), color = cs.onSurfaceVariant)
             }
             return@Column
         }
@@ -126,8 +140,9 @@ internal fun NetworkScanContent(
 
         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
             Column(Modifier.padding(14.dp)) {
-                Text("Subnet ${base}0/24   (this phone: ${localIp ?: "?"})",
+                Text("Subnet $subnet   (this phone: ${localIp ?: "?"})",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 Spacer(Modifier.height(10.dp))
                 Button(
                     modifier = Modifier.fillMaxWidth(),

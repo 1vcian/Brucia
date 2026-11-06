@@ -4,7 +4,8 @@
 namespace brucia {
 namespace companion {
 struct CommandRequest;
-void bleStart();
+// 0 = scanning, 409 = a BLE HID session owns the stack, 503 = BLE init failed.
+int bleStart();
 void bleStop();
 void bleService();
 

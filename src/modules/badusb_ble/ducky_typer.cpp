@@ -1,5 +1,6 @@
 #if !defined(LITE_VERSION)
 #include "ducky_typer.h"
+#include <brucia_identity.h>
 #include "core/display.h"
 #include "core/mykeyboard.h"
 #include "core/radio_mem.h"
@@ -630,7 +631,7 @@ void ducky_startKb(HIDInterface *&hid, bool ble, int functionId) {
             if (!g_companionActive) Serial.printf("[ducky_startKb] Active BLE instances: %d\n", activeBLEInstances);
 
             // Create HID service
-            hid = new BleKeyboard(deviceName, "BruceFW", 100);
+            hid = new BleKeyboard(deviceName, BRUCIA_MANUFACTURER, 100);
             if (!g_companionActive) Serial.println("[ducky_startKb] New BleKeyboard created");
 
             // Set hid_ble to point to the active instance

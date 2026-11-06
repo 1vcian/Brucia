@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-command release: bumps the single VERSION file, rebuilds firmware + app from it, and publishes
-# a release with the APK + firmware bin to the PRIVATE BruciaDev repo (while the project is private).
+# a release with the APK + firmware bin to the repository named in brand.json (the PRIVATE BruciaDev
+# repo while the project is private; docs/LAUNCH.md covers the switch to Brucia).
 # The public repo (origin) is intentionally NOT touched here - do not publish publicly until tested.
 #
 # Usage: ./release.sh [major|minor|patch] ["changelog notes"]
@@ -11,9 +12,13 @@
 #   With no notes, a generic body is used.
 set -euo pipefail
 cd "$(dirname "$0")"
-# Private dev target. Flip to origin / add a public mirror only at the public launch.
-REMOTE="brucia-dev"
-REPO="1vcian/BruciaDev"
+# Target repository and git remote come from brand.json (single source; see docs/LAUNCH.md).
+REMOTE="$(python3 tools/brand.py get release_remote)"
+REPO="$(python3 tools/brand.py get repo_slug)"
+if [ -z "$REMOTE" ] || [ -z "$REPO" ]; then
+  echo "Cannot read the release target from brand.json." >&2
+  exit 1
+fi
 part="${1:-patch}"
 notes="${2:-}"
 if [ -n "$(git status --porcelain)" ]; then

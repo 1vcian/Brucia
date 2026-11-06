@@ -125,6 +125,8 @@ uint32_t infoCallback(cmd *c) {
     serialDevice->print("Commit: ");
     serialDevice->println(BRUCIA_BUILD_DIRTY == 1 ? BRUCIA_BUILD_COMMIT " (dirty)" : BRUCIA_BUILD_COMMIT);
     serialDevice->println(BRUCIA_UPSTREAM_CREDIT);
+    serialDevice->println("Source: " BRUCIA_REPO_URL);
+    serialDevice->println("Upstream: " BRUCIA_UPSTREAM_REPO_URL);
     serialDevice->print("SDK: ");
     serialDevice->println(ESP.getSdkVersion());
     serialDevice->println("MAC addr: " + String(WiFi.macAddress()));

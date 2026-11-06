@@ -8,12 +8,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONObject
 
 /**
  * Ethernet (W5500) commands on one single-owner [DeviceOperation], lifted from WardriveViewModel:
  * status/config plus the two authorized-use LAN stress tests (DHCP starvation, MAC flooding).
- * [refresh] reads structured link state via [JsonCommandRunner]; a token guards the [status] mapping
- * so only the owning request publishes it, and [configure] chains a single [refresh] on success.
+ * [refresh] and [configure] read structured link state via [JsonCommandRunner]; a token guards the
+ * [status] mapping so only the owning request publishes it.
  */
 class EthernetService(
     scope: CoroutineScope,
@@ -33,37 +34,53 @@ class EthernetService(
 
     private fun ethErrMessage(out: String) = out.ifBlank { "No Ethernet on this device." }
 
-    /** Query Ethernet link + IP (eth_status); ok maps [status] and clears [message], fail shows the error. */
+    /**
+     * Link state from an eth_status / eth_config ACK. The firmware nests it in `d.data`
+     * (src/companion/network.cpp ethSendStatus: {ok, out, data:{link, up, ip, gw, mask, dns, mac}});
+     * top-level fields are accepted as a fallback. Null when the reply carries no link state
+     * (an ERR such as a usage error, or "W5500 not found").
+     */
+    private fun statusOf(d: JSONObject?): EthStatus? {
+        val reply = d ?: return null
+        val r = reply.optJSONObject("data") ?: reply.takeIf { it.has("link") } ?: return null
+        return EthStatus(
+            link = r.optBoolean("link", false),
+            ip = r.optString("ip").takeUnless { it == "0.0.0.0" }.orEmpty(),
+            detail = reply.optString("out"),
+        )
+    }
+
+    /** Device text of a reply: `out` (ACK) or `msg` (ERR / local failure). */
+    private fun textOf(d: JSONObject?): String = d?.optString("out")?.ifBlank { null } ?: d?.optString("msg").orEmpty()
+
+    /**
+     * Query Ethernet link + IP (eth_status). Any reply that carries link state maps [status] (a
+     * link without a DHCP lease answers ok=false but still reports it); ok clears [message],
+     * otherwise the device text is shown.
+     */
     fun refresh() = synchronized(lock) {
         val t = ++token
-        op.startJson(json, "eth_status", "Querying Ethernet...", timeoutMs = STATUS_TIMEOUT_MS) { ok, d ->
-            if (!ok) return@startJson ethErrMessage(d?.optString("out").orEmpty())
-            synchronized(lock) {
-                if (t == token) _status.value = EthStatus(
-                    link = d?.optBoolean("link", false) ?: false,
-                    ip = d?.optString("ip").orEmpty(),
-                    detail = d?.optString("out").orEmpty(),
-                )
-            }
-            ""
-        }
+        op.startJson(json, "eth_status", "Querying Ethernet...", timeoutMs = STATUS_TIMEOUT_MS) { ok, d -> publish(t, ok, d, "") }
     }
 
     /**
-     * Apply Ethernet configuration (eth_config <...>); [args] is the raw argument string. On success
-     * a single [refresh] follows (it supersedes this command, so its "Querying Ethernet..." replaces
-     * the config text and no loop forms); on failure the error is shown and no refresh runs.
+     * Apply Ethernet configuration (eth_config <dhcp | static <ip> <gw> <mask> [dns]>); [args] is the
+     * raw argument string, blank meaning DHCP. The firmware brings the W5500 up with these settings,
+     * reports the resulting link in the same ACK and stops the interface again, so that ACK (not a
+     * follow-up eth_status, which would bring it up afresh on DHCP) is what [status] shows.
      */
     fun configure(args: String) = synchronized(lock) {
-        ++token
-        val a = args.trim()
-        val cmd = if (a.isEmpty()) "eth_config" else "eth_config $a"
-        op.start(cmd, "Applying Ethernet config...", timeoutMs = CONFIG_TIMEOUT_MS) { ok, out ->
-            if (!ok) return@start ethErrMessage(out)
-            val text = out.ifBlank { "Ethernet configured." }
-            refresh()
-            text
+        val t = ++token
+        val a = args.trim().ifEmpty { "dhcp" }
+        op.startJson(json, "eth_config $a", "Applying Ethernet config...", timeoutMs = CONFIG_TIMEOUT_MS) { ok, d ->
+            publish(t, ok, d, textOf(d).ifBlank { "Ethernet configured." })
         }
+    }
+
+    private fun publish(t: Long, ok: Boolean, d: JSONObject?, okText: String): String {
+        val parsed = statusOf(d)
+        synchronized(lock) { if (t == token && parsed != null) _status.value = parsed }
+        return if (ok) okText else ethErrMessage(textOf(d))
     }
 
     /** DHCP-starvation flood over Ethernet: eth_dhcp_starve [secs]. Authorized use only. */

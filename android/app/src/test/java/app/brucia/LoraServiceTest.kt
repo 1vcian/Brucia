@@ -71,7 +71,7 @@ class LoraServiceTest {
     private val json = JsonGate()
     private val packets = CopyOnWriteArrayList<JSONObject>()
     private fun CoroutineScope.svc(connected: Boolean = true) =
-        LoraService(this, runner, json, { connected }) { packets += it }
+        LoraService(this, runner, json, { connected }, stopRunner = { _, _ -> true to "" }) { packets += it }
 
     @Test(timeout = 5000) fun notConnectedRejectsLocallyAndSendsNothing() = runVirtual {
         val s = svc(connected = false)
@@ -160,6 +160,27 @@ class LoraServiceTest {
         json.reply(0, true, JSONObject().put("out", "received 1 packet(s)").put("data", JSONObject().put("data", "X")))
         delay(20)
         assertEquals("Stopped.", s.status.value)
+        assertTrue(packets.isEmpty())
+    }
+
+    @Test(timeout = 5000) fun stopReceiveSendsDeviceStopSoTheListenWindowEndsEarly() = runVirtual {
+        // The firmware blocks in lora_recv for up to 120 s; only a polled `stop` frees it early
+        // (otherwise PINGs go unanswered and the link watchdog reports a device restart).
+        val stopsSent = CopyOnWriteArrayList<String>()
+        val s = LoraService(this, runner, json, { true }, stopRunner = { cmd, _ -> stopsSent += cmd; true to "" }) { packets += it }
+        s.receive(60)
+        until { json.calls.size == 1 }
+        s.stopReceive()
+        until { stopsSent.isNotEmpty() }
+        assertEquals(listOf("stop"), stopsSent)
+        assertFalse(s.receiving.value)
+        // Not receiving: no stray stop frame.
+        s.stopReceive()
+        settle()
+        assertEquals(1, stopsSent.size)
+        // The device's final ACK for the stopped window is ignored (releases the gated fake).
+        json.reply(0, true, JSONObject().put("out", "received 0 packet(s) (stopped)"))
+        settle()
         assertTrue(packets.isEmpty())
     }
 

@@ -2,6 +2,7 @@
 #include "core/mykeyboard.h"
 #include "internal.h"
 #include "modules/rf/rf_utils.h"
+#include "subghz_busy.h"
 #include <globals.h>
 #if defined(COMPANION_HAS_CC1101)
 #include "modules/rf/emit.h"
@@ -478,33 +479,51 @@ static void runSubghzConfig(const String &argsIn, uint32_t id) {
     if (tok[3].length()) g_rfCfg.dataRate = tok[3].toFloat();
 
     // Apply live so the settings are active immediately.
-    if (initRfModule("rx", g_rfCfg.freqMHz)) {
+    const bool applied = initRfModule("rx", g_rfCfg.freqMHz);
+    if (applied) {
         ELECHOUSE_cc1101.setModulation(g_rfCfg.modulation);
         ELECHOUSE_cc1101.setRxBW(g_rfCfg.rxBW);
         ELECHOUSE_cc1101.setDRate(g_rfCfg.dataRate);
         deinitRfModule();
     }
 
-    char out[96];
+    // Stored either way (later commands use it); ok only when the CC1101 actually took it.
+    char out[128];
     snprintf(
         out,
         sizeof(out),
-        "freq=%.0fkHz mod=%s bw=%.0fkHz dr=%.0fkBaud",
+        "%sfreq=%.0fkHz mod=%s bw=%.0fkHz dr=%.0fkBaud",
+        applied ? "" : "stored, not applied (CC1101 init failed): ",
         g_rfCfg.freqMHz * 1000.0f,
         modName(g_rfCfg.modulation),
         g_rfCfg.rxBW,
         g_rfCfg.dataRate
     );
-    companionAckMsg(id, true, out);
+    companionAckMsg(id, applied, out);
 #else
     (void)argsIn;
     sendErr(id, 501, "no CC1101 on this board");
 #endif
 }
 
+// True while a receive stream (subghz.raw / subghz.spectrum) owns the CC1101.
+static bool subghzReceiverBusy() {
+#if defined(COMPANION_HAS_CC1101)
+    return subRf || subSpec;
+#else
+    return subRf;
+#endif
+}
+
 bool dispatchSubghzCommand(const CommandRequest &request) {
     const String &cmdStr = request.command;
     const uint32_t id = request.id;
+    // One owner for the CC1101: refuse a one-shot radio command (companion subghz_* or a routed
+    // rf/subghz CLI verb) while a receive stream runs, instead of deinitializing the radio under it.
+    if (subghzReceiverBusy() && subghzCommandNeedsRadio(cmdStr.c_str())) {
+        sendErr(id, 409, "sub-ghz receiver busy (stop Listen/Spectrum first)");
+        return true;
+    }
     do {
 
         // Brucia Sub-GHz (CC1101): record+replay a raw signal.

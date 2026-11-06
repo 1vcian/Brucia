@@ -46,3 +46,17 @@ struct IButtonBus {
 IButtonResult ibuttonReadRom(
     IButtonBus &bus, uint8_t out[8], int attempts, bool stopOnNoPresence, uint32_t retryDelayMs
 );
+
+// Headless write (companion ibutton_write), the steps the standalone menu takes plus a read-back:
+// wait for a presence pulse (up to `attempts` resets, retryDelayMs apart; the menu waits without a
+// bound), run `writeId` (the RW1990 sequence), then read the ROM back with the same attempts and
+// compare all 8 bytes with `id` (even when its CRC byte is not valid: the bytes asked for are what
+// must land). *written tells whether the sequence ran.
+//   SUCCESS: the read-back equals id;
+//   NO_KEY: nothing answered before the write (nothing written) or after it (unverified);
+//   FAILURE: a key answered with other bytes (not a writable blank, or the write did not take);
+//   CANCELLED: bus.cancelled() before the write.
+IButtonResult ibuttonWriteVerified(
+    IButtonBus &bus, const uint8_t id[8], void (*writeId)(void *ctx), void *ctx, int attempts,
+    uint32_t retryDelayMs, bool *written
+);

@@ -10,10 +10,13 @@ proxy, and session offload/reporting.
 Runs on-device BruceJS (JavaScript) headless and returns its output (`script_run`).
 
 ## iButton
-1-Wire read and emulate, including RW1990 rewrite (`ibutton_read`, `ibutton_write`).
+1-Wire read and RW1990 rewrite (`ibutton_read`, `ibutton_write`). The write waits about 3 s
+for a key on the probe, writes it and reads it back, and reports whether the id landed
+(firmware from this release on; older firmware writes without checking).
 
 ## Clock
-Gets or sets the device RTC (`clock_get`, `clock_set`).
+Gets or sets the device clock (`clock_get`, `clock_set`). Like Bruce's own NTP sync, the
+device clock holds local time: "Sync from phone" sends the phone's local time.
 
 ## Speaker tools
 Plays a tone or an audio file on the onboard I2S speaker (`speaker_tone`,

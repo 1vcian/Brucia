@@ -165,12 +165,17 @@ IButtonResult ibutton_read_headless(String &idHexOut) {
     return IBUTTON_SUCCESS;
 }
 
-IButtonResult ibutton_write_headless(const String &idHex) {
+static void writeKeyThunk(void *ow) { writeKey(*static_cast<OneWire *>(ow)); }
+
+IButtonResult ibutton_write_headless(const String &idHex, bool *written) {
+    if (written) *written = false;
     if (!ibuttonParseId(idHex.c_str(), keyBuffer)) return IBUTTON_FAILURE; // need exactly 8 bytes
     keyLoaded = true;
     OneWire ow(bruceConfigPins.iButton);
-    writeKey(ow);
-    return IBUTTON_SUCCESS;
+    OneWireBus bus(ow);
+    // The menu waits for the blank before writing; headless waits up to ~3 s (100 x 30 ms, inside
+    // the app's 10 s reply wait) and reads the id back instead of reporting an unchecked write.
+    return ibuttonWriteVerified(bus, keyBuffer, writeKeyThunk, &ow, 100, 30, written);
 }
 
 // ---------------------------------------------------------------------------

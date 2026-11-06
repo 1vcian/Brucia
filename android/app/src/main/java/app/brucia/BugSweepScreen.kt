@@ -79,22 +79,28 @@ internal fun BugSweepScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
     }
 
-    // Track whether THIS screen turned BLE on, so we don't stop a scan started elsewhere.
-    var bleStartedHere by rememberRetained { mutableStateOf(false) }
+    // The streams THIS sweep turned on (retained across a rotation): leaving stops only those, so a
+    // Wi-Fi/BLE scan or spectrum sweep that was already running elsewhere is left alone.
+    var startedHere by rememberRetained { mutableStateOf(SweepBands()) }
+    // On, starting or unconfirmed on the device (the subscription view, not the lagging UI flags).
+    fun running() = SweepBands(wifi = vm.streamMayRun("wifi.ap"), ble = vm.streamMayRun("ble.scan"), sub = vm.streamMayRun("subghz.spectrum"))
     // Start/stop the three ESP streams with the sweep.
     fun startSweep() {
         if (!connected) return
-        if (useSub) vm.startSpectrum()
-        if (useBle) { vm.setBleScan(true); bleStartedHere = true }
-        if (useWifi) vm.setWardriving(true)
+        startedHere = SweepStreams.start(
+            want = SweepBands(wifi = useWifi, ble = useBle, sub = useSub), running = running(),
+            startWifi = { vm.setWardriving(true) }, startBle = { vm.setBleScan(true) }, startSub = { vm.startSpectrum() },
+        )
         peakHold = null; prevSample = null; trend = 0
         sweeping = true
     }
     fun stopSweep() {
         sweeping = false
-        if (vm.spectrumActive.value) vm.stopSpectrum()
-        if (bleStartedHere) { vm.setBleScan(false); bleStartedHere = false }
-        if (vm.wardriving.value) vm.setWardriving(false)
+        SweepStreams.stop(
+            startedHere, running(),
+            stopWifi = { vm.setWardriving(false) }, stopBle = { vm.setBleScan(false) }, stopSub = { vm.stopSpectrum() },
+        )
+        startedHere = SweepBands()
     }
     LeaveEffect { if (sweeping) stopSweep() }
 
@@ -174,5 +180,27 @@ internal fun BugSweepScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             Text("Tip: the sub-GHz peak reflects whatever range the device is sweeping - set it in the RF tool to target a suspected band.",
                 color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+/** Which of the sweep's device streams (Wi-Fi scan, BLE scan, sub-GHz spectrum) are meant. */
+internal data class SweepBands(val wifi: Boolean = false, val ble: Boolean = false, val sub: Boolean = false)
+
+/** Bug Sweep stream ownership: start only what is not already on, stop only what the sweep started. */
+internal object SweepStreams {
+    /** Start the [want]ed streams that are not [running]; returns the ones started here. */
+    fun start(want: SweepBands, running: SweepBands, startWifi: () -> Unit, startBle: () -> Unit, startSub: () -> Unit): SweepBands {
+        val started = SweepBands(wifi = want.wifi && !running.wifi, ble = want.ble && !running.ble, sub = want.sub && !running.sub)
+        if (started.sub) startSub()
+        if (started.ble) startBle()
+        if (started.wifi) startWifi()
+        return started
+    }
+
+    /** Stop the streams in [started] that are still [running]. */
+    fun stop(started: SweepBands, running: SweepBands, stopWifi: () -> Unit, stopBle: () -> Unit, stopSub: () -> Unit) {
+        if (started.sub && running.sub) stopSub()
+        if (started.ble && running.ble) stopBle()
+        if (started.wifi && running.wifi) stopWifi()
     }
 }

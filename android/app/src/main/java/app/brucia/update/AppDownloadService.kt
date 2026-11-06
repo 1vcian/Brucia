@@ -36,6 +36,7 @@ class AppDownloadService(
     val state = mutableState.asStateFlow()
     private val lock = Any()
     private var active: Any? = null
+    private var activeJob: Job? = null
 
     fun start(url: String, integrity: AssetIntegrity): Job? {
         val run = Any()
@@ -62,7 +63,14 @@ class AppDownloadService(
             end(run, error)
         }
         job.invokeOnCompletion { cause -> if (cause != null) end(run, CANCELLED) }
+        synchronized(lock) { if (active === run) activeJob = job }
         return job
+    }
+
+    /** Cancel the running download (the copy stops at its next read); never reaches the installer. */
+    fun cancel() {
+        val job = synchronized(lock) { activeJob.takeIf { active != null } }
+        job?.cancel()
     }
 
     /** Clear a finished result; never hides a running download. */
@@ -78,6 +86,7 @@ class AppDownloadService(
         synchronized(lock) {
             if (active !== run) return
             active = null
+            activeJob = null
             mutableState.value = mutableState.value.copy(downloading = false, error = error)
         }
     }

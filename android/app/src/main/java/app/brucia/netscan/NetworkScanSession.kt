@@ -19,8 +19,8 @@ data class NetworkScanState(
     val total: Int = 254,
 )
 
-/** Runs one subnet scan: (base, onProgress(done, total), onHost) -> returns when finished. */
-typealias SubnetScanner = suspend (base: String, onProgress: (Int, Int) -> Unit, onHost: (ScanHost) -> Unit) -> Unit
+/** Runs one subnet scan: (hosts, onProgress(done, total), onHost) -> returns when finished. */
+typealias SubnetScanner = suspend (hosts: List<String>, onProgress: (Int, Int) -> Unit, onHost: (ScanHost) -> Unit) -> Unit
 
 /**
  * Network Scan state and its running job, owned outside the composition (see
@@ -30,8 +30,8 @@ typealias SubnetScanner = suspend (base: String, onProgress: (Int, Int) -> Unit,
  */
 class NetworkScanSession(
     private val scope: CoroutineScope,
-    private val scanner: SubnetScanner = { base, onProgress, onHost ->
-        NetworkScanner.scan(base = base, onProgress = onProgress, onHost = onHost)
+    private val scanner: SubnetScanner = { hosts, onProgress, onHost ->
+        NetworkScanner.scan(hosts = hosts, onProgress = onProgress, onHost = onHost)
     },
 ) {
     private val _state = MutableStateFlow(NetworkScanState())
@@ -43,15 +43,15 @@ class NetworkScanSession(
 
     val isRunning: Boolean get() = synchronized(lock) { job?.isActive == true }
 
-    /** Starts a scan of [base] (e.g. "192.168.1."); false (and no change) while one is running. */
-    fun start(base: String): Boolean = synchronized(lock) {
+    /** Starts a scan of [hosts] (see WifiLanSelector.scanPlan); false (and no change) while one is running. */
+    fun start(hosts: List<String>): Boolean = synchronized(lock) {
         if (job?.isActive == true) return false
         val id = ++run
-        _state.value = NetworkScanState(scanning = true, total = _state.value.total)
+        _state.value = NetworkScanState(scanning = true, total = hosts.size)
         job = scope.launch {
             try {
                 scanner(
-                    base,
+                    hosts,
                     { done, total -> updateIf(id) { it.copy(progress = done, total = total) } },
                     { host -> updateIf(id) { s -> s.copy(hosts = (s.hosts + host).sortedBy { ipKey(it.ip) }) } },
                 )

@@ -44,12 +44,21 @@ static uint8_t companionHidKey(const String &name) {
 static bool subBle = false;
 static NimBLEScan *bleScan = nullptr;
 
-void bleStart() {
-    if (subBle) return;
-    NimBLEDevice::init("");
+// Start the ble.scan stream. Returns 0 when scanning, 409 while a BLE HID presenter owns the
+// stack (stopping the scan later deinit()s the stack and would free the HID objects under the live
+// session), 503 when NimBLE cannot be initialized or yields no scanner (the SUB handler answers
+// ERR instead of acknowledging a stream that would never deliver).
+int bleStart() {
+    if (subBle) return 0;
+#if !defined(LITE_VERSION)
+    if (g_companionHid) return 409;
+#endif
+    if (!NimBLEDevice::isInitialized() && !NimBLEDevice::init("")) return 503;
     bleScan = NimBLEDevice::getScan();
-    if (bleScan) bleScan->setActiveScan(true);
+    if (bleScan == nullptr) return 503;
+    bleScan->setActiveScan(true);
     subBle = true;
+    return 0;
 }
 
 void bleStop() {
@@ -386,7 +395,7 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
             }
             if (runIbeaconBounded(
                     (uint32_t)secs * 1000,
-                    "Bruce iBeacon",
+                    BRUCIA_NAME " iBeacon",
                     uuid.length() ? uuid.c_str() : "8ec76ea3-6668-48da-9866-75be8bc86f4d"
                 )) {
                 companionAckMsg(id, true, "ibeacon done");
@@ -560,6 +569,10 @@ bool dispatchBluetoothCommand(const CommandRequest &request) {
                 // The media hijack drives the shared stack as a central; refuse while a BLE HID
                 // presenter owns it rather than tearing that session down underneath it.
                 sendErr(id, 409, "ble hid session active (ble_hid_end first)");
+            } else if (subBle) {
+                // It ends with NimBLEDevice::deinit(true), which deletes the scanner the running
+                // ble.scan stream still uses (bleService would then touch freed memory).
+                sendErr(id, 409, "ble scan active (stop the scan first)");
             } else if (mac.length() < 11) {
                 sendErr(id, 400, "usage: ble_media <mac>");
             } else {

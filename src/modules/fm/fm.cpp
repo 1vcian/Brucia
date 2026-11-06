@@ -14,7 +14,7 @@ void set_frq(uint16_t frq) { fm_station = frq; }
 void fm_banner() {
     tft.fillScreen(bruceConfig.bgColor);
     tft.setCursor(10, 10);
-    tft.drawCentreString("~== Bruce Radio ==~", tftWidth / 2, 10, SMOOTH_FONT);
+    tft.drawCentreString("~== Brucia Radio ==~", tftWidth / 2, 10, SMOOTH_FONT);
     delay(500);
 }
 
@@ -274,11 +274,11 @@ bool fm_setup(bool traffic_alert, bool silent) {
     // Begin the RDS/RDBS transmission
     radio.beginRDS();
     if (traffic_alert) {
-        radio.setRDSstation("BruceTraffic");
+        radio.setRDSstation("BruciaTraffic");
         radio.setRDSbuffer("Traffic Info");
     } else {
-        radio.setRDSstation("BruceRadio");
-        radio.setRDSbuffer("Pwned by Bruce Radio!");
+        radio.setRDSstation("BruciaRadio");
+        radio.setRDSbuffer("Pwned by Brucia Radio!");
     }
 
     if (!silent) {
@@ -324,8 +324,8 @@ bool fm_tx_companion(uint16_t freq10k, const String &rdsText) {
         radio.setRDSstation(const_cast<char *>(rdsText.c_str()));
         radio.setRDSbuffer(const_cast<char *>(rdsText.c_str()));
     } else {
-        radio.setRDSstation(const_cast<char *>("BruceRadio"));
-        radio.setRDSbuffer(const_cast<char *>("Pwned by Bruce Radio!"));
+        radio.setRDSstation(const_cast<char *>("BruciaRadio"));
+        radio.setRDSbuffer(const_cast<char *>("Pwned by Brucia Radio!"));
     }
     radio.setProperty(SI4713_PROP_TX_RDS_PS_MISC, 0x1008);
     return true;

@@ -268,6 +268,60 @@ def _valid_hex_key_64(key):
     return all(c in "0123456789abcdefABCDEF" for c in s)
 
 
+RF_CLI_MAX_TE_US = 65535   # mirrors rf_commands.cpp RF_CLI_MAX_TE_US
+RF_CLI_MAX_REPEAT = 1000   # mirrors RF_CLI_MAX_REPEAT
+RF_CLI_MAX_BITS = 64       # mirrors RF_CLI_MAX_BITS
+
+
+def _valid_u32(token, lo=0, hi=0xFFFFFFFF):
+    """Mirrors firmware clinum::parseU32 (src/core/serial_commands/cli_number.h): the whole token
+    must be decimal digits (optional blanks and '+'), value within [lo, hi]. Never raises."""
+    s = token.strip()
+    if s.startswith("+"):
+        s = s[1:]
+    if not s or not all(c in "0123456789" for c in s):
+        return False
+    return lo <= int(s) <= hi
+
+
+def rf_tx_reject_reason(cmd):
+    """Why the firmware rejects a single-code RF transmit (`rf/subghz tx|txp ...`), or None if it
+    accepts it (or the command is not one of them). Mirrors rfTxCallback/rfTxByNameCallback: the
+    key through rfhex::parseKey64, every number through clinum::parseU32 with the same bounds."""
+    parts = cmd.split()
+    if len(parts) < 2 or parts[0] not in ("rf", "subghz") or parts[1] not in ("tx", "txp"):
+        return None
+    if parts[1] == "tx":  # tx <key> <freq> <te> <count>; SimpleCLI defaults for missing args
+        args = (parts[2:] + ["0", "433920000", "0", "10"][len(parts) - 2:])[:4]
+        key, nums = args[0], [("frequency", args[1], 0, 0xFFFFFFFF), ("te", args[2], 0, RF_CLI_MAX_TE_US),
+                              ("count", args[3], 0, RF_CLI_MAX_REPEAT)]
+    else:  # txp <proto> <freq> <bits> <key> <te> <repeat>
+        args = (parts[2:] + ["", "433920000", "24", "0", "0", "10"][len(parts) - 2:])[:6]
+        key = args[3]
+        nums = [("frequency", args[1], 0, 0xFFFFFFFF), ("bits", args[2], 1, RF_CLI_MAX_BITS),
+                ("te", args[4], 0, RF_CLI_MAX_TE_US), ("repeat", args[5], 0, RF_CLI_MAX_REPEAT)]
+    if not _valid_hex_key_64(key):
+        return "invalid key: expected up to 16 hex digits (one 64-bit code)\n"
+    for name, value, lo, hi in nums:
+        if not _valid_u32(value, lo, hi):
+            return f"invalid {name}: '{value}' (expected a whole number {lo}..{hi})\n"
+    return None
+
+
+SUBGHZ_RADIO_VERBS = ("rx", "tx", "txp", "scan", "tx_from_file", "tx_from_buffer", "keeloqtx")
+
+
+def subghz_needs_radio(cmd):
+    """Mirrors src/companion/subghz_busy.h subghzCommandNeedsRadio(): companion subghz_* commands,
+    RfSend and the CLI rf/subghz radio verbs drive the CC1101 themselves (mfcodes does not)."""
+    parts = cmd.split()
+    if not parts:
+        return False
+    if parts[0].startswith("subghz_") or parts[0] == "RfSend":
+        return True
+    return parts[0] in ("rf", "subghz") and len(parts) > 1 and parts[1] in SUBGHZ_RADIO_VERBS
+
+
 class MockDevice:
     """One mock device serving the companion protocol on a PTY master fd.
 
@@ -476,20 +530,16 @@ class MockDevice:
 
         Mirrors the firmware's rfhex::parseKey64 (src/modules/rf/rf_hexkey.h): a key that is empty,
         non-hex or longer than 16 hex digits (a phone De Bruijn sweep is far longer) is REJECTED with
-        an error ACK (ok:False), never a false "sent" and never a crash. Returns the ACK body, or
+        an error ACK (ok:False), never a false "sent" and never a crash. Numeric arguments follow
+        clinum::parseU32 (backlog F03): malformed or out-of-range numbers are rejected the same way. Returns the ACK body, or
         None if this is not an RF tx command. No RF is emitted by the mock regardless.
         """
         parts = cmd.split()
-        if len(parts) < 2 or parts[0] not in ("rf", "subghz"):
+        if len(parts) < 2 or parts[0] not in ("rf", "subghz") or parts[1] not in ("tx", "txp"):
             return None
-        if parts[1] == "tx":
-            key = parts[2] if len(parts) > 2 else ""
-        elif parts[1] == "txp":
-            key = parts[5] if len(parts) > 5 else ""  # txp <proto> <freq> <bits> <key> ...
-        else:
-            return None
-        if not _valid_hex_key_64(key):
-            return {"ok": False, "out": "invalid key: expected up to 16 hex digits (one 64-bit code)\n"}
+        reason = rf_tx_reject_reason(cmd)
+        if reason is not None:
+            return {"ok": False, "out": reason}
         return {"ok": True, "out": "mock tx accepted\n"}
 
     def _restore_outputs_if_silent(self):
@@ -685,6 +735,15 @@ class MockDevice:
                 pmkid = cmd.startswith("wifi_pmkid")
                 desc = _capture_descriptor(cmd, pmkid)
                 self._send(fd, ACK, mid, {"ok": True, "out": "mock capture written", "desc": desc})
+            elif subghz_needs_radio(cmd) and self.subs & {"subghz.raw", "subghz.spectrum"}:
+                # One CC1101 owner (dispatchSubghzCommand): a receive stream holds the radio.
+                self._send(fd, ERR, mid, {"code": 409, "msg": "sub-ghz receiver busy (stop Listen/Spectrum first)"})
+            elif cmd.startswith("lora_recv"):
+                # runLoraRecv polls companionPollStop: PING answered, `stop` ends the window early.
+                arg = cmd[len("lora_recv"):].strip()
+                secs = min(max(int(arg) if arg.isdigit() else 5, 1), 120)
+                self._blocking_op(fd, mid, secs, stop, lambda stopped: self._send(fd, ACK, mid, {
+                    "ok": True, "out": "received 0 packet(s)" + (" (stopped)" if stopped else "")}))
             elif (reply := self._rf_tx(cmd)) is not None:
                 self._send(fd, ACK, mid, reply)
             else:

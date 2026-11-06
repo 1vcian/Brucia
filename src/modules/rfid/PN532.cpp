@@ -7,6 +7,7 @@
  */
 
 #include "PN532.h"
+#include <brucia_identity.h>
 #include "apdu.h"
 #include "core/bus_HAL.h"
 #include "core/display.h"
@@ -514,7 +515,7 @@ int PN532::emulate() {
             if ((!canParseUltralightDump ||
                  !extractNdefMessageFromPageDump(strAllPages, emulatedNdefMessage))) {
                 if (!buildNdefMessageFromStruct(this->ndefMessage, emulatedNdefMessage)) {
-                    std::vector<uint8_t> uriPayload = Ndef::urlNdefAbbrv("https://bruce.computer");
+                    std::vector<uint8_t> uriPayload = Ndef::urlNdefAbbrv(BRUCIA_SITE_URL);
                     emulatedNdefMessage = Ndef::newMessage(uriPayload);
                 }
             }

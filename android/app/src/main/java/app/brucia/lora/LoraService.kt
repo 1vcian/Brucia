@@ -1,6 +1,7 @@
 package app.brucia.lora
 
 import app.brucia.session.CommandRunner
+import app.brucia.session.CommandTasks
 import app.brucia.session.DeviceOperation
 import app.brucia.session.JsonCommandRunner
 import kotlinx.coroutines.CoroutineScope
@@ -23,9 +24,12 @@ class LoraService(
     runner: CommandRunner,
     private val json: JsonCommandRunner,
     private val isConnected: () -> Boolean,
+    /** Carries the fire-and-forget `stop` frame (firmware polls it mid-receive and never ACKs it). */
+    private val stopRunner: CommandRunner = runner,
     private val onPacket: (JSONObject) -> Unit,
 ) {
     private val op = DeviceOperation(scope, runner, isConnected, CONFIG_TIMEOUT_MS)
+    private val stops = CommandTasks(scope)
     /** Progress or result text (VM loraStatus). */
     val status: StateFlow<String> = op.status
     val busy: StateFlow<Boolean> = op.busy
@@ -91,8 +95,17 @@ class LoraService(
         }
     }
 
-    /** Cancel the local receive wait; firmware keeps its bounded listen window. */
-    fun stopReceive() = stop()
+    /**
+     * End a receive: send the generic `stop` the firmware polls during lora_recv (so the device
+     * leaves the listen window at once and answers PINGs again, instead of staying blocked up to
+     * 120 s and tripping the app's link watchdog), then cancel the local wait. Older firmware
+     * without the poll still ends at its bounded window.
+     */
+    fun stopReceive() {
+        val wasReceiving = synchronized(lock) { _receiving.value }
+        if (wasReceiving && isConnected()) stops.run(stopRunner, STOP_CMD, STOP_TIMEOUT_MS)
+        stop()
+    }
 
     /** Hard stop: cancel any in-flight command and clear the receive indicator. */
     fun stop() = synchronized(lock) {
@@ -109,6 +122,10 @@ class LoraService(
 
         /** Firmware runLoraRecv listens secs*1000 (clamped to 120s max); margin covers the final ACK. */
         const val RECV_MARGIN_MS = 10_000L
+        /** Generic stop frame; matches companionPollStop's "stop" rule and is always permitted. */
+        const val STOP_CMD = "stop"
+        /** Bounds only the fire-and-forget launch: the firmware polls the stop and never ACKs it. */
+        const val STOP_TIMEOUT_MS = 10_000L
         fun recvTimeoutFor(secs: Int): Long = secs.coerceIn(1, 120).toLong() * 1000L + RECV_MARGIN_MS
     }
 }

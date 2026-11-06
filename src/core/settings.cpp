@@ -1,4 +1,5 @@
 #include "settings.h"
+#include <brucia_identity.h>
 #include "core/led_control.h"
 #include "core/wifi/wifi_common.h"
 #include "current_year.h"
@@ -700,10 +701,10 @@ void setRFModuleMenu() {
         // else display an error
         displayError("CC1101 not found", true);
         if (pins_setup == 1)
-            qrcode_display("https://github.com/pr3y/Bruce/blob/main/media/connections/cc1101_stick.jpg");
+            qrcode_display(BRUCIA_UPSTREAM_REPO_URL "/blob/main/media/connections/cc1101_stick.jpg");
         if (pins_setup == 2)
             qrcode_display(
-                "https://github.com/pr3y/Bruce/blob/main/media/connections/cc1101_stick_SDCard.jpg"
+                BRUCIA_UPSTREAM_REPO_URL "/blob/main/media/connections/cc1101_stick_SDCard.jpg"
             );
         while (!check(AnyKeyPress)) vTaskDelay(50 / portTICK_PERIOD_MS);
     }
@@ -1279,11 +1280,11 @@ void setGpsBaudrateMenu() {
 **  Handles Menu to set the WiFi AP SSID
 **********************************************************************/
 void setWifiApSsidMenu() {
-    const bool isDefault = bruceConfig.wifiAp.ssid == "BruceNet";
+    const bool isDefault = bruceConfig.wifiAp.ssid == BRUCIA_AP_SSID;
 
     options = {
-        {"Default (BruceNet)",
-         [=]() { bruceConfig.setWifiApCreds("BruceNet", bruceConfig.wifiAp.pwd); },
+        {"Default (" BRUCIA_AP_SSID ")",
+         [=]() { bruceConfig.setWifiApCreds(BRUCIA_AP_SSID, bruceConfig.wifiAp.pwd); },
          isDefault                                                                            },
         {"Custom",
          [=]() {

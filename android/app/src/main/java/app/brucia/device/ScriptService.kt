@@ -82,15 +82,30 @@ class ScriptService(
     }
 
     /** Disconnect / teardown: drop the wait and any unsent stop; a late reply is ignored. */
-    fun abandon() {
+    fun abandon(text: String = ABANDONED) {
         synchronized(lock) {
             stops.cancel()
             graceJob?.cancel()
             graceJob = null
             stopWriting = false
             _stopping.value = false
-            op.stop(ABANDONED)
+            op.stop(text)
         }
+    }
+
+    /**
+     * Hand-over (Remote leaves companion mode next): send `script_stop` for the waiting run unless
+     * one was already sent, wait until [stopRunner] has written it, then drop the wait with [text]
+     * (its reply can no longer be read). False, nothing sent, when no run waits.
+     */
+    suspend fun stopForHandover(text: String): Boolean {
+        val send = synchronized(lock) {
+            if (!op.busy.value) return false
+            (stopSentFor != runSeq).also { stopSentFor = runSeq }
+        }
+        if (send) try { stopRunner.run(STOP_CMD, STOP_SEND_TIMEOUT_MS) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { }
+        abandon(text)
+        return true
     }
 
     /**

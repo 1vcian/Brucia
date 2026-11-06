@@ -42,8 +42,21 @@ class NfcToolsService(
         ndef.start(
             "nfc_ndef_push $type $p",
             "Pushing NDEF ($type) - tap a device...",
-            { if (p.isEmpty()) "Enter a payload first." else null },
+            { ndefPayloadProblem(type, p) },
         ) { ok, out -> if (ok) out.ifBlank { "NDEF pushed." } else out.ifBlank { "NDEF push failed." } }
+    }
+
+    /**
+     * Local check matching the firmware (nfc.cpp runNfcNdefPush): it refuses a URL over 99 bytes,
+     * a text over 96 and any payload over 200 (it used to truncate them silently), and the command
+     * is one line. Null when the payload can be sent.
+     */
+    fun ndefPayloadProblem(type: String, p: String): String? {
+        if (p.isEmpty()) return "Enter a payload first."
+        if (p.any { it == '\n' || it == '\r' }) return "Use a single line (contact: Name;+phone)."
+        val max = when (type) { "url" -> NDEF_MAX_URL_BYTES; "text" -> NDEF_MAX_TEXT_BYTES; else -> NDEF_MAX_PAYLOAD_BYTES }
+        val bytes = p.toByteArray(Charsets.UTF_8).size
+        return if (bytes > max) "Too long for the device: $bytes bytes, max $max for $type." else null
     }
 
     /** Read a masked / read-only EMV card: `nfc_emv_read`. */
@@ -81,6 +94,10 @@ class NfcToolsService(
     companion object {
         /** emulate() self-bounds the NDEF target-mode window to ~60s (nfc.cpp runNfcNdefPush) + ACK margin. */
         const val NDEF_TIMEOUT_MS = 75_000L
+        /** Firmware NDEF record limits (RFIDInterface::buildNdefMessage / runNfcNdefPush). */
+        const val NDEF_MAX_URL_BYTES = 99
+        const val NDEF_MAX_TEXT_BYTES = 96
+        const val NDEF_MAX_PAYLOAD_BYTES = 200
 
         /** nfc_emv_read and nfc_write_uid block on the reader with no firmware bound: long guard. */
         const val UNBOUNDED_TIMEOUT_MS = 650_000L

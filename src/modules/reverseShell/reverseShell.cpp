@@ -22,7 +22,7 @@ void ReverseShell() {
         switch (type) {
             case WS_EVT_CONNECT:
                 wsConnected = true;
-                client->text("Connected to BruceShell!\r\n");
+                client->text("Connected to BruciaShell!\r\n");
                 break;
 
             case WS_EVT_DISCONNECT:
@@ -83,12 +83,12 @@ void ReverseShell() {
     }
 
     // ── AP Password: bruce ─────────────────────────────────────
-    if (!WiFi.softAP("BruceShell", "bruce")) {
+    if (!WiFi.softAP("BruciaShell", "bruce")) {
         tft.println("Failed to start AP");
         return;
     }
 
-    tft.println("Wi-Fi AP Started: BruceShell (pass: bruce)");
+    tft.println("Wi-Fi AP Started: BruciaShell (pass: bruce)");
     tft.println("IP: " + apGateway.toString());
 
     tcpServer.begin();
@@ -176,7 +176,7 @@ void ReverseShell() {
             tcpClient = tcpServer.accept();
             if (tcpClient) {
                 tft.println("Client connected.");
-                tcpClient.println("~Welcome to BruceShell.");
+                tcpClient.println("~Welcome to BruciaShell.");
                 tcpClient.println("~Developed by Fourier & Ninja-jr");
                 tcpClient.println("~Type 'help' for available commands");
                 shellConnected = true;

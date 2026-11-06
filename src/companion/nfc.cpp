@@ -164,6 +164,8 @@ static void runMifareKeycheck(const String &argsIn, uint32_t id) {
 // url/text, Ndef::mimeRecord (same helper as buildWifiNdef) for a vCard contact,
 // then the driver's emulate() (PN532 target mode). emulate() self-bounds to ~60s.
 //   nfc_ndef_push <url|text|contact> <payload...>
+static const unsigned NDEF_PUSH_MAX_URL = 99;  // RFIDInterface::buildNdefMessage URI payload
+static const unsigned NDEF_PUSH_MAX_TEXT = 96; // RFIDInterface::buildNdefMessage text payload
 static void runNfcNdefPush(const String &argsIn, uint32_t id) {
     String args = argsIn;
     args.trim();
@@ -184,8 +186,16 @@ static void runNfcNdefPush(const String &argsIn, uint32_t id) {
         sendErr(id, 400, "type must be url|text|contact");
         return;
     }
-    // Clamp to what the NDEF buffers / single-byte TLV length can carry.
-    if (payload.length() > 200) payload = payload.substring(0, 200);
+    // RFIDInterface::buildNdefMessage cuts a URL at 99 and a text at 96 bytes and this used to cut
+    // every payload at 200, while the ACK still said "emulated": a truncated URL went out as if it
+    // were the one the user typed. Refuse instead (bytes = UTF-8 length).
+    const unsigned maxLen = type == "url" ? NDEF_PUSH_MAX_URL : (type == "text" ? NDEF_PUSH_MAX_TEXT : 200);
+    if (payload.length() > maxLen) {
+        char why[64];
+        snprintf(why, sizeof(why), "%s too long (max %u bytes)", type.c_str(), maxLen);
+        sendErr(id, 400, why);
+        return;
+    }
 
     RFIDInterface *rfid = createCompanionRfidModule();
     if (!rfid || !rfid->begin()) {
@@ -241,8 +251,12 @@ static void runNfcNdefPush(const String &argsIn, uint32_t id) {
 // (EMVReader::readMaskedSummary -> read_emv_card) headlessly. AUTHORIZED USE ONLY:
 // the middle PAN digits are masked and the full PAN is never returned.
 //   nfc_emv_read
+static const uint32_t NFC_EMV_WAIT_MS = 20000;
 static void runNfcEmvRead(uint32_t id) {
     EMVReader emv(false); // construct WITHOUT running the interactive GUI setup()
+    // Wait at most NFC_EMV_WAIT_MS for a card (the app's `stop` ends it earlier); the GUI loop
+    // otherwise waits for ESC on the device, freezing the companion link.
+    emv.setHeadlessWait(NFC_EMV_WAIT_MS, companionPollStop);
     String out;
     bool ok = emv.readMaskedSummary(out);
     companionAckMsg(id, ok, out.c_str());

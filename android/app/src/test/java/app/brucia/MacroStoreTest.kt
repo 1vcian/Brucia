@@ -34,4 +34,21 @@ class MacroStoreTest {
             loaded,
         )
     }
+
+    @Test fun defaultNameNeverReplacesASavedMacro() {
+        assertEquals("Macro 1", Macro.defaultName(emptyList()))
+        // Macro 1 was deleted: "Macro ${'$'}{size + 1}" was "Macro 2" and replaced the saved one.
+        val left = listOf(Macro("Macro 2", listOf(MacroStep("uptime"))))
+        assertEquals("Macro 3", Macro.defaultName(left))
+        assertEquals("Macro 3", Macro.defaultName(listOf(Macro("a", emptyList()), Macro("Macro 2", emptyList()))))
+        assertEquals("Macro 2", Macro.defaultName(listOf(Macro("x", emptyList()))))
+    }
+
+    @Test fun moveStepReordersWithinBounds() {
+        val a = MacroStep("a"); val b = MacroStep("b"); val c = MacroStep("c")
+        assertEquals(listOf(b, a, c), Macro.moveStep(listOf(a, b, c), 1, -1))
+        assertEquals(listOf(a, c, b), Macro.moveStep(listOf(a, b, c), 1, 1))
+        assertEquals(listOf(a, b, c), Macro.moveStep(listOf(a, b, c), 0, -1))
+        assertEquals(listOf(a, b, c), Macro.moveStep(listOf(a, b, c), 5, 1))
+    }
 }

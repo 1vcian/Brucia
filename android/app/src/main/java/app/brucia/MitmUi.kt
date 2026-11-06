@@ -183,7 +183,7 @@ internal fun MitmScreen(vm: app.brucia.wardrive.WardriveViewModel, connected: Bo
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (!running) {
                             LocalNetworkGateCard(lan.status, "The MITM proxy", { lan.request() }, { lan.openSettings() },
-                                { scope.launch { lan.checkBeforeStart(MitmController.localIpv4()) } })
+                                { scope.launch { lan.checkBeforeStart(MitmController.wifiIpv4(context)) } })
                         }
                         OutlinedTextField(
                             value = portText,
@@ -203,7 +203,7 @@ internal fun MitmScreen(vm: app.brucia.wardrive.WardriveViewModel, connected: Bo
                                 onClick = {
                                     val p = portText.toIntOrNull()?.takeIf { it in 1..65535 } ?: 8080
                                     scope.launch {
-                                        if (lan.checkBeforeStart(MitmController.localIpv4())) MitmController.start(context, p)
+                                        if (lan.checkBeforeStart(MitmController.wifiIpv4(context))) MitmController.start(context, p)
                                     }
                                 },
                                 enabled = LocalNetworkAccess.canStart(lan.status),

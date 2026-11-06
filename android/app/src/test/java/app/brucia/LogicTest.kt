@@ -66,6 +66,20 @@ class LogicTest {
     }
 
     @Test
+    fun rfReplayOnlyForCapturesRfTxReproduces() {
+        // `rf tx` sends protocol 1 with 24 bits: the firmware's headless capture format.
+        val rcswitch = "Frequency: 433920000\nPreset: 0\nProtocol: RcSwitch\nBit: 24\nKey: 44 55 33\nTE: 350"
+        assertEquals("rf tx 445533 433920000 350 10", CliParse.rfReplayCommand(rcswitch))
+        // Another protocol or bit length would go out as a different frame: no replay command.
+        assertEquals(null, CliParse.rfReplayCommand(rcswitch.replace("Protocol: RcSwitch", "Protocol: CAME")))
+        assertEquals(null, CliParse.rfReplayCommand(rcswitch.replace("Bit: 24", "Bit: 12")))
+        assertEquals(null, CliParse.rfReplayCommand(rcswitch.replace("Protocol: RcSwitch", "Protocol: KeeLoq")))
+        // The display form "Protocol: <name>(<preset>)" is matched by name.
+        assertEquals("rf tx 445533 433920000 350 10",
+            CliParse.rfReplayCommand(rcswitch.replace("Protocol: RcSwitch", "Protocol: Princeton(0)")))
+    }
+
+    @Test
     fun exportsProduceValidHeaders() {
         val aps = listOf(
             ApObservation("AA:BB:CC:DD:EE:FF", "Net1", 6, -50, "wpa2", 45.0, 9.0, 1L),

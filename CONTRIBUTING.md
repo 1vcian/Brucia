@@ -234,6 +234,10 @@ both sides aware of it.
 - **No emoji** anywhere (code, UI, docs, commits).
 - Match the surrounding code's idiom and comment density.
 - Flame theme: ember `#FF6D1A`, amber `#FFB300`, deep `#E23E00`, bg `#0E0E10`.
+- **Project links** (repository, site, wiki, releases, Bruce credit) come from `brand.json`: use
+  `BRUCIA_*` macros from `brucia_identity.h` in firmware, `BrandLinks` in the app and `BruciaBrand`
+  (`docs/brand.js`) on the site, then run `python3 tools/brand.py write`. `tools/test_brand.py`
+  rejects new hardcoded links; see `docs/LAUNCH.md`.
 
 ## Commits & PRs
 

@@ -11,9 +11,11 @@ void setiButtonPinMenu();
 // OneWire + RW1990 logic as the interactive menu.
 //   ibutton_read_headless  -> IBUTTON_SUCCESS and idHexOut = 16 hex chars (8 bytes),
 //                             IBUTTON_NO_KEY when nothing answers, IBUTTON_CRC_ERROR on bad CRC.
-//   ibutton_write_headless -> parse 16 hex chars into the key buffer and emulate/write
-//                             it onto an RW1990 blank; IBUTTON_FAILURE on a bad id.
+//   ibutton_write_headless -> parse 16 hex chars into the key buffer, wait briefly for a key,
+//                             write it onto an RW1990 blank and read it back
+//                             (ibuttonWriteVerified); IBUTTON_FAILURE with *written false on
+//                             a bad id.
 IButtonResult ibutton_read_headless(String &idHexOut);
-IButtonResult ibutton_write_headless(const String &idHex);
+IButtonResult ibutton_write_headless(const String &idHex, bool *written = nullptr);
 
 #endif

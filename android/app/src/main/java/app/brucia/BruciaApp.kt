@@ -17,6 +17,14 @@ class BruciaApp : Application() {
         super.onCreate()
         // Start the rolling app log as early as possible so startup failures are captured too.
         BruciaLog.init(this)
+        // Update downloads left from an earlier run (installed or abandoned), off the main thread.
+        Thread {
+            val n = app.brucia.update.AppUpdater.cleanupStaleDownloads(
+                listOf(app.brucia.update.AppUpdater.apkDir(this)) + app.brucia.update.AppUpdater.legacyApkDirs(this),
+                System.currentTimeMillis(),
+            )
+            if (n > 0) BruciaLog.i("Update", "removed $n stale update download(s)")
+        }.start()
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             try {

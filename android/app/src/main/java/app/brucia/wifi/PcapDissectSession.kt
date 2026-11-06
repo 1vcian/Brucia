@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -43,7 +44,9 @@ class PcapDissectSession(
     fun open(fileName: String, read: () -> ByteArray): Boolean {
         if (job?.isActive == true) return false
         _state.value = PcapDissectState(fileName = fileName, loading = true)
-        job = scope.launch {
+        // Lazy, so [job] names this run before its body can reach the finally below.
+        val run = scope.launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]
             var next = _state.value
             try {
                 val bytes = withContext(ioDispatcher) { read() }
@@ -58,9 +61,13 @@ class PcapDissectSession(
             } catch (e: Exception) {
                 next = next.copy(error = "Failed to read: ${e.message}")
             } finally {
-                _state.value = next.copy(loading = false)
+                // A blocking read cannot be interrupted: after reset() (or a newer open) this
+                // run's end must not bring its file name back over the newer state.
+                if (job === self) _state.value = next.copy(loading = false)
             }
         }
+        job = run
+        run.start()
         return true
     }
 

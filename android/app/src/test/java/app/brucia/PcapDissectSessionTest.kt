@@ -94,4 +94,24 @@ class PcapDissectSessionTest {
             assertEquals(PcapDissectState(), session.state.value)
         } finally { s.cancel() }
     }
+
+    @Test fun resetWhileTheBlockingReadRunsLeavesTheStateCleared() = scoped { session ->
+        // The read (on the IO dispatcher) cannot be interrupted; the user leaves meanwhile.
+        session.open("a.pcap") { session.reset(); pcap(2) }
+        clock.runCurrent()
+        assertEquals(PcapDissectState(), session.state.value)
+    }
+
+    @Test fun anAbandonedParseNeverOverwritesANewerOpen() = scoped { session ->
+        session.open("a.pcap") {
+            session.reset()
+            assertTrue(session.open("b.pcap") { pcap(3) })
+            pcap(2)
+        }
+        clock.runCurrent()
+        val s = session.state.value
+        assertEquals("b.pcap", s.fileName)
+        assertFalse(s.loading)
+        assertEquals(3, s.summary!!.frames)
+    }
 }

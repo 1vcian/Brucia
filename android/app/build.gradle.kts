@@ -17,6 +17,21 @@ val keystoreProps = Properties().apply {
     if (hasKeystore) keystorePropsFile.inputStream().use { load(it) }
 }
 
+// Public links (repository, site, wiki, releases) come from the repo-root brand.json, the same
+// file the firmware header and website are generated from (tools/brand.py, docs/LAUNCH.md).
+// app/brucia/BrandLinks.kt derives every URL from these BuildConfig fields.
+@Suppress("UNCHECKED_CAST")
+val brand = groovy.json.JsonSlurper().parseText(rootProject.file("../brand.json").readText()) as Map<String, Any?>
+fun brandValue(key: String, pattern: String): String {
+    val value = brand[key] as? String ?: error("brand.json: missing $key")
+    require(Regex(pattern).matches(value)) { "brand.json: invalid $key" }
+    return value
+}
+val brandSlug = "[A-Za-z0-9][A-Za-z0-9._-]*"
+val brandAcceptedRepos = (brand["accepted_release_repos"] as? List<*> ?: error("brand.json: missing accepted_release_repos"))
+    .map { it as? String ?: error("brand.json: invalid accepted_release_repos") }
+    .onEach { require(Regex(brandSlug).matches(it)) { "brand.json: invalid accepted_release_repos" } }
+
 android {
     namespace = "app.brucia"
     compileSdk = 37
@@ -37,6 +52,11 @@ android {
         // lower codes even when development version names change.
         versionCode = 1000000 + (vparts.getOrElse(0) { 0 }) * 10000 + (vparts.getOrElse(1) { 0 }) * 100 + (vparts.getOrElse(2) { 0 })
         versionName = bruciaVersion
+        buildConfigField("String", "BRAND_NAME", "\"${brandValue("name", "Brucia")}\"")
+        buildConfigField("String", "BRAND_GITHUB_OWNER", "\"${brandValue("github_owner", brandSlug)}\"")
+        buildConfigField("String", "BRAND_GITHUB_REPO", "\"${brandValue("github_repo", brandSlug)}\"")
+        buildConfigField("String", "BRAND_SITE_URL", "\"${brandValue("site_url", "https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~-]+)*/")}\"")
+        buildConfigField("String", "BRAND_ACCEPTED_RELEASE_REPOS", "\"${brandAcceptedRepos.joinToString(",")}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

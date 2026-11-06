@@ -75,8 +75,14 @@ std::vector<uint8_t> EMVReader::emv_ask_for_aid() {
     uint8_t response[240];
     uint8_t response_len = 0;
     std::vector<uint8_t> aid;
+    const uint32_t waitStart = millis();
     while (!_cancelled) {
         if (check(EscPress)) {
+            _cancelled = true;
+            break;
+        }
+        // Brucia companion: bounded wait + app stop (an unbounded wait froze the companion loop).
+        if ((_waitMs && millis() - waitStart >= _waitMs) || (_pollStop && _pollStop())) {
             _cancelled = true;
             break;
         }
@@ -323,10 +329,18 @@ bool is_visa(EMVCard *card) {
 
 EMVCard EMVReader::read_emv_card() {
     EMVCard res;
-    if (_cancelled) return res;
+    // A cancelled wait (ESC, or the companion bound/stop) read no card: never report it as parsed
+    // (EMVCard.parsed defaults to true, which made an empty card look like a successful read).
+    if (_cancelled) {
+        res.parsed = false;
+        return res;
+    }
 
     std::vector<uint8_t> aid = emv_ask_for_aid(); // Perform Application Selection
-    if (_cancelled) return res;
+    if (_cancelled) {
+        res.parsed = false;
+        return res;
+    }
 
     if (aid.empty()) { // If we can't get AID, we can't read the card
         res.parsed = false;

@@ -198,7 +198,7 @@ void drawCompanionScreen(bool connected, bool wifi, bool ble, bool subghz) {
         padprintln("[ LOCKED - controlled by phone ]");
     } else {
         padprintln("Download the app to connect:");
-        padprintln("github.com/1vcian/BruciaDev");
+        padprintln(BRUCIA_REPO_DISPLAY);
     }
     padprintln("");
     String streams = "Streams: ";
@@ -258,7 +258,7 @@ static void runCompanionUSB(bool headless) {
     // companion app, then wait for it to connect. (Press OK/ESC on the QR to continue.)
     // When entered headless (from the `companion` CLI command), the app is already talking
     // to us over serial, so skip the blocking QR screen and go straight to the loop.
-    if (!headless) { qrcode_display("https://github.com/1vcian/BruciaDev/releases/latest"); }
+    if (!headless) { qrcode_display(BRUCIA_LATEST_RELEASE_URL); }
 
     // Probe the shared-SPI peripherals (NRF24 / W5500) exactly once, here, before the status
     // screen starts redrawing in the service loop. This serializes the single risky bus probe
@@ -368,10 +368,13 @@ static void runCompanionUSB(bool headless) {
                         const char *stream = in["d"]["stream"] | "";
                         bool on = in["d"]["on"] | false;
                         if (strcmp(stream, "ble.scan") == 0) {
-                            if (on) bleStart();
+                            int code = 0;
+                            if (on) code = bleStart();
                             else bleStop();
-                            subBleOn = on;
-                            sendAck(id, true);
+                            subBleOn = on && code == 0;
+                            if (code == 0) sendAck(id, true);
+                            else if (code == 409) sendErr(id, 409, "ble hid session active (ble_hid_end first)");
+                            else sendErr(id, 503, "ble init failed");
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
                         } else if (strcmp(stream, "subghz.raw") == 0) {
                             bool started = true;
@@ -508,6 +511,11 @@ static void runCompanionUSB(bool headless) {
                     default: sendErr(id, 404, "unknown message kind"); break;
                 }
             }
+            // Measure the app-silence exit (60 s, above) from the END of handling: a bounded
+            // command that blocks the loop for ~60 s (NFC emulate/NDEF push, TV-B-Gone, a long
+            // capture) would otherwise trip it before the PINGs queued meanwhile are read, and the
+            // device would drop out of companion mode right after answering.
+            lastFrame = millis();
         }
 
         // 2) Service the wifi.ap stream: run back-to-back async scans and emit

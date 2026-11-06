@@ -1,8 +1,7 @@
 package app.brucia.mitm
 
 import android.content.Context
-import java.net.Inet4Address
-import java.net.NetworkInterface
+import app.brucia.net.WifiLanSelector
 
 /**
  * Process-wide owner of the running [MitmProxy]. Keeps the proxy alive independently of
@@ -16,13 +15,19 @@ object MitmController {
     @Synchronized
     fun start(ctx: Context, port: Int): Boolean {
         if (proxy != null) return true
+        // Only on the active Wi-Fi network (not mobile data or a VPN): that is the LAN the target shares.
+        val wifi = WifiLanSelector.current(ctx).getOrElse {
+            MitmLog.setError("Proxy not started: ${it.message}")
+            MitmLog.setRunning(false)
+            return false
+        }
         return try {
             MitmCa.ensureCa(ctx.applicationContext) // generate the CA up front if needed
             val p = MitmProxy(ctx.applicationContext, port)
             p.start()
             proxy = p
             MitmLog.setPort(port)
-            MitmLog.setLocalIp(localIpv4())
+            MitmLog.setLocalIp(wifi.ip)
             MitmLog.setError(null)
             MitmLog.setRunning(true)
             true
@@ -43,15 +48,6 @@ object MitmController {
 
     fun isRunning(): Boolean = proxy != null
 
-    /** Best-effort site-local IPv4 of this phone (for the target to point its proxy at). */
-    fun localIpv4(): String? = try {
-        NetworkInterface.getNetworkInterfaces().asSequence()
-            .filter { it.isUp && !it.isLoopback }
-            .flatMap { it.inetAddresses.asSequence() }
-            .filterIsInstance<Inet4Address>()
-            .firstOrNull { it.isSiteLocalAddress }
-            ?.hostAddress
-    } catch (e: Exception) {
-        null
-    }
+    /** This phone's IPv4 on the active Wi-Fi network (what the target points its proxy at), or null. */
+    fun wifiIpv4(ctx: Context): String? = WifiLanSelector.current(ctx).getOrNull()?.ip
 }

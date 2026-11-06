@@ -108,6 +108,19 @@ class FileTransferService(
             }
         }
 
+    /** True while any submitted transfer has not completed. */
+    val active: Boolean @Synchronized get() = jobs.isNotEmpty()
+
+    /**
+     * [cancelAll], then wait until every cancelled transfer has finished, including the upload
+     * abort a cancelled upload sends from its cleanup (SessionFileLink.write).
+     */
+    suspend fun cancelAllAndJoin() {
+        val pending = synchronized(this) { jobs.toList() }
+        cancelAll()
+        pending.forEach { it.join() }
+    }
+
     @Synchronized fun cancelAll() {
         generation++
         val pending = jobs.toList()

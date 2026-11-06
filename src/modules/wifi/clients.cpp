@@ -166,7 +166,7 @@ void startSessionLog(ClientProtocol protocol) {
             sessionLogEnabled = true;
             sessionLogPath = candidate;
 
-            String header = "=== Bruce Terminal Session ===\n";
+            String header = "=== Brucia Terminal Session ===\n";
             header += "Protocol: " + String(getProtocolName(protocol)) + "\n";
             header += "Host: " + sessionHost + "\n";
             if (!sessionUser.isEmpty()) header += "User: " + sessionUser + "\n";

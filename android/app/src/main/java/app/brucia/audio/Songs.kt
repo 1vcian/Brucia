@@ -34,6 +34,10 @@ object Rtttl {
             val v = t[1].trim().toIntOrNull() ?: continue
             when (t[0].trim()) { "d" -> d = v; "o" -> o = v; "b" -> bpm = v }
         }
+        // A malformed header (b<=0 or d<=0) would otherwise divide by zero/negative and yield
+        // absurd note durations (Int.MAX_VALUE ms, or negative); fall back to RTTTL defaults.
+        if (bpm <= 0) bpm = 63
+        if (d <= 0) d = 4
         val wholeMs = (60_000.0 / bpm) * 4.0
         val out = ArrayList<Note>()
         for (raw in parts[2].split(',')) {

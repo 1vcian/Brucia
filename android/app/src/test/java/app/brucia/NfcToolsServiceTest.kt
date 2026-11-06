@@ -47,6 +47,23 @@ class NfcToolsServiceTest {
         assertTrue(runner.calls.isEmpty())
     }
 
+    @Test(timeout = 5_000) fun pushNdefRefusesWhatTheFirmwareWouldTruncate() = runVirtual {
+        val s = svc()
+        // The firmware used to cut a URL at 99 / text at 96 bytes and still ACK "emulated".
+        s.pushNdef("url", "https://" + "a".repeat(92)) // 100 bytes
+        assertEquals("Too long for the device: 100 bytes, max 99 for url." to false, s.ndefStatus.value to s.ndefBusy.value)
+        s.pushNdef("text", "\u00e9".repeat(49)) // 98 UTF-8 bytes
+        assertEquals("Too long for the device: 98 bytes, max 96 for text.", s.ndefStatus.value)
+        s.pushNdef("contact", "Ada\nLovelace")
+        assertEquals("Use a single line (contact: Name;+phone).", s.ndefStatus.value)
+        delay(20)
+        assertTrue(runner.calls.isEmpty())
+        // At the limit it is sent.
+        s.pushNdef("url", "https://" + "a".repeat(91))
+        finish(0, true, "") { s.ndefBusy.value }
+        assertEquals("nfc_ndef_push url https://" + "a".repeat(91), runner.cmds.single())
+    }
+
     @Test(timeout = 5_000) fun readEmvTextsAndCommand() = runVirtual {
         val s = svc()
         s.readEmv()

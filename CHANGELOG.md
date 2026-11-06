@@ -7,6 +7,162 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Radio features audit (batch 17, software only; firmware changes need a build and the hardware
+  checks in `docs/audit/radio.md`):
+  - RF CLI numbers (backlog F03): `subghz tx`, `subghz txp`, `subghz keeloqtx` and `RfSend` no longer
+    abort the device on a malformed or out-of-range number. `std::stoul` threw on text or an
+    over-wide value (Bruce CLI keeps exceptions and nothing on the companion path catches them);
+    numbers now go through a non-throwing whole-token parser (`src/core/serial_commands/cli_number.h`)
+    and are rejected with a reason naming the argument before the radio is touched. Bounds:
+    frequency a decimal uint32 (as before), `bits` 1..64 (more shifted the 64-bit key out of range and
+    a `.sub` `Bit: 2000000000` sized a huge encoder buffer, also refused in the encoder itself),
+    `te` 0..65535 us, count/repeat 0..1000, KeeLoq button 0..15, serial 28-bit hex, counter 0..65535.
+    `txp` and `keeloqtx` now report a failed encode/transmit instead of success. Nothing new is
+    transmitted; the app refuses a `.sub` outside the same bounds.
+  - Sub-GHz: the spectrum labels showed 0.30-0.35 MHz for a 300-348 MHz sweep (kHz read as Hz);
+    fixed. While Listen or Spectrum owns the CC1101, one-shot radio commands (capture, transmit,
+    replay, config, brute force, burst) are refused with `ERR 409` instead of idling the radio under
+    the running stream. A saved capture is offered for Replay only when `rf tx` (24-bit protocol 1)
+    reproduces it; a CAME/Nice/KeeLoq capture was "replayed" as a different frame.
+    `subghz_config` reports a CC1101 init failure. The brute-force text no longer says every code
+    is sent.
+  - NFC: the "Read NDEF" button WROTE the Brucia URL onto the tag on the reader (`rfid ndef` is a
+    write). It is now "Write NDEF URL..." behind a confirmation, and Erase also asks first. NDEF
+    push refuses a URL over 99 / text over 96 bytes (firmware and app) instead of sending a silently
+    truncated record. `nfc_emv_read` gives up after 20 s or on Stop instead of waiting for ESC at the
+    device, and a cancelled wait is no longer reported as a read card. The Emulate text states the
+    PN532 limits.
+  - Companion link: the 60 s app-silence exit and the 15 s screen/LED restore are measured from the
+    end of a handled frame, so a ~60 s bounded command (NDEF push, TV-B-Gone) no longer drops the
+    device out of companion mode right after it answers.
+  - LoRa: Stop sends `stop`, which `lora_recv` now polls (PINGs are answered during the window);
+    a long receive no longer makes the app report "device restarted?".
+  - BLE: turning the scan on while a BLE Remote (HID) session is live is refused with `ERR 409`
+    (stopping the scan later freed the HID objects), and a BLE init failure is `ERR 503`; the media
+    hijack is refused while the scan runs (its stack teardown freed the scanner). GATT, BadBLE and
+    the media hijack end the scan from the app first, so the Scan toggle no longer stays on with no
+    events. Leaving the BLE or Spam screen stops the BLE advertising loop.
+  - BadUSB: `badusb run_from_file/run_from_buffer` are refused in companion mode (USB-HID setup on
+    the port that is the app link could hang it); standalone Bruce behavior is unchanged.
+  - IR: transmit commands refuse "IR TX pin not configured" instead of opening the on-device pin
+    menu in companion mode; `ir tx` with a protocol the sender ignores fails instead of reporting
+    success; an AC-state code longer than its bit count is rejected instead of overflowing a stack
+    buffer. The app no longer shows "Sent" before the device replied, and the IR jammer text no
+    longer promises an effect.
+  - ESP-NOW: `espnow_send` no longer forces Wi-Fi STA mode and disconnects (that shut down a running
+    Evil Portal AP and dropped the device's network join); the reply says the broadcast was queued
+    and delivery is not confirmed. ESP-NOW and FM texts no longer claim "any ESP32" or verified
+    broadcast audio.
+- Wi-Fi audit batch 17 (features wardrive/probes/sniffer/monitor/channels/connect/mac/crack/
+  evilportal/karma/brucegotchi/spamwifi):
+  - Spam Wi-Fi (beacon spam) honest framing: the beacon-spam card no longer claims the broadcast is
+    seen by nearby clients ("so nearby clients see bogus SSIDs ... appear as that many separate
+    networks"). It now describes what the device does - broadcasts beacon frames advertising the
+    given network names - and states that whether a nearby device's Wi-Fi scanner lists them is not
+    verified here, matching the honest framing already applied to the BLE advertising tools.
+  - Spam Wi-Fi now reports the device's real SSID count: each `wifi_beacon_spam` burst replies with
+    the number of SSIDs the device actually broadcast (after its own 9000-character list cap and
+    comma handling), so the status line shows that count once a reply arrives and falls back to the
+    requested count only when a reply lacks it.
+  - Evil Portal: the "deauth clients (evil twin)" sub-text no longer claims the disconnected clients
+    join the fake AP; it states deauth frames are sent and whether, and to which AP, a client
+    reconnects is up to the client and is not verified here.
+  - Firmware (`src/companion/wifi.cpp`, needs a build): a `karma_stop` / `responder_stop` arriving
+    while nothing is running now answers "not running" instead of being misread by the
+    `startsWith("karma")` / `startsWith("responder")` handlers as a new ~60 s run (mirrors the
+    existing `brucegotchi_stop` guard). The app sends a plain `stop`, so this closes a latent
+    footgun (e.g. a user macro sending the literal `*_stop`).
+  - Firmware (`src/companion/wifi.cpp`, needs a build): the Wi-Fi monitor lock channel is clamped to
+    1..13, matching the app and the protocol (was 1..14); an out-of-range channel falls through to
+    band-hopping as before, with no exception.
+  - Tests: `WifiSpamTextTest`, `BeaconSpamTest`, extended `BurstLoop`;
+    `tools/test_companion_wifi_dispatch.py` (static dispatch guard + monitor-channel checks).
+- Network Scan and MITM work only on the active Wi-Fi network (backlog B17-01). The phone's address
+  used to come from the first site-local interface of any kind, with the subnet always assumed /24,
+  so with mobile data or a VPN up the scan or the "point your proxy at" address could belong to the
+  wrong network while the screen said Wi-Fi. Both tools now read the active network from the
+  system and refuse, with the reason on screen, when it is not Wi-Fi, is a VPN or has no IPv4. The
+  scan uses the real prefix: every host of a /24 to /31, and on a larger Wi-Fi (for example a /16)
+  only this phone's /24, saying so. (`net/WifiLan.kt`, `WifiLanSelectorTest`.)
+- MITM proxy: request and response bodies of any size now stream through (backlog B17-02); before,
+  anything over 4 MiB failed and the client got a closed connection. The log keeps the first 4 KiB
+  of each body and marks it as truncated. HEAD, 204 and 304 responses keep the server's
+  Content-Length instead of being rewritten to 0 (B17-03). (`mitm/HttpRelay.kt`, `MitmStreamingTest`,
+  loopback only.)
+- Geo signals: Replay shows "Replaying ...", then the device's answer (done or the failure reason)
+  instead of announcing "Replayed" before anything was sent (B17-04, `GeoReplayServiceTest`).
+- Bug Sweep: leaving the sweep stops only the scans it started itself; a Wi-Fi/BLE scan or spectrum
+  sweep that was already running is left alone (B17-05, `SweepStreamsTest`).
+- Network Scan (intercept): the OpenSSH "regreSSHion" (CVE-2024-6387) heuristic no longer
+  false-flags OpenSSH 8.0-8.4. The rule's own text says it affects 8.5-9.7, but the regex matched
+  the whole 8.x range, so a patched/unaffected 8.0-8.4 server was shown a high-severity RCE flag it
+  does not have. The version range now matches the stated 8.5-9.7 (`netscan/VulnRules.kt`); legacy
+  `<7.4` detection is unchanged. Covered by `VulnRulesTest`.
+- RTTTL song parser (Audio / Tone, hardening): a melody header with a non-positive tempo (`b=0` or
+  negative) or default duration (`d=0`) no longer divides by zero and produces absurd note lengths
+  (`Int.MAX_VALUE` ms) or negative durations; the parser falls back to RTTTL defaults
+  (`audio/Songs.kt`). Covered by `RtttlTest`. (The firmware plays presets/custom songs natively; this
+  guards the phone-side parser.)
+- Branding and links (backlog BRAND): one central config for Brucia's public links. `brand.json`
+  at the repository root holds the name, the GitHub repository (`1vcian/BruciaDev` for now), the
+  site and the Bruce upstream credit links, plus the future `Brucia` values; `docs/LAUNCH.md`
+  describes the switch (`python3 tools/brand.py launch`) and the documentation to regenerate at
+  launch. The firmware reads it through the generated `include/brucia_brand.h`, the app through
+  `BuildConfig` (`BrandLinks`), the website through the generated `docs/brand.js`, `release.sh`
+  through `tools/brand.py get`. The app updater and the web flasher accept release assets under
+  both `BruciaDev` and `Brucia`, so builds from this release on keep finding updates after the
+  rename (older builds need one manual install). `tools/test_brand.py` fails on a hardcoded
+  Brucia repo/site or Bruce link outside the config and a reasoned allowlist.
+  Firmware (needs a build, not yet checked on a device): default BLE/Wi-Fi names shown to users
+  are now Brucia (`Brucia-*` BLE names, `BruciaShell`, `BruciaKarma`, `BruciaSniffer`, iBeacon,
+  pwngrid name, FM RDS, BLE keyboard manufacturer, U2F attestation subject); the serial banner
+  reads BRUCIA; Device Info and `info` show the source repository and the Bruce upstream; NFC
+  emulation and PN532 BLE default to the Brucia site; GPX metadata names Brucia; the AP-mode WebUI
+  screen shows the configured AP SSID/password instead of a hardcoded "BruceNet", and the AP SSID
+  menu default is BruciaNet. Folders, file formats, JS API names, config keys and the BLE API name
+  used by Bruce's official app are unchanged; credits to Bruce stay.
+- Device and tools audit (agent17/DEVICE, `docs/audit/device-tools.md`; not yet checked on
+  hardware):
+  - Ethernet: the status card now reads the link state and IP where the firmware sends them (it
+    always showed "Link: down" and no IP); device error texts are shown instead of "No Ethernet on
+    this device."; a blank configuration means DHCP (it sent an unsupported bare `eth_config`); a
+    static configuration shows its own result instead of a DHCP re-query that hid it. The screen
+    now says the settings are applied for a link test and not kept.
+  - Files: folder and file names with spaces (or `;;`) work for browse, delete and new folder (they
+    were split by the device CLI: folders could not be opened, deletes silently failed, `;;` ran a
+    second command); names the CLI cannot carry (`"`, `\`, control characters) are refused with a
+    message. A listing cut by the device's 3500-byte reply limit now says so and never shows a cut
+    entry with a wrong size. The device's answer to Delete / New folder is shown. Device file
+    names containing `/` are ignored, so "Open with" can no longer write outside its folder.
+  - Backups: Android cloud backup and device transfer no longer include the MITM CA private key or
+    the WiGLE API token; other app data is still backed up.
+  - iButton write (firmware): waits briefly for a key, writes it and reads it back; the reply says
+    "written and verified", "no iButton on the probe ... (nothing written)" or "read-back differs".
+    It used to write without a key present and always answered "written".
+  - Clock "Sync from phone" sets the device to the phone's local time (Bruce keeps local time in
+    its clock; the app sent UTC). "Get time" no longer shows a misleading "Z".
+  - Firmware update: if the download, integrity check or image check fails after the device was
+    rebooted into its bootloader, the app resets it back into its current firmware (it stayed dark
+    until unplugged). A write whose MD5 read-back does not match is reported as a failed flash,
+    not as "Firmware flashed - WARNING".
+  - Macros: saving without a name no longer overwrites an existing macro; the command hint shows a
+    command that can actually be typed. PCAP dissect: leaving the tool during a parse no longer
+    brings the old file name back. Utilities: generated passwords and the Wi-Fi QR string are
+    copied as sensitive clips (hidden from the Android 13+ copy preview).
+  - Remote: starting it first stops a running macro, script (sends `script_stop`), file transfer
+    (the upload is aborted on the device) and burst loops, before the device leaves companion
+    mode; they used to keep waiting for replies that could no longer arrive.
+  - Console and every CLI-backed tool: output cut by the device's 3500-byte reply limit now ends
+    with "(output truncated by the device at 3500 bytes)".
+  - Files: Delete asks for confirmation; local copies of pulled files are limited to the newest 20.
+    Device: Sleep and Reboot ask for confirmation. Report and session exports no longer crash when
+    storage is unavailable (an error is shown) and only the newest 10 of each are kept; device
+    names in reports can no longer break the Markdown layout.
+  - Updates: the downloaded APK waits in app-private storage (not the shared app folder) and is
+    removed after the update; a running APK download can be cancelled.
+  - Macros: saved macros can be edited (loaded back into the builder) and steps moved up; the save
+    button says when it will replace a macro of the same name.
+
 - De Bruijn (backlog F01-F02): fix the T-Embed reboot on "Transmit de Bruijn". The phone's
   generator produces a hex key far longer than one 64-bit code (order 12 = 1024 hex characters); the
   CLI parsed it with `std::stoull`, which threw `std::out_of_range`. That code is Bruce CLI

@@ -59,16 +59,20 @@ class LifecycleRegressionTest {
         assertEquals("Operation failed: bad reply", op.status.value)
     }
 
-    @Test(timeout = 5000) fun ethernetLateConfigCannotLaunchRefreshAfterCleanup() = runVirtual {
-        var reply: Continuation<Pair<Boolean, String>>? = null
-        var refreshes = 0
-        val ethernet = EthernetService(this, CommandRunner { _, _ -> suspendCoroutine { reply = it } },
-            JsonCommandRunner { _, _ -> refreshes++; true to JSONObject() }, { true })
+    @Test(timeout = 5000) fun ethernetLateConfigCannotPublishOrQueryAfterCleanup() = runVirtual {
+        // eth_config answers with its own link state (no chained eth_status any more); a reply that
+        // arrives after Stop must neither map the status nor start another device command.
+        var reply: Continuation<Pair<Boolean, JSONObject?>>? = null
+        var jsonCalls = 0
+        val ethernet = EthernetService(this, CommandRunner { _, _ -> fail("no text command expected"); true to "" },
+            JsonCommandRunner { _, _ -> jsonCalls++; suspendCoroutine { reply = it } }, { true })
         ethernet.configure("fixture"); until { reply != null }
         ethernet.stop()
-        reply!!.resume(true to "configured")
+        reply!!.resume(true to JSONObject().put("ok", true).put("out", "link up")
+            .put("data", JSONObject().put("link", true).put("ip", "10.0.0.2")))
         coroutineContext[Job]!!.children.toList().joinAll()
-        assertEquals(0, refreshes)
+        assertEquals(1, jsonCalls)
+        assertNull(ethernet.status.value)
         assertFalse(ethernet.busy.value)
         assertEquals("Stopped.", ethernet.message.value)
     }

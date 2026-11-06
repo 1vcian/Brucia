@@ -428,4 +428,25 @@ class EspFlasherTest {
         assertTrue(esp.packets.isEmpty())
         assertTrue(esp.lines.isEmpty())
     }
+
+    @Test fun aMismatchedReadBackIsReportedAsAFailedFlashNotAFlashedOne() {
+        val (phase, message) = EspFlasher.Outcome.of(EspFlasher.Verify.MISMATCH)
+        assertEquals("error", phase)
+        assertFalse(message, message.contains("flashed", ignoreCase = true) && !message.contains("failed", ignoreCase = true))
+        assertTrue(message.startsWith("Flash failed verification"))
+        assertEquals("done", EspFlasher.Outcome.of(EspFlasher.Verify.MATCH).first)
+        assertTrue(EspFlasher.Outcome.of(EspFlasher.Verify.MATCH).second.contains("verified"))
+        val unverified = EspFlasher.Outcome.of(EspFlasher.Verify.UNVERIFIED)
+        assertEquals("done", unverified.first)
+        assertTrue(unverified.second.contains("not verified"))
+    }
+
+    @Test fun resetToAppLeavesTheLoaderWithoutWritingAnything() {
+        // Used when an operation rebooted the device into download mode and then failed before
+        // writing (download, integrity or image check): the device must restart its firmware.
+        val esp = FakeEsp()
+        EspFlasher(esp).resetToApp()
+        assertEquals(listOf("dtr=false", "rts=true", "rts=false"), esp.lines)
+        assertTrue(esp.packets.isEmpty())
+    }
 }

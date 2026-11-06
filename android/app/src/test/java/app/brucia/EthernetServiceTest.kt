@@ -44,44 +44,76 @@ class EthernetServiceTest {
         assertEquals("No Ethernet on this device.", s.message.value)
     }
 
-    @Test fun configureBuildsRawArgsAndChainsSingleRefresh() = runVirtual {
-        val s = svc()
-        // Empty args -> bare command; drain its chained refresh.
-        s.configure("")
-        until { runner.calls.size == 1 }
-        assertEquals("eth_config" to 18_000L, runner.calls[0])
-        runner.reply(0, true, "")
-        until { json.calls.size == 1 }
-        json.reply(0, true, statusData(true, "1.1.1.1", "up"))
-        until { !s.busy.value }
-        assertEquals(EthStatus(true, "1.1.1.1", "up"), s.status.value)
-        assertEquals("", s.message.value)
+    /** The shape src/companion/network.cpp ethSendStatus really sends: link state under d.data. */
+    private fun firmwareStatus(ok: Boolean, link: Boolean, ip: String, out: String) = JSONObject()
+        .put("ok", ok).put("out", out)
+        .put("data", JSONObject().put("link", link).put("up", ok).put("ip", ip).put("gw", "0.0.0.0")
+            .put("mask", "0.0.0.0").put("dns", "0.0.0.0").put("mac", "02:00:00:00:00:01"))
 
-        // Raw args passthrough + exactly one chained refresh (no loop).
-        s.configure(" dhcp ")
-        assertEquals("Applying Ethernet config..." to true, s.message.value to s.busy.value)
-        until { runner.calls.size == 2 }
-        assertEquals("eth_config dhcp" to 18_000L, runner.calls[1])
-        runner.reply(1, true, "applied")
-        until { json.calls.size == 2 }
-        assertEquals("Querying Ethernet...", s.message.value)
-        assertEquals("eth_status", json.calls[1].first)
-        json.reply(1, true, statusData(false, "", "no link"))
+    @Test fun refreshReadsTheFirmwareNestedDataObject() = runVirtual {
+        val s = svc()
+        s.refresh()
+        until { json.calls.size == 1 }
+        json.reply(0, true, firmwareStatus(true, true, "192.168.1.20", "link up, ip 192.168.1.20"))
         until { !s.busy.value }
         assertEquals("", s.message.value)
-        assertEquals(EthStatus(false, "", "no link"), s.status.value)
-        assertEquals(2, json.calls.size)
+        assertEquals(EthStatus(true, "192.168.1.20", "link up, ip 192.168.1.20"), s.status.value)
+
+        // Cable in, no DHCP lease: ok=false but the link state is still reported, not a stale one.
+        s.refresh()
+        until { json.calls.size == 2 }
+        json.reply(1, false, firmwareStatus(false, true, "0.0.0.0", "no link / no DHCP lease"))
+        until { !s.busy.value }
+        assertEquals("no link / no DHCP lease", s.message.value)
+        assertEquals(EthStatus(true, "", "no link / no DHCP lease"), s.status.value)
     }
 
-    @Test fun configureFailureShowsErrorAndSkipsRefresh() = runVirtual {
+    @Test fun errMessageIsShownForRefresh() = runVirtual {
+        val s = svc()
+        s.refresh()
+        until { json.calls.size == 1 }
+        json.reply(0, false, JSONObject().put("code", 400).put("msg", "W5500 busy"))
+        until { !s.busy.value }
+        assertEquals("W5500 busy", s.message.value)
+        assertNull(s.status.value)
+    }
+
+    @Test fun configureMapsItsOwnAckWithoutAFollowUpRefresh() = runVirtual {
+        val s = svc()
+        // Blank means DHCP: the firmware only handles "eth_config <dhcp|static ...>"; a bare
+        // "eth_config" fell through to the Bruce CLI and showed "No Ethernet on this device.".
+        s.configure("")
+        assertEquals("Applying Ethernet config..." to true, s.message.value to s.busy.value)
+        until { json.calls.size == 1 }
+        assertEquals("eth_config dhcp" to 18_000L, json.calls[0])
+        json.reply(0, true, firmwareStatus(true, true, "10.0.0.7", "link up, ip 10.0.0.7"))
+        until { !s.busy.value }
+        assertEquals("link up, ip 10.0.0.7", s.message.value)
+        assertEquals(EthStatus(true, "10.0.0.7", "link up, ip 10.0.0.7"), s.status.value)
+
+        // A static config reports the static address from its own ACK. A chained eth_status would
+        // bring the W5500 up afresh on DHCP and hide it.
+        s.configure(" static 192.168.5.9 192.168.5.1 255.255.255.0 ")
+        until { json.calls.size == 2 }
+        assertEquals("eth_config static 192.168.5.9 192.168.5.1 255.255.255.0", json.calls[1].first)
+        json.reply(1, true, firmwareStatus(true, true, "192.168.5.9", "link up, ip 192.168.5.9"))
+        until { !s.busy.value }
+        assertEquals(EthStatus(true, "192.168.5.9", "link up, ip 192.168.5.9"), s.status.value)
+        delay(20)
+        assertEquals(2, json.calls.size)
+        assertTrue(runner.calls.isEmpty())
+    }
+
+    @Test fun configureFailureShowsTheDeviceText() = runVirtual {
         val s = svc()
         s.configure("static 1.2.3.4")
-        until { runner.calls.size == 1 }
-        runner.reply(0, false, "bad")
+        until { json.calls.size == 1 }
+        json.reply(0, false, JSONObject().put("code", 400).put("msg", "usage: eth_config static <ip> <gw> <mask> [dns]"))
         until { !s.busy.value }
-        assertEquals("bad", s.message.value)
+        assertEquals("usage: eth_config static <ip> <gw> <mask> [dns]", s.message.value)
+        assertNull(s.status.value)
         delay(20)
-        assertTrue(json.calls.isEmpty())
+        assertEquals(1, json.calls.size)
     }
 
     @Test fun dhcpStarveAndMacFloodTextsCommandsAndTimeouts() = runVirtual {

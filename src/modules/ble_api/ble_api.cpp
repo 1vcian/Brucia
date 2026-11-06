@@ -20,6 +20,8 @@ public:
 };
 
 void BLE_API::setup() {
+    // Kept as "Bruce"/"Bruc" on purpose: this is the BLE API used by Bruce's official app,
+    // which may look the device up by these names (protocol compatibility, not branding).
     NimBLEDevice::init("Bruce");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // 9 dBm, tweak if you want
 

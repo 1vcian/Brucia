@@ -8,6 +8,8 @@ import sys
 import tempfile
 import unittest
 
+import brand
+
 ROOT = Path(__file__).resolve().parents[1]
 SHIM = r'''
 import json, os, sys
@@ -53,7 +55,8 @@ class ReleaseTest(unittest.TestCase):
         for tool in ('git', 'pio', 'gh'):
             self.executable(self.repo / 'bin' / tool)
         self.executable(self.repo / 'android/gradlew')
-        for tool in ('build_firmware.py', 'check_flash_budget.py'):
+        shutil.copy2(ROOT / 'brand.json', self.repo / 'brand.json')
+        for tool in ('build_firmware.py', 'check_flash_budget.py', 'brand.py'):
             shutil.copy2(ROOT / 'tools' / tool, self.repo / 'tools' / tool)
         (self.repo / 'tools/test_site_release.cjs').write_text('// standalone website tests run separately\n')
         for script in ('test_firmware_codec.py', 'test_firmware_storage.py', 'test_firmware_framing.py', 'test_protocol_e2e.py', 'test_audio_noise_bounds.py'):
@@ -118,9 +121,24 @@ class ReleaseTest(unittest.TestCase):
         add = next(c for c in calls if c[:2] == ['git', 'add'])
         self.assertEqual(['git', 'add', '--', 'VERSION', 'docs/manifest.json',
                           'docs/firmware/brucia-t-embed-cc1101.bin'], add)
-        self.assertIn(['git', 'push', '--atomic', 'brucia-dev', 'main', 'v0.1.1'], calls)
+        target = brand.derive(brand.load(ROOT))
+        self.assertIn(['git', 'push', '--atomic', target['release_remote'], 'main', 'v0.1.1'], calls)
         release = next(c for c in calls if c[:3] == ['gh', 'release', 'create'])
+        self.assertEqual(['-R', target['repo_slug']], release[4:6])
         self.assertIn('Fix one\nFix two', release[-1])
+
+    def test_release_target_follows_brand_json_after_launch_switch(self):
+        (self.repo / 'android/keystore.properties').write_text('# simulated signing config')
+        launched = brand.apply_launch(brand.load(ROOT))
+        (self.repo / 'brand.json').write_text(json.dumps(launched))
+        result = self.run_release()
+        self.assertEqual(0, result.returncode, result.stderr)
+        target = brand.derive(launched)
+        calls = self.calls()
+        self.assertIn(['git', 'push', '--atomic', target['release_remote'], 'main', 'v0.1.1'], calls)
+        release = next(c for c in calls if c[:3] == ['gh', 'release', 'create'])
+        self.assertEqual(['-R', target['repo_slug']], release[4:6])
+        self.assertIn(target['repo_slug'], result.stdout)
 
 
 if __name__ == '__main__':

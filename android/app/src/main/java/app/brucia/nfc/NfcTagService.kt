@@ -34,6 +34,7 @@ class NfcTagService(
 
     fun info() = run(INFO)
 
+    /** WRITES an NDEF URL record (the firmware default: the Brucia project URL) onto the tag; not a read. */
     fun ndef() = run(NDEF)
 
     /** Cancel the pending command; its late reply is ignored. */

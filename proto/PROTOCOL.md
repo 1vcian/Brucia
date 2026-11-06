@@ -363,7 +363,11 @@ and reply shape; everything else is "whatever the CLI prints".
 
 `scr`/`led` state auto-restores (screen/LED back on) if the phone goes
 silent for more than 15s, and always on leaving companion mode, so the device
-never gets stuck dark if the app disconnects mid-session.
+never gets stuck dark if the app disconnects mid-session. After 60 s without a
+frame the device leaves companion mode. Both silences are measured from the end of
+handling the last frame, so a bounded command that blocks for about a minute
+(NDEF push / emulate, TV-B-Gone) does not trip them before the PINGs queued
+meanwhile are read.
 
 #### Device appearance and lite-control state in `CAPS` (additive)
 
@@ -489,13 +493,20 @@ CLI command into the module code it calls):
 | `webui -noAp` with no Wi-Fi | the network menu | `ok:false`, connect first with `wifi_connect`; `webui` (AP) and `webui -noAp` with Wi-Fi still run until ESC at the device, as before |
 | `decrypt` / `crypto decrypt_from_file` / `crypto type_from_file` with an empty password | the password keyboard | `ok:false`, `a password is required in companion mode (no keyboard prompt)` |
 | `js <file>` / `js run_from_file <file>` | the main loop to bring the script to the foreground (it never does in companion mode; later `script_run`s answered `interpreter busy`) | `ok:false`, `js is not available in companion mode (use script_run)`; `js exit` unchanged |
-| `badusb run_from_file` (USB-HID boards), `ble_badble` payloads | `WAIT_FOR_BUTTON_PRESS` in the payload | the payload stops there (`WAIT_FOR_BUTTON_PRESS: payload stopped, ...`) |
+| `badusb run_from_file` / `run_from_buffer` | a USB HID host on the port that is the app link (`while (!tud_mounted())`) | `ok:false`, `badusb is not available in companion mode (the USB port is the app link; use BadBLE)` |
+| `ble_badble` payloads | `WAIT_FOR_BUTTON_PRESS` in the payload | the payload stops there (`WAIT_FOR_BUTTON_PRESS: payload stopped, ...`) |
+| IR transmit (`ir tx`, `ir tx_raw`, `ir tx_from_file`, `IRSend`, `ir_tvbgone`, `ir_tx_raw`, `ir_jammer`) with the IR TX pin outside the board's IR TX pin list | the pin menu | `ok:false`, `IR TX pin not configured`; nothing is transmitted |
+| `nfc_emv_read` with no card | ESC at the device | gives up after 20 s (`ok:false`, `no EMV card present`); a `stop` ends it earlier |
+| `lora_recv <secs>` | the listen window (up to 120 s) | PING answered; a `stop` ends it early (`received <n> packet(s) (stopped)`) |
 | `settings` (no arguments) | nothing; it wrote the JSON straight onto the frame stream | the JSON goes into `ACK.d.out` (cut at 3500 bytes); pin setters no longer dump the pins file onto the link either |
 
 Unchanged on purpose: `webui`, `sniffer` and `sleep` / `power sleep` run until a key at the device
 (the app's console and Sleep button) and are refused only inside a companion script; menus they
 show appear after a person pressed a key. `subghz rx` / `rf scan` end on their own timeout or step
-count, `ir tx_from_file` pauses only when SEL is pressed, `rfid emulate` on a PN532 runs up to 60 s.
+count (the single-code `subghz tx` / `txp` / `keeloqtx` and `RfSend` reject a malformed or
+out-of-range number with `ok:false` and a reason naming the argument instead of aborting:
+frequency is a whole decimal uint32, `bits` 1..64, `te` 0..65535 µs, count/repeat 0..1000,
+KeeLoq button 0..15, serial up to 28 bits hex, counter 0..65535), `ir tx_from_file` pauses only when SEL is pressed, `rfid emulate` on a PN532 runs up to 60 s.
 
 Outside companion mode none of this applies: Bruce's console, `serial.readln` and the CLI behave
 as upstream.
@@ -807,6 +818,17 @@ A stream is a named channel the phone turns on/off with
 `subghz.spectrum` replies `ERR {code:503}` when the radio or RMT receiver cannot
 be initialized; the stream then stays off. A `subghz.spectrum` start with invalid
 sweep parameters replies `ERR {code:400}` and changes no stream (see below).
+Starting `ble.scan` replies `ERR {code:409}` while a BLE HID session (`ble_hid_begin`)
+owns the stack and `ERR {code:503}` when BLE cannot be initialized; the stream then
+stays off.
+
+**One CC1101 owner.** While `subghz.raw` or `subghz.spectrum` runs, a command that drives
+the CC1101 itself (every `subghz_*` command, `RfSend`, and the CLI `rf`/`subghz` verbs
+`rx`, `tx`, `txp`, `scan`, `tx_from_file`, `tx_from_buffer`, `keeloqtx`) replies
+`ERR {code:409, msg:"sub-ghz receiver busy (stop Listen/Spectrum first)"}` instead of
+re-initializing and then idling the radio under the running stream. `rf/subghz mfcodes`
+(file only) is unaffected. Likewise `ble_media` replies `ERR {code:409}` while
+`ble.scan` runs.
 
 - **Structured streams** deliver `EVENT {ev: "<name>", data: {...}}` messages
   (`id` is always 0 — these are unsolicited).

@@ -23,6 +23,9 @@ class BurstLoopRegistry {
         loops += loop
     }
 
+    /** True while any registered loop runs. */
+    val anyActive: Boolean get() = loops.any { it.active.value }
+
     /** Stop every registered loop; [silent] keeps each status line (see [BurstLoop.stop]). */
     fun stopAll(silent: Boolean) {
         loops.forEach { it.stop(silent) }
@@ -72,6 +75,9 @@ class BurstLoop(
      * as status, or [FAILED] when blank. When the loop ends under its own ownership (link closed,
      * rejection or cancellation), [active] clears, [status] becomes [stoppedText] if it still
      * equals [running], and [onEnd] runs (not after [stop], whose caller owns that cleanup).
+     * [progress], when given, maps each successful burst reply to a new running text (null keeps
+     * the current one); it applies only while this run owns the loop and replaces the status only
+     * while the previous running text still shows, so Stop and a rejection behave as before.
      */
     fun start(
         running: String,
@@ -79,6 +85,7 @@ class BurstLoop(
         timeoutMs: Long,
         stoppedText: String = STOPPED,
         onEnd: () -> Unit = {},
+        progress: ((String) -> String?)? = null,
     ) {
         synchronized(lock) {
             stop(silent = true)
@@ -106,6 +113,7 @@ class BurstLoop(
                             break
                         }
                         if (!ok) { rejection = out.ifBlank { FAILED }; break }
+                        progress?.invoke(out)?.let { advance(myJob, it) }
                     }
                 } finally {
                     finish(myJob, rejection)
@@ -135,6 +143,15 @@ class BurstLoop(
     /** Show a local [text] (no command): the caller's own line when it rejects before [start]. */
     fun show(text: String) {
         synchronized(lock) { _status.value = text }
+    }
+
+    /** Replace the running text after a successful burst, only while [myJob] still owns the loop. */
+    private fun advance(myJob: Job?, text: String) {
+        synchronized(lock) {
+            if (job !== myJob || !_active.value) return
+            if (_status.value == runningText) _status.value = text
+            runningText = text
+        }
     }
 
     /** Apply the end state only while [myJob] still owns the loop (a restart supersedes it). */

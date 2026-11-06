@@ -20,7 +20,8 @@ import androidx.core.net.toUri
  */
 object AppUpdater {
 
-    const val RELEASES_API = "https://api.github.com/repos/1vcian/BruciaDev/releases/latest"
+    /** From brand.json via [app.brucia.BrandLinks]; see docs/LAUNCH.md for the repository rename. */
+    val RELEASES_API: String = app.brucia.BrandLinks.RELEASES_API
 
     private const val FILEPROVIDER_AUTHORITY = "app.brucia.fileprovider"
     private const val APK_MIME = "application/vnd.android.package-archive"
@@ -64,9 +65,36 @@ object AppUpdater {
     fun supportsInAppFirmware(board: String): Boolean = board.lowercase().let { "t-embed" in it && "cc1101" in it }
 
     /**
-     * Stream the APK to the external files cache (covered by the FileProvider paths),
-     * following redirects. The file is promoted only after [integrity] (release size and
-     * SHA-256, when published) matches; otherwise [IntegrityException] and no APK is left.
+     * Where the verified APK waits for the installer: app-private cache (FileProvider `cache-path`),
+     * which no other app can write on any Android version. It used to be the external files dir,
+     * which apps holding the storage permission could replace on Android 8-10 between the
+     * SHA-256 check and the installer reading it.
+     */
+    fun apkDir(ctx: Context): File = File(ctx.cacheDir, "update")
+
+    /** Earlier download locations, cleaned like [apkDir]. */
+    fun legacyApkDirs(ctx: Context): List<File> = listOfNotNull(ctx.getExternalFilesDir(null), ctx.filesDir).map { File(it, "cache") }
+
+    /**
+     * Delete update downloads left behind (the APK after the installer took it, or a `.part` of an
+     * interrupted download) that are older than [minAgeMs], so an installer still reading a fresh
+     * file is never disturbed. Returns how many files were deleted; never throws.
+     */
+    fun cleanupStaleDownloads(dirs: List<File>, nowMs: Long, minAgeMs: Long = STALE_DOWNLOAD_MS): Int = dirs.sumOf { dir ->
+        try {
+            dir.listFiles { f ->
+                f.isFile && (f.name == APK_FILE || (f.name.startsWith("brucia-update-") && f.name.endsWith(".part"))) &&
+                    nowMs - f.lastModified() >= minAgeMs
+            }.orEmpty().count { it.delete() }
+        } catch (_: Exception) { 0 }
+    }
+
+    const val STALE_DOWNLOAD_MS = 30L * 60 * 1000
+
+    /**
+     * Stream the APK to [apkDir] (covered by the FileProvider paths), following redirects. The
+     * file is promoted only after [integrity] (release size and SHA-256, when published) matches;
+     * otherwise [IntegrityException] and no APK is left.
      */
     fun download(
         ctx: Context,
@@ -75,7 +103,7 @@ object AppUpdater {
         onProgress: (downloaded: Long, total: Long) -> Unit,
         isCancelled: () -> Boolean = { false },
     ): File = DownloadIO.downloadFile(
-        File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "cache"), APK_FILE, ReleaseCatalog.APK_MAX_BYTES,
+        apkDir(ctx), APK_FILE, ReleaseCatalog.APK_MAX_BYTES,
         integrity, { openWithRedirects(URL(url)) }, isCancelled, onProgress,
     )
 

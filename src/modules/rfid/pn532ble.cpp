@@ -1,5 +1,6 @@
 #ifndef LITE_VERSION
 #include "pn532ble.h"
+#include <brucia_identity.h>
 #include "apdu.h"
 #include "core/display.h"
 #include "core/mykeyboard.h"
@@ -199,7 +200,7 @@ void Pn532ble::loadNdefEmulateMenu() {
     String prefix = "";
 
     options = {
-        {"Visit Bruce", [&]() { prefix = "https://bruce.computer"; }},
+        {"Visit " BRUCIA_NAME, [&]() { prefix = BRUCIA_SITE_URL; }},
         {"Open Url",    [&]() { prefix = "https://"; }              },
         {"Phone Call",  [&]() { prefix = "tel:"; }                  },
         {"Send Email",  [&]() { prefix = "mailto:"; }               },
