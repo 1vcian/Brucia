@@ -28,6 +28,9 @@ that offloads computation to the phone. Format loosely follows
 - App Store: the menu entry is now "Install Bruce App Store" and shows, before installing, that it
   is the Bruce community store on a third-party host whose apps download over plain HTTP. The
   store address is now set in `brand.json` like the other links.
+- App Store installer: the download is now verified against pinned root certificates (it used to
+  accept any server), and the script is installed only when it arrived complete and was fully
+  written; an interrupted download or full storage shows an error and keeps any previous install.
 
 - New IR power spam (authorized use only): `ir_power_spam` blasts the power-off codes for TVs,
   projectors, audio and more - both regions (NA + EU) and the universal parsed + raw tables - and

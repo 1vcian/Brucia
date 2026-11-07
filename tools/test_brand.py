@@ -227,7 +227,7 @@ class FirmwareMacroTest(unittest.TestCase):
         # The Bruce community store host is third-party; its URL lives in brand.json only.
         host = brand.load()["upstream"]["app_store_url"].split("/")[2]
         settings = (ROOT / "src/core/settings.cpp").read_text()
-        self.assertIn("http.begin(BRUCIA_UPSTREAM_APP_STORE_URL)", settings)
+        self.assertIn("http.begin(tls, BRUCIA_UPSTREAM_APP_STORE_URL)", settings)
         hits = [str(p.relative_to(ROOT)) for p in (ROOT / "src").rglob("*")
                 if p.is_file() and host in p.read_text(errors="ignore")]
         self.assertEqual([], hits)

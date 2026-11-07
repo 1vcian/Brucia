@@ -1694,9 +1694,67 @@ bool appStoreInstalled() {
     return fs->exists("/BruceJS/Tools/App Store.js");
 }
 
+#include "app_store_install.h"
+#include "app_store_roots.h"
 #include <HTTPClient.h>
+#include <NetworkClientSecure.h>
+
+namespace {
+/** Response body over the authenticated stream; idle-bounded so a stalled server cannot hang the UI. */
+struct HttpBody : app_store::Body {
+    HTTPClient &http;
+    NetworkClient *stream;
+    explicit HttpBody(HTTPClient &h) : http(h), stream(h.getStreamPtr()) {}
+    long length() override { return http.getSize(); }
+    long read(uint8_t *buf, size_t cap) override {
+        if (!stream) return -1;
+        const uint32_t start = millis();
+        while (millis() - start < 10000) {
+            const int avail = stream->available();
+            if (avail > 0) {
+                const int n = stream->read(buf, cap < (size_t)avail ? cap : (size_t)avail);
+                return n > 0 ? n : -1;
+            }
+            if (!stream->connected()) return 0;
+            delay(5);
+        }
+        return -1;
+    }
+};
+
+struct FsFiles : app_store::Files {
+    FS &fs;
+    File file;
+    explicit FsFiles(FS &f) : fs(f) {}
+    bool exists(const std::string &p) override { return fs.exists(p.c_str()); }
+    bool remove(const std::string &p) override { return fs.remove(p.c_str()); }
+    bool rename(const std::string &a, const std::string &b) override { return fs.rename(a.c_str(), b.c_str()); }
+    bool beginWrite(const std::string &p) override {
+        file = fs.open(p.c_str(), FILE_WRITE);
+        return (bool)file;
+    }
+    size_t write(const uint8_t *d, size_t n) override { return file ? file.write(d, n) : 0; }
+    bool endWrite() override {
+        if (!file) return false;
+        file.flush();
+        const bool ok = !file.getWriteError();
+        file.close();
+        return ok;
+    }
+    long size(const std::string &p) override {
+        File f = fs.open(p.c_str(), FILE_READ);
+        if (!f) return -1;
+        const long n = (long)f.size();
+        f.close();
+        return n;
+    }
+};
+} // namespace
+
 // Installs the Bruce community App Store script (third-party host, BRUCIA_UPSTREAM_APP_STORE_URL in
 // brand.json). Brucia has no store of its own; the Bruce JS apps run unchanged on the same interpreter.
+// The bootstrap download is authenticated against the pinned roots and installed only when complete
+// (F35); the store script's own catalog/app downloads are plain HTTP and are not covered by this.
 void installAppStoreJS() {
     displayInfo("Bruce community App Store: third-party host, apps download over plain HTTP", true);
 
@@ -1726,23 +1784,33 @@ void installAppStoreJS() {
         }
     }
 
+    NetworkClientSecure tls;
+    tls.setCACert(BRUCIA_APP_STORE_ROOTS); // never setInsecure(): an untrusted certificate fails the connect
     HTTPClient http;
-    http.begin(BRUCIA_UPSTREAM_APP_STORE_URL);
-    int httpCode = http.GET();
-    if (httpCode != 200) {
-        http.end();
+    http.useHTTP10(true); // no chunked encoding: the body is the script itself, sized by Content-Length
+    if (!http.begin(tls, BRUCIA_UPSTREAM_APP_STORE_URL)) {
         displayWarning("Failed to download Bruce App Store", true);
         return;
     }
-
-    File file = fs->open("/BruceJS/Tools/App Store.js", FILE_WRITE);
-    if (!file) {
-        displayWarning("Failed to save App Store", true);
+    const int httpCode = http.GET();
+    if (httpCode != 200) {
+        http.end();
+        displayWarning(
+            httpCode < 0 ? String("App Store: secure connection failed (untrusted certificate or network)")
+                         : String("App Store: server replied HTTP ") + httpCode,
+            true
+        );
         return;
     }
-    file.print(http.getString());
+
+    HttpBody body(http);
+    FsFiles files(*fs);
+    const std::string err = app_store::install(body, files, "/BruceJS/Tools/App Store.js");
     http.end();
-    file.close();
+    if (!err.empty()) {
+        displayWarning(String("App Store not installed: ") + err.c_str(), true);
+        return;
+    }
 
     displaySuccess("Bruce App Store installed", true);
     displaySuccess("Goto JS Interpreter -> Tools -> App Store", true);

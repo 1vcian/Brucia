@@ -4,6 +4,51 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## F35 App Store installer: authenticated, checked install — 2026-11-07
+
+Tree: HEAD `43f2972d` (v0.1.8) plus uncommitted F35 changes (`src/core/app_store_install.*`,
+`src/core/app_store_roots.h`, `installAppStoreJS` in `settings.cpp`, tests). Not released.
+
+**1. Compilation and host tests (PASS)**
+
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **312 OK, 1 skipped** (the live
+  network test, skipped without its env var).
+- `BRUCIA_NET_TESTS=1 ... -p 'test_app_store_install.py'`: **6 OK**. Live: the store host
+  validates against the 9 pinned roots only; `self-signed`, `expired`, `wrong.host` and
+  `untrusted-root` badssl hosts are rejected. Python ssl, not mbedtls on the device.
+- Host-compiled `app_store::install` harness: interrupted stream, read timeout, no
+  Content-Length, empty, blank, oversized (refused before reading), HTML page, storage
+  full mid-write and at 0 bytes, flush failure, size re-read mismatch, final-rename failure,
+  failure to move the previous install aside, stale staging, backup restore after a crash
+  between renames. Each with and without a previous install: no success, no staging left,
+  previous install unchanged. Mutation check: treating an early end of stream as complete
+  fails the harness.
+- `pio run -e lilygo-t-embed-cc1101 -e m5stack-cardputer`: **SUCCESS**. T-Embed app slot
+  4,343,904 / 4,653,056 B (93.36%, warning threshold 92%; +16 KB for roots and installer).
+
+**2. Flash: NOT RUN.** The T-Embed was not enumerated (no `/dev/cu.usbmodem*`); the upload
+attempt failed at port open, nothing was written and no log file was created.
+
+**3. Hardware: NOT RUN.** Owed: install over Wi-Fi succeeds through mbedtls with the
+pinned roots; the store opens from JS Interpreter -> Tools; Wi-Fi drop mid-download shows
+the error and leaves no new install; an existing install survives a failed update.
+
+## Release v0.1.8 — publication review 2026-11-07
+
+HEAD `43f2972d`, following `85cf0d30` (F32/F34) and `a21a3965` (store branding).
+GitHub API independently confirms v0.1.8 published at 2026-11-06 23:27:53 UTC,
+not draft/prerelease, with uploaded `Brucia-0.1.8.apk` (19,015,839 B) and
+`brucia-t-embed-cc1101.bin` (4,393,072 B). This review inspected metadata, not
+downloaded artifact contents. Local `hw-acceptance-reports/release-0.1.8.log`
+records successful checks/builds, signed APK packaging and publication.
+App partition usage: 4,327,536 / 4,653,056 B (93.00%, 325,520 B free);
+warning threshold 92%, failure threshold 98%. This is the app slot, not total flash.
+
+v0.1.8 flash and phone/device acceptance: **NOT RUN**. Historical d2e24911
+flash/boot evidence below does not verify the released pair. F32/F34 phone checks,
+IR/NRF24 stop behavior, FM ownership, store installation and F23 under real radio
+EVENT traffic remain open. No flash, script execution, commit or release by this reviewer.
+
 ## App Store source (Bruce community store) — 2026-11-07
 
 Finding: "Install App Store" downloads `App Store.js` from the Bruce community store
@@ -23,6 +68,19 @@ the plain-HTTP downloads.
 - Flash: NOT RUN for this change (the 2026-11-07 flash below is d2e24911 firmware).
 - Hardware: NOT RUN. Owed: menu label, notice, install over Wi-Fi, store opens from
   JS Interpreter -> Tools.
+
+Independent source review (F35, OPEN): `installAppStoreJS` uses `HTTPClient.begin(url)`
+without a CA. In the installed Arduino core's `HTTPClient.cpp`, `begin(String)`
+delegates HTTPS to `begin(url, nullptr)` (lines 212–228), and `TLSTraits::verify`
+calls `setInsecure()` for a null CA (lines 61–65): the bootstrap's HTTPS URL does
+not authenticate the server. This is a local driver/source finding, not a live TLS test.
+The installer writes directly to the final path and ignores `file.print`'s returned
+count; `getString()` also ignores `writeToStream`'s error. Success is shown regardless
+of completeness, and installed state is only file existence. These inherited defects
+need installer fixes and fault tests (invalid certificate, interrupted/empty/oversized
+download, full storage/short write, preservation of an existing install).
+The notice alone does not supply integrity. This review did not retrieve/execute
+the remote script; its catalog/app behavior above is the previous auditor's evidence.
 
 ## F32 LoRa teardown + F34 Remote watchdog fixes, reflash — 2026-11-07
 

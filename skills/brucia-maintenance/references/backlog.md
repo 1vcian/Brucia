@@ -1,16 +1,18 @@
 # Work queue — single operational ledger
 
-Updated 2026-11-07. `VERSION` is 0.1.7; local HEAD is `d2e24911` plus uncommitted F32
-LoRa-teardown and F34 Remote-watchdog fixes (host-tested, 1120 Kotlin tests). The
+Updated 2026-11-07. `VERSION` is 0.1.8; local HEAD is release commit `43f2972d`.
+F32 LoRa-teardown and F34 Remote-watchdog fixes were committed in `85cf0d30`;
+store branding followed in `a21a3965`. GitHub v0.1.8 is published with APK and
+T-Embed firmware assets (API verified 2026-11-07). This does not close physical acceptance. The
 d2e24911 firmware was reflashed successfully on the T-Embed (`/dev/cu.usbmodem2101`,
 MAC 8c:bf:ea:8a:a4:78, hash verified, boot to main menu; full log in
-hw-acceptance-reports/). Phone/device acceptance of F32/F34 is NOT RUN; no release.
+hw-acceptance-reports/). Phone/device acceptance of F32/F34 is NOT RUN; v0.1.8 flash is NOT RUN.
 F23 under actual radio-EVENT traffic remains open.
 See [TESTS.md](../../../TESTS.md) for evidence and limits.
 Independent review 2026-11-07 accepts the two software corrections: 46 targeted
 tests rerun successfully, plus the held-dispatcher LoRa teardown probe. Upload log
-and artifact hashes verified; no new hardware acceptance claimed. Include both
-new RemoteRun files when committing; phone checks remain separate release gates.
+and artifact hashes verified; no new hardware acceptance claimed. RemoteRun files
+are committed; phone checks remain open despite publication.
 
 Status vocabulary: OPEN, IN_PROGRESS, BLOCKED, DONE; worker packets also use PREPARED/HOLD. DONE needs a test/result;
 record unavailable devices, missing schemas and environment restrictions explicitly.
@@ -92,8 +94,39 @@ acceptance runner; a human must confirm it switches a permitted display.
 
 **A. Software defects still to fix (host/JVM-testable, no device needed):**
 F32 LoRa disconnect cleanup and F34 Remote failed-start cleanup are fixed with host
-regressions (2026-11-07). Release stays gated on the phone checks for both and the
-other open device checks; host results do not open the gate.
+regressions (2026-11-07). v0.1.8 was published before phone acceptance; these and
+other open device checks remain unverified. Host results do not close them.
+
+- **P1 F35 OPEN — App Store installer trust and incomplete-file handling.**
+  `src/core/settings.cpp:1730` calls `HTTPClient.begin(url)` without a CA; the installed
+  Arduino core delegates HTTPS to a null-CA transport and calls `setInsecure()`.
+  Thus bootstrap HTTPS does not authenticate the server. The installer also writes
+  directly to the final JS path, ignores the `file.print` result, and reports success;
+  `appStoreInstalled()` checks existence only. `getString()` ignores its underlying
+  transfer error, so interrupted transfers/storage-full can leave an incomplete file
+  advertised as installed. These pre-existing integration defects are not fixed by
+  the new notice. Next: authenticated bootstrap and an explicit integrity policy;
+  bounded, checked download to staging with failure cleanup/preservation of any
+  previous installation. Test invalid certificates, truncated/empty/oversized
+  responses and short/full-storage writes; no success or new installed marker on failure.
+  Downstream plain-HTTP catalog/apps remain a separate trust problem in the third-party
+  script. Source review only; no script executed or hardware/network fault injected.
+  **FIXED (HOST) 2026-11-07, uncommitted; device install NOT RUN.** `installAppStoreJS`
+  now uses `NetworkClientSecure.setCACert(BRUCIA_APP_STORE_ROOTS)` (`src/core/app_store_roots.h`:
+  GTS R1-R4, GlobalSign Root CA, ISRG X1/X2, SSL.com ECC/RSA; the host is behind Cloudflare,
+  which rotates between these CAs) and `http.begin(tls, url)`; no `setInsecure()` call remains.
+  Integrity policy: authenticated TLS + exact Content-Length (HTTP/1.0, no chunking; missing
+  length refused), 64 KiB bound, HTML/blank body refused. Portable `app_store::install` stages
+  to `<dest>.part`, checks every write, flush and the re-read size, then replaces via
+  `<dest>.bak` with rollback; a leftover backup is restored first. Failure never shows success
+  and keeps an existing install. Tests: `tools/test_app_store_install.py` (host-compiled
+  core: interrupted/timeout/unsized/empty/blank/oversized/HTML, full storage, flush/size/rename
+  failures, with and without a previous install; mutation-checked), adapter source checks,
+  pinned-root fingerprints, untrusted local TLS server rejected; live (`BRUCIA_NET_TESTS=1`)
+  store host accepted and badssl self-signed/expired/wrong-host/untrusted-root rejected.
+  These TLS checks use Python ssl, not mbedtls. Owed on device: install over Wi-Fi succeeds,
+  store opens; a pulled Wi-Fi/unplug mid-download leaves no new install. Downstream
+  plain-HTTP catalog/apps still OPEN (separate item).
 
 1. ~~P1 DT01~~ DONE 2026-11-06: decision taken (authorized) to keep the recovered key unmasked in reports/exports; comments + tests pin it. See the DT01 row above.
 2. ~~P1 NRF24 app-stop responsiveness~~ DONE (sw) 2026-11-06: scan/sniff loops poll `companionPollStop()`; jammer/MouseJack get an optional abort callback in the Bruce modules (`nrf_jammer_headless`, `nrf_mousejack_headless`; a stopped MouseJack never injects); ACK text says `(stopped)`; idle `nrf24_stop` answers "not running". App: NRF24 `BurstLoop`s send `nrf24_stop` on Stop and wait for the burst reply (`draining`), scan/sniff never run two windows at once, Stop all ends them in its first phase. Tests: `test_radio_guards.py` (poll + mock idle stop), `test_companion_dispatch_stops.py`, `BurstLoopTest`. Firmware builds T-Embed CC1101 + Cardputer. Open: device check (C8). Jammer/MouseJack can still overlap a scan/sniff (the second gets 409).
