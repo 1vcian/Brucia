@@ -106,6 +106,8 @@ data class DeviceFeatures(
     // (literal `features.capture_descriptor`); the capture workflow imports exactly that path and
     // verifies size/CRC after transfer instead of diffing directory listings.
     val captureDescriptor: Boolean = false,
+    // script_run_file <path>: run a stored .js/.bjs or compiled .bin (literal `features.script_run_file`).
+    val scriptRunFile: Boolean = false,
     val omitted: Set<String> = emptySet(),
 ) {
     /** True only when the firmware reported [group] as compiled out (literal `false`). */
@@ -123,6 +125,7 @@ data class DeviceFeatures(
             obj?.opt("transactional_uploads") == true, obj?.opt("speaker_play_async") == true,
             obj?.opt("mifare_keycheck_stop") == true, obj?.opt("diag") == true,
             obj?.opt("capture_descriptor") == true,
+            obj?.opt("script_run_file") == true,
             OMITTABLE.filter { obj?.opt(it) == false }.toSet())
     }
 }

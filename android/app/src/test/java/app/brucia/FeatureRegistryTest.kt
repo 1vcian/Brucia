@@ -105,7 +105,7 @@ class FeatureRegistryTest {
     @Test fun builtinRegistryHasExpectedShape() {
         val reg = BuiltinFeatures.registry
         assertEquals(11, reg.categories.size)
-        assertEquals(50, reg.features.size)
+        assertEquals(52, reg.features.size)
         // Mixed tools remain reachable: actual capture/playback operations own their gates.
         for (tab in listOf(7, 27, 28)) assertNull(reg.byTabId(tab)?.cap)
         // Null cap keeps its meaning (ESP-NOW is always available).
@@ -116,7 +116,15 @@ class FeatureRegistryTest {
         assertSame(wardrive, reg.byId("org.brucia.wifi.wardrive"))
         // First and last in navigation order.
         assertEquals("Wardrive", reg.features.first().title)
-        assertEquals("Utilities", reg.features.last().title)
+        assertEquals("BLE console", reg.features.last().title)
+        // BLE console: phone-side Bluetooth, no device capability gate (the device's BLE API is optional).
+        assertEquals("org.brucia.tools.bleconsole", reg.byTabId(52)?.id)
+        assertNull(reg.byTabId(52)?.cap)
+        // IR power spam is reachable from the Spam category too (same run as the IR screen).
+        val spamIr = reg.byTabId(53)!!
+        assertEquals("org.brucia.spam.spamir", spamIr.id)
+        assertEquals("ir", spamIr.cap)
+        assertTrue(reg.categories.first { it.name == "Spam" }.features.contains(spamIr))
     }
 
     private fun assertThrows(block: () -> Unit): FeatureRegistryException {

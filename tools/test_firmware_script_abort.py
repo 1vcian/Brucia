@@ -354,9 +354,16 @@ class ScriptAbortWiring(unittest.TestCase):
 
     def test_script_run(self):
         sysc = code("src/companion/system.cpp")
-        run = body_of(sysc, "static void runScriptRun(const String &src, uint32_t id)")
+        # script_run and script_run_file share one driver (runHeadlessScript); each refuses a busy
+        # interpreter before handing it a script.
+        run = body_of(sysc, "template <typename Start> static void runHeadlessScript(uint32_t id, Start start)")
+        for entry, start in (("static void runScriptRun(const String &src, uint32_t id)", "run_bjs_script_headless(code)"),
+                             ("static void runScriptRunFile(const String &arg, uint32_t id)", "run_bjs_script_headless(*fs, path)")):
+            e = body_of(sysc, entry)
+            self.assertLess(e.index("scriptInterpreterBusy(id)"), e.index("runHeadlessScript(id,"), entry)
+            self.assertIn(start, e)
         self.assertNotIn("while (interpreter_state == 1", run)
-        self.assertLess(run.index("run_bjs_script_headless(code)"), run.index("interpreter_state = 2;"))
+        self.assertLess(run.index("if (!start())"), run.index("interpreter_state = 2;"))
         self.assertIn("BjsRunWatch watch(g_bjsDeadlineMs, started + 20000);", run)
         self.assertIn("running && companionPollStop()", run)
         self.assertIn("if (watch.abortRequested) g_bjsAbort = true;", run)
@@ -378,7 +385,8 @@ class ScriptAbortWiring(unittest.TestCase):
         self.assertLess(threw, run.index("companionAckMsg(id, true, captured.c_str());"))
         # The busy refusal checks both the state and the task handle, and the reply goes out only
         # after the wait loop (a stopped run answers once the task has ended or the wall clock ran out).
-        self.assertIn("if (interpreter_state > 0 || interpreterTaskHandler != NULL) {", run)
+        self.assertIn("if (interpreter_state > 0 || interpreterTaskHandler != NULL) {",
+                      body_of(sysc, "static bool scriptInterpreterBusy(uint32_t id)"))
         loop_end = run.index("if (step != BjsRunWatch::WAIT) break;")
         self.assertLess(loop_end, run.index("companionAckMsg(id, false, failure);"))
         self.assertLess(loop_end, run.index("companionAckMsg(id, true, captured.c_str());"))

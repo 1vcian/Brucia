@@ -18,6 +18,7 @@ import app.brucia.files.FileTransferService
 import app.brucia.files.DeviceFileBrowser
 import app.brucia.files.SessionFileLink
 import app.brucia.remote.RemoteHandover
+import app.brucia.ble.BleConsole
 import app.brucia.remote.RemoteRun
 import app.brucia.utils.FileRetention
 import java.io.IOException
@@ -3638,6 +3639,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Run a JavaScript source on the device; the captured output lands on [scriptOutput]. */
     fun scriptRun(src: String) = script.run(src)
 
+    /** Run a script file stored on the device (.js/.bjs or compiled .bin); output on [scriptOutput]. */
+    fun scriptRunFile(path: String) = script.runFile(path)
+
     /** Stop the running script on the device (script_stop); the run's own reply shows the outcome. */
     fun scriptStop() = script.stop()
 
@@ -3993,7 +3997,12 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // the shared micPcm flow inside the Audio UI (all modes in parallel), so no per-mode RX state lives
     // in the ViewModel. Transmit (sstvTransmit) stays here because it is phone->device output.
 
+    /** Plain-text console over the firmware's BLE API (independent of the USB companion link). */
+    private val bleConsoleLazy = lazy { BleConsole(getApplication(), viewModelScope) }
+    val bleConsole by bleConsoleLazy
+
     override fun onCleared() {
+        if (bleConsoleLazy.isInitialized()) bleConsole.disconnect()
         dictionaryTest.cancel()
         fused.removeLocationUpdates(locationCallback)
         stopPhoneMic()

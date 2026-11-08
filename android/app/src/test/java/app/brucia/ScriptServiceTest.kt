@@ -76,6 +76,41 @@ class ScriptServiceTest {
         assertNull(ScriptService.precheck("é".repeat(3000)))
     }
 
+    @Test fun runFileSendsScriptRunFileWithThePath() = runVirtual {
+        val svc = ScriptService(this, runner, { true }, stopper)
+        assertEquals("compiled ok 42", svc.result(true to "compiled ok 42") { assertTrue(runFile(" /BruceJS/hello.bin ")) })
+        assertEquals("not a compiled BruceJS file", svc.result(false to "not a compiled BruceJS file") { runFile("/x.BIN") })
+        assertEquals(listOf("script_run_file /BruceJS/hello.bin" to 25_000L, "script_run_file /x.BIN" to 25_000L), runner.calls.toList())
+    }
+
+    @Test fun runFileLocalRejectionsAreNotSent() = runVirtual {
+        val svc = ScriptService(this, runner, { true }, stopper)
+        for ((path, why) in listOf("" to "Nothing to run.", "hello.js" to "Invalid script path.",
+                "/a.js\nreboot" to "Invalid script path.", "/notes.txt" to "Not a script (.js, .bjs or compiled .bin).",
+                "/firmware.bin.bak" to "Not a script (.js, .bjs or compiled .bin).")) {
+            svc.runFile(path)
+            assertEquals(path, why to false, svc.output.value to svc.busy.value)
+        }
+        delay(20)
+        assertTrue(runner.calls.isEmpty())
+        for (ok in listOf("/a.js", "/b.BJS", "/c.bin")) assertNull(ok, ScriptService.precheckFile(ok))
+    }
+
+    @Test fun aFileRunIsStoppedLikeASourceRunAndBlocksAnotherRun() = runVirtual {
+        val svc = ScriptService(this, runner, { true }, stopper)
+        assertTrue(svc.runFile("/loop.bin"))
+        until { runner.calls.size == 1 }
+        assertFalse("no second run while one waits", svc.run("1"))
+        assertFalse(svc.runFile("/other.js"))
+        assertTrue(svc.stop())
+        until { stopper.calls.size == 1 }
+        assertEquals(ScriptService.STOP_CMD, stopper.calls[0].first)
+        runner.reply(0, false, "script stopped")
+        until { !svc.busy.value }
+        assertEquals(ScriptService.STOPPED, svc.output.value)
+        assertEquals(1, runner.calls.size)
+    }
+
     @Test fun clearOnlyWhenIdleAndNeverCancelsARun() = runVirtual {
         var connected = true
         val svc = ScriptService(this, runner, { connected }, stopper)

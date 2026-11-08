@@ -765,6 +765,10 @@ void sendCaps(uint32_t id) {
     // for the file written this run; the phone imports exactly that path and verifies it after transfer.
     d["features"]["capture_descriptor"] = true;
 #endif
+#if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
+    // script_run_file <path>: run a stored .js/.bjs or compiled .bin (bytecode checked before loading).
+    d["features"]["script_run_file"] = true;
+#endif
 
     // Per-module evidence (additive): compiled / configured / probed / initialized, the probe
     // outcome (present / absent / busy), a short detail and static pin conflicts. caps above stays

@@ -59,7 +59,7 @@ EXTS = {".c", ".cpp", ".h"}
 PROMPT = re.compile(
     r"\b(keyboard|hex_keyboard|num_keyboard|loopOptions|loopSD|displayMessage|viewFile|wifiConnectMenu|"
     r"optionsMenu|loopOptionsWebUi|qrcode_display|readFs)\s*\("
-    r"|\.\s*show\s*\("                               # ScrollableTextArea::show: until SelPress
+    r"|(?<!FastLED)\.\s*show\s*\("                    # ScrollableTextArea::show: until SelPress (FastLED.show only drives LEDs)
     r"|\bwhile\s*\(\s*!\s*check\s*\("                 # wait-for-key loop
 )
 # CLI modes that run until a key is pressed at the device (refused in a companion script only).
@@ -385,20 +385,23 @@ class CompanionPrompts(unittest.TestCase):
         js = body_of(strip_code((ROOT / CLI_DIR / "interpreter_commands.cpp").read_text()), "static uint32_t jsCallback(")
         self.assertLess(js.index("interpreter_state = -1;"), js.index("if (g_companionActive) {"))
         self.assertLess(js.index("if (g_companionActive) {"), js.index("run_bjs_script_headless(*fs, filepath)"))
-        # ARPScanner::setup (Bruce `arp`, Ethernet ARP scan): every early return between taking the
-        # lwIP core lock (CONFIG_LWIP_TCPIP_CORE_LOCKING=1 in the pinned sdkconfig) and releasing
-        # it releases it first (backlog F04).
+        # ARPScanner::setup (Bruce `arp`, Ethernet ARP scan): the lwIP core lock
+        # (CONFIG_LWIP_TCPIP_CORE_LOCKING=1 in the pinned sdkconfig) is held only around each lwIP
+        # call, never across a return, delay, display/key wait or Esc check (backlog F04): held
+        # across the scan's per-host delays, the tcpip thread could not process the ARP replies.
         arp = strip_code((ROOT / "src/modules/ethernet/ARPScanner.cpp").read_text())
         setup = body_of(arp, "void ARPScanner::setup()")
-        locked = setup[setup.index("LOCK_TCPIP_CORE();"):setup.index("\n    UNLOCK_TCPIP_CORE();")]
-        returns = [m.start() for m in re.finditer(r"\breturn\b", locked)]
-        self.assertEqual(len(returns), 3)
-        for pos in returns:
-            branch = locked[locked.rfind("if (", 0, pos):pos]
-            self.assertIn("UNLOCK_TCPIP_CORE();", branch, branch)
-            # A key wait (displayError(..., true)) on the standalone path comes after the release.
-            wait = branch.find("displayError(")
-            self.assertTrue(wait < 0 or wait > branch.index("UNLOCK_TCPIP_CORE();"), branch)
+        locks = [m.end() for m in re.finditer(r"LOCK_TCPIP_CORE\(\);", setup) if not setup[:m.start()].endswith("UN")]
+        self.assertEqual(len(locks), setup.count("UNLOCK_TCPIP_CORE();"))
+        sections = []
+        for pos in locks:
+            sections.append((pos, setup.index("UNLOCK_TCPIP_CORE();", pos)))
+            section = setup[pos:sections[-1][1]]
+            for banned in ("return", "delay(", "vTaskDelay", "displayError(", "displayRedStripe(", "check(", "tft."):
+                self.assertNotIn(banned, section, section)
+        for call in ("etharp_cleanup_netif(", "etharp_request(", "readArpTableETH(", "etharp_find_addr("):
+            for m in re.finditer(re.escape(call), setup):
+                self.assertTrue(any(a <= m.start() < b for a, b in sections), f"{call} outside the lwIP lock")
         # `settings` with no arguments printed the JSON straight to Serial (the frame stream).
         settings = body_of(strip_code((ROOT / CLI_DIR / "settings_commands.cpp").read_text()), "uint32_t settingsCallback(")
         self.assertLess(settings.index("if (g_companionActive)"), settings.index("serializeJsonPretty(jsonDoc, Serial)"))

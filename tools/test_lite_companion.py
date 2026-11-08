@@ -42,7 +42,7 @@ GROUP_MACROS = {"COMPANION_HAS_MIFARE_KEYCHECK", "COMPANION_HAS_IR_CMDS", "COMPA
                 "COMPANION_HAS_DIAG", "COMPANION_HAS_NRF24"}
 LITE_FALSE = {"mifare_keycheck": False, "ir_cmds": False, "ble_gatt": False, "diag": False}
 FULL_FEATURES = {"verified_files": True, "transactional_uploads": True, "mifare_keycheck_report": True,
-                 "mifare_keycheck_stop": True, "diag": True, "capture_descriptor": True}
+                 "mifare_keycheck_stop": True, "diag": True, "capture_descriptor": True, "script_run_file": True}
 # (file, handler call that must vanish on LITE, ERR 501 text that replaces it)
 DISPATCH = [
     ("nfc.cpp", "runMifareKeycheck(", "mifare_keycheck not available in this (lite) build"),

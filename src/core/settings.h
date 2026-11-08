@@ -109,6 +109,8 @@ void setMacAddressMenu();
 
 #if !defined(LITE_VERSION)
 void enableBLEAPI();
+/** Delete every phone bonded to the BLE API (needs the API on: the BLE stack holds the bonds). */
+void forgetBLEAPIPairings();
 
 bool appStoreInstalled();
 

@@ -94,32 +94,23 @@ static void runEspnowSend(const String &args, uint32_t id) {
 // it returns instead of letting it run on. The whole module is #ifndef LITE_VERSION /
 // DISABLE_INTERPRETER, so lite falls back to a 501.
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
-static void runScriptRun(const String &src, uint32_t id) {
-    String s = src;
-    s.trim();
-    if (s.length() == 0) {
-        sendErr(id, 400, "usage: script_run <js source>");
-        return;
-    }
-    if (s.length() > 6000) { // keep within one protocol frame worth of source
-        companionAckMsg(id, false, "script too large");
-        return;
-    }
+static bool scriptInterpreterBusy(uint32_t id) {
     if (interpreter_state > 0 || interpreterTaskHandler != NULL) {
         companionAckMsg(id, false, "interpreter busy");
-        return;
+        return true;
     }
-    char *code = strdup(s.c_str()); // run_bjs_script_headless takes ownership (frees it)
-    if (code == NULL) {
-        companionAckMsg(id, false, "out of memory");
-        return;
-    }
+    return false;
+}
+
+// Shared by script_run and script_run_file: [start] hands the interpreter its script (it takes
+// ownership); this drives the run to completion under the bounds above and replies with the outcome.
+template <typename Start> static void runHeadlessScript(uint32_t id, Start start) {
     String captured;
     captured.reserve(256);
     const uint32_t started = millis();
     g_bjsDeadlineMs = started + 15000; // 15s execution bound
     bjs_capture_begin(&captured);
-    if (!run_bjs_script_headless(code)) {
+    if (!start()) {
         bjs_capture_end();
         g_bjsDeadlineMs = 0;
         companionAckMsg(id, false, "failed to start interpreter");
@@ -170,6 +161,68 @@ static void runScriptRun(const String &src, uint32_t id) {
         return;
     }
     companionAckMsg(id, true, captured.c_str());
+}
+
+static void runScriptRun(const String &src, uint32_t id) {
+    String s = src;
+    s.trim();
+    if (s.length() == 0) {
+        sendErr(id, 400, "usage: script_run <js source>");
+        return;
+    }
+    if (s.length() > 6000) { // keep within one protocol frame worth of source
+        companionAckMsg(id, false, "script too large");
+        return;
+    }
+    if (scriptInterpreterBusy(id)) return;
+    char *code = strdup(s.c_str()); // run_bjs_script_headless takes ownership (frees it)
+    if (code == NULL) {
+        companionAckMsg(id, false, "out of memory");
+        return;
+    }
+    runHeadlessScript(id, [code]() { return run_bjs_script_headless(code); });
+}
+
+// script_run_file <path>: run a script stored on the device (.js/.bjs source or compiled .bin
+// bytecode), same bounds, stop and output capture as script_run. The file system is picked like
+// fs_read (SD if mounted, else LittleFS). Bytecode is checked by JS_CheckBytecode before loading.
+static constexpr size_t SCRIPT_FILE_MAX_BYTES = 256 * 1024;
+static void runScriptRunFile(const String &arg, uint32_t id) {
+    String path = arg;
+    path.trim();
+    if (path.length() == 0 || !path.startsWith("/")) {
+        sendErr(id, 400, "usage: script_run_file </absolute/path.js|.bjs|.bin>");
+        return;
+    }
+    String lower = path;
+    lower.toLowerCase();
+    if (!lower.endsWith(".js") && !lower.endsWith(".bjs") && !lower.endsWith(".bin")) {
+        sendErr(id, 400, "not a script (.js, .bjs or compiled .bin)");
+        return;
+    }
+    FS *fs = nullptr;
+    if (!getFsStorage(fs) || fs == nullptr) {
+        sendErr(id, 503, "no storage");
+        return;
+    }
+    File f = fs->open(path, FILE_READ);
+    if (!f || f.isDirectory()) {
+        if (f) f.close();
+        sendErr(id, 404, "file not found");
+        return;
+    }
+    const size_t size = f.size();
+    f.close();
+    if (size == 0 || size > SCRIPT_FILE_MAX_BYTES) {
+        companionAckMsg(id, false, size == 0 ? "empty script file" : "script file too large");
+        return;
+    }
+    if (lower.endsWith(".bin") && !bjs_file_is_bytecode(*fs, path)) {
+        companionAckMsg(id, false, "not a compiled BruceJS file");
+        return;
+    }
+    if (scriptInterpreterBusy(id)) return;
+    runHeadlessScript(id, [fs, &path]() { return run_bjs_script_headless(*fs, path); });
 }
 #endif // interpreter
 
@@ -282,6 +335,15 @@ bool dispatchSystemCommand(const CommandRequest &request) {
         // Brucia: run a phone-supplied BruceJS script headless and return its
         // console/print output. The interpreter module is dropped on lite builds.
         //   script_run <js source>
+        //   script_run_file <path>   (device file: .js/.bjs source or compiled .bin)
+        if (cmdStr.startsWith("script_run_file ")) {
+#if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
+            runScriptRunFile(cmdStr.substring(16), id);
+#else
+            sendErr(id, 501, "script_run_file not available in this (lite) build");
+#endif
+            break;
+        }
         if (cmdStr.startsWith("script_run ")) {
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
             runScriptRun(cmdStr.substring(11), id);

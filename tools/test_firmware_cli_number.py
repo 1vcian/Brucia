@@ -295,6 +295,24 @@ class SoundScreenCliCallbacks(unittest.TestCase):
         self.assertTrue(sound_screen_problems(moved, SCREEN_CMDS.read_text()))
 
 
+class LedCliCallbacks(unittest.TestCase):
+    """`led` (ported from upstream Bruce 63881836): every numeric argument is parsed whole-token and
+    range-checked through clinum before the config is changed; atoi/strtoul turned "abc" into 0."""
+
+    def test_contract(self):
+        src = code_only((ROOT / "src/core/serial_commands/led_commands.cpp").read_text())
+        self.assertIsNone(re.search(r"\b(atoi|atol|strtoul|strtol)\s*\(", src))
+        for needle in ("clinum::parseU32(strValue.c_str(), 0, 255, v)",
+                       "clinum::parseHexU32(strValue.c_str(), 0xFFFFFF, value)",
+                       "clinum::parseU32(strValue.c_str(), 0, 100, value)",
+                       "clinum::parseU32(strValue.c_str(), LED_EFFECT_SOLID, LED_EFFECT_FIRE, value)"):
+            self.assertIn(needle, src)
+        for cb, side in (("ledHexCallback", "applyLedColor("), ("ledBrightnessCallback", "bruceConfig.setLedBright("),
+                         ("ledEffectCallback", "bruceConfig.setLedEffect(")):
+            body = callback_body(src, cb)
+            self.assertLess(body.index("clinum::"), body.index(side), cb)
+
+
 class NoThrowingConversionInCliOrCompanion(unittest.TestCase):
     """No std::stoi/stoul/stoull/stof/stod left in the CLI callbacks or companion handlers (F03)."""
 

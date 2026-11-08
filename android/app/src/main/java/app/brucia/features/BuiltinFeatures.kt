@@ -57,6 +57,7 @@ object BuiltinFeatures {
                 FeatureDescriptor("org.brucia.spam.spamble", 49, "Spam BLE", "Broadcasts BLE pairing advertisements (iOS/Android/Windows/Samsung); receiver reaction is unverified", "ble"),
                 FeatureDescriptor("org.brucia.spam.spamwifi", 50, "Spam Wi-Fi", "Beacon flood: broadcast fake Wi-Fi networks", "wifi"),
                 FeatureDescriptor("org.brucia.spam.spamnfc", 51, "Spam NFC", "NFC NDEF push (tap-to-send)", "nfc"),
+                FeatureDescriptor("org.brucia.spam.spamir", 53, "Spam IR", "IR power spam: power codes for TVs, projectors, audio (both regions), repeating until Stop", "ir"),
             )),
             FeatureCategory("Intercept", "MITM", listOf(
                 FeatureDescriptor("org.brucia.intercept.mitm", 18, "MITM", "On-phone HTTPS intercepting proxy - authorized use only"),
@@ -90,6 +91,7 @@ object BuiltinFeatures {
                 FeatureDescriptor("org.brucia.tools.geosignals", 48, "Geo signals", "Pin sub-GHz/IR signals to a GPS spot and replay on return"),
                 FeatureDescriptor("org.brucia.tools.gadgets", 20, "Gadgets", "iButton read / write and device clock"),
                 FeatureDescriptor("org.brucia.tools.utilities", 24, "Utilities", "Offline phone tools - passwords, hashes, base64, MAC vendor, Wi-Fi QR"),
+                FeatureDescriptor("org.brucia.tools.bleconsole", 52, "BLE console", "Run device commands over Bluetooth (BLE API, paired with the device PIN)"),
             )),
         )
     )

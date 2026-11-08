@@ -471,6 +471,18 @@ Firmware before batch 16 replied `ok:true` for these, so a host should not read 
 error" from older firmware. Other `ok:false` replies: `script timeout`, `script stopped`,
 `interpreter busy`, `script too large` (over 6000 characters) or `failed to start interpreter`.
 
+`script_run_file <path>` (`features.script_run_file`; not on LITE builds) runs a script stored on
+the device with the same bounds, stop handling and reply as `script_run`. `<path>` is absolute and
+ends in `.js`, `.bjs` or `.bin` (compiled BruceJS bytecode, `mqjs -o file.bin -m32 file.js` with the
+mquickjs version the firmware pins; `tools/bjs_compile.py`). The file system is chosen like
+`fs_read` (SD if mounted, else LittleFS). Errors before the run: `ERR 400` (usage or not a script
+extension), `ERR 404 file not found`, `ERR 503 no storage`; `ACK ok:false` with `empty script file`,
+`script file too large` (over 256 KiB), `not a compiled BruceJS file` (a `.bin` without the
+bytecode magic) or `interpreter busy`. A `.bin` whose structure does not check out (truncated,
+corrupt, other bytecode version) ends as an uncaught error, `invalid or incompatible bytecode file`.
+The check bounds the file's blocks and pointers; it does not verify the opcodes, so a bytecode file
+is code the user chose to run, like a `.js`.
+
 While it waits for the script the device behaves as during every blocking operation (see
 "Behavior during a blocking operation"): a `PING` is answered, any other `CMD` gets `ERR 409
 device busy`, and a `stop` / `*_stop` `CMD` (`script_stop` reads best) stops the script; it is not

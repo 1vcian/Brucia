@@ -1395,6 +1395,7 @@ private fun categoryIcon(name: String): androidx.compose.ui.graphics.vector.Imag
         "Spam BLE" -> I.Bluetooth
         "Spam Wi-Fi" -> I.Wifi
         "Spam NFC" -> I.Nfc
+        "Spam IR" -> I.SettingsRemote
         "Intercept" -> I.Security
         "Device" -> I.DeveloperBoard
         "Audio" -> I.GraphicEq
@@ -1427,6 +1428,7 @@ private fun toolIcon(title: String): androidx.compose.ui.graphics.vector.ImageVe
         "Spam BLE" -> I.Bluetooth
         "Spam Wi-Fi" -> I.Wifi
         "Spam NFC" -> I.Nfc
+        "Spam IR" -> I.SettingsRemote
         "ESP-NOW" -> I.Cast
         "MAC" -> I.Badge
         "Connect" -> I.Wifi
@@ -1458,6 +1460,7 @@ private fun toolIcon(title: String): androidx.compose.ui.graphics.vector.ImageVe
         "Geo signals" -> I.PinDrop
         "Gadgets" -> I.Memory
         "Utilities" -> I.Handyman
+        "BLE console" -> I.Bluetooth
         else -> I.ChevronRight
     }
 }
@@ -1612,6 +1615,7 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
                         49 -> SpamScreen(vm, onConnect, filter = "ble")
                         50 -> SpamScreen(vm, onConnect, filter = "wifi")
                         51 -> SpamScreen(vm, onConnect, filter = "nfc")
+                        53 -> SpamScreen(vm, onConnect, filter = "ir")
                         17 -> WifiMonitorScreen(vm, onConnect)
                         18 -> MitmScreen(vm, status == "Connected")
                         19 -> ScriptsScreen(vm, onConnect)
@@ -1620,6 +1624,7 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
                         22 -> LoRaScreen(vm, onConnect)
                         23 -> EthernetScreen(vm, onConnect)
                         24 -> UtilitiesScreen()
+                        52 -> BleConsoleScreen(vm)
                         25 -> AudioDashboardScreen(vm, onConnect)
                         41 -> MacroScreen(vm, onConnect)
                         42 -> RfMap3dScreen(vm, onConnect)
@@ -2428,6 +2433,10 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     // a rotation or resize.
     var editor by rememberRetained { mutableStateOf<EditorState?>(null) }
     var showNew by remember { mutableStateOf(false) }
+    // Device script run from this screen (script_run_file): the file name while its output dialog is up.
+    var runningFile by rememberSaveable { mutableStateOf<String?>(null) }
+    val device by vm.device.collectAsState()
+    val canRunFiles = device?.features?.scriptRunFile == true
 
     // SAF: let the user choose where a pulled device file is saved. The source device path is held
     // while the system document picker is up.
@@ -2554,6 +2563,14 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                             catch (e: Exception) { Toast.makeText(context, "Open failed: ${e.message}", Toast.LENGTH_SHORT).show() }
                         }
                     }) { Text(if (app.brucia.files.FileKinds.isPcap(sel.name)) "Open with... (Wireshark etc.)" else "Open with...") }
+                    if (canRunFiles && app.brucia.device.ScriptService.isScriptFile(sel.name)) {
+                        Spacer(Modifier.height(6.dp))
+                        Button(modifier = Modifier.fillMaxWidth(), enabled = connected, onClick = {
+                            selected = null
+                            if (vm.scriptRunFile(full)) runningFile = sel.name
+                            else Toast.makeText(context, "A script is still running", Toast.LENGTH_SHORT).show()
+                        }) { Text("Run on device") }
+                    }
                     if (app.brucia.files.FileKinds.isEditable(sel.name)) {
                         Spacer(Modifier.height(6.dp))
                         OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
@@ -2575,6 +2592,32 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 }
             }
         }
+    }
+
+    runningFile?.let { name ->
+        val output by vm.scriptOutput.collectAsState()
+        val running by vm.scriptBusy.collectAsState()
+        val stopping by vm.scriptStopping.collectAsState()
+        androidx.compose.material3.AlertDialog(
+            // Closing only hides the dialog; the run keeps its normal lifecycle (Scripts screen, Stop all).
+            onDismissRequest = { runningFile = null },
+            confirmButton = {
+                if (running || stopping) {
+                    TextButton(enabled = connected && running && !stopping, onClick = { vm.scriptStop() }) {
+                        Text(if (stopping) "Stopping..." else "Stop")
+                    }
+                } else {
+                    TextButton(onClick = { runningFile = null }) { Text("Close") }
+                }
+            },
+            dismissButton = { if (running || stopping) TextButton(onClick = { runningFile = null }) { Text("Hide") } },
+            title = { Text(name, fontFamily = FontFamily.Monospace) },
+            text = {
+                Box(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    Text(output.ifBlank { "No output yet." }, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                }
+            },
+        )
     }
 
     confirmDelete?.let { target ->
@@ -3939,29 +3982,7 @@ private fun IrActionsSection(vm: WardriveViewModel, connected: Boolean) {
             Spacer(Modifier.height(14.dp))
 
             // --- IR power spam (all power tables, both regions, repeating) ---
-            val powerSpamming by vm.irPowerSpamBusy.collectAsState()
-            val powerSpamStatus by vm.irPowerSpamStatus.collectAsState()
-            Button(
-                enabled = connected && (powerSpamming || !irCmdsOmitted),
-                modifier = Modifier.fillMaxWidth(),
-                colors = BruciaButtonDefaults.buttonColors(containerColor = if (powerSpamming) Color(0xFFD32F2F) else cs.primary),
-                onClick = {
-                    if (powerSpamming) vm.irPowerSpamStop()
-                    else {
-                        vm.irPowerSpamStart()
-                        Toast.makeText(context, "IR power spam started", Toast.LENGTH_SHORT).show()
-                    }
-                },
-            ) { Text(if (powerSpamming) "Stop IR power spam" else "IR power spam (all power codes)") }
-            Text(
-                "Authorized use only. Blasts power codes for TVs, projectors, audio and more (both regions + universal), repeating until you Stop.",
-                style = MaterialTheme.typography.bodySmall,
-                color = cs.onSurfaceVariant,
-            )
-            if (powerSpamStatus.isNotBlank()) {
-                Spacer(Modifier.height(4.dp))
-                Text(powerSpamStatus, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurface)
-            }
+            IrPowerSpamControls(vm, connected, irCmdsOmitted)
 
             Spacer(Modifier.height(14.dp))
 
@@ -4777,6 +4798,108 @@ private fun ScriptsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 fontFamily = FontFamily.Monospace,
                 color = cs.onSurface,
             )
+        }
+    }
+}
+
+/** Runtime permissions the BLE console needs on this Android version. */
+private fun bleConsolePermissions(): Array<String> =
+    if (android.os.Build.VERSION.SDK_INT >= 31)
+        arrayOf(android.Manifest.permission.BLUETOOTH_SCAN, android.Manifest.permission.BLUETOOTH_CONNECT)
+    else arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
+
+@Composable
+private fun BleConsoleScreen(vm: WardriveViewModel) {
+    val cs = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val console = vm.bleConsole
+    val state by console.state.collectAsState()
+    val devices by console.devices.collectAsState()
+    val log by console.log.collectAsState()
+    var input by rememberSaveable { mutableStateOf("") }
+    var permitted by remember {
+        mutableStateOf(bleConsolePermissions().all {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        })
+    }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        permitted = r.values.all { it }
+        if (permitted) console.startScan()
+    }
+    fun scan() { if (permitted) console.startScan() else permLauncher.launch(bleConsolePermissions()) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text("BLE console", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = cs.primary)
+        Text(
+            "Run CLI commands over Bluetooth, without USB. On the device: Config > Advanced > Toggle BLE API; " +
+                "it shows a 6-digit PIN. Pair the phone with that PIN; only a paired phone can run commands.",
+            color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(8.dp))
+        val s = state
+        Text(
+            when (s) {
+                app.brucia.ble.BleConsole.State.Idle -> "Not connected"
+                app.brucia.ble.BleConsole.State.Scanning -> "Scanning for devices with the BLE API on..."
+                is app.brucia.ble.BleConsole.State.Connecting -> "Connecting to ${s.name}..."
+                is app.brucia.ble.BleConsole.State.Pairing -> "Pairing with ${s.name}: enter the PIN shown on the device."
+                is app.brucia.ble.BleConsole.State.Ready -> "Connected to ${s.name}"
+                is app.brucia.ble.BleConsole.State.Failed -> s.reason
+            },
+            color = if (s is app.brucia.ble.BleConsole.State.Failed) cs.error else cs.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            when (s) {
+                is app.brucia.ble.BleConsole.State.Ready, is app.brucia.ble.BleConsole.State.Connecting, is app.brucia.ble.BleConsole.State.Pairing ->
+                    Button(onClick = { console.disconnect() }, modifier = Modifier.weight(1f)) { Text("Disconnect") }
+                app.brucia.ble.BleConsole.State.Scanning ->
+                    OutlinedButton(onClick = { console.stopScan() }, modifier = Modifier.weight(1f)) { Text("Stop scan") }
+                else -> Button(onClick = { scan() }, modifier = Modifier.weight(1f)) { Text("Scan") }
+            }
+            OutlinedButton(onClick = { console.clearLog() }, modifier = Modifier.weight(1f)) { Text("Clear") }
+        }
+        if (s is app.brucia.ble.BleConsole.State.Scanning || (s !is app.brucia.ble.BleConsole.State.Ready && devices.isNotEmpty() &&
+                s !is app.brucia.ble.BleConsole.State.Connecting && s !is app.brucia.ble.BleConsole.State.Pairing)) {
+            Spacer(Modifier.height(8.dp))
+            if (devices.isEmpty()) Text("No device yet.", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            devices.forEach { d ->
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { console.connect(d) },
+                    colors = CardDefaults.cardColors(containerColor = cs.surface),
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(d.name, fontWeight = FontWeight.SemiBold)
+                            Text(d.address, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant)
+                        }
+                        Text("${d.rssi} dBm", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(8.dp)).background(cs.surface)
+                .verticalScroll(rememberScrollState(), reverseScrolling = true).padding(10.dp),
+        ) {
+            Text(log.ifBlank { "Output appears here." }, style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace, color = cs.onSurface)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = input, onValueChange = { input = it }, singleLine = true,
+                label = { Text("Command") }, modifier = Modifier.weight(1f),
+                textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+                enabled = s is app.brucia.ble.BleConsole.State.Ready,
+            )
+            Spacer(Modifier.size(8.dp))
+            Button(enabled = s is app.brucia.ble.BleConsole.State.Ready && input.isNotBlank(), onClick = {
+                val why = console.send(input)
+                if (why == null) input = "" else Toast.makeText(context, why, Toast.LENGTH_SHORT).show()
+            }) { Text("Send") }
         }
     }
 }
@@ -6719,10 +6842,12 @@ private fun SpamScreen(vm: WardriveViewModel, onConnect: () -> Unit, filter: Str
     val showBle = filter == null || filter == "ble"
     val showWifi = filter == null || filter == "wifi"
     val showNfc = filter == null || filter == "nfc"
+    val showIr = filter == null || filter == "ir"
     val heading = when (filter) {
         "ble" -> "Bluetooth (BLE) spam"
         "wifi" -> "Wi-Fi spam"
         "nfc" -> "NFC spam"
+        "ir" -> "IR spam"
         else -> "Spam hub - grouped by transport"
     }
     // Leaving the screen ends the BLE advertising and the Wi-Fi beacon burst loops (like the
@@ -6730,6 +6855,9 @@ private fun SpamScreen(vm: WardriveViewModel, onConnect: () -> Unit, filter: Str
     // leaving (LeaveEffect).
     if (showBle) LeaveEffect { vm.stopBleSpam() }
     if (showWifi) LeaveEffect { vm.stopBeaconSpam() }
+    if (showIr) LeaveEffect { if (vm.irPowerSpamBusy.value) vm.irPowerSpamStop() }
+    val device by vm.device.collectAsState()
+    val irCmdsOmitted = device?.features?.omits(app.brucia.wardrive.DeviceFeatures.IR_CMDS) == true
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -6802,10 +6930,59 @@ private fun SpamScreen(vm: WardriveViewModel, onConnect: () -> Unit, filter: Str
             // Real NDEF push, sharing the exact same vm.nfcNdefPush as the NFC screen.
             item { NfcNdefPushCard(connected = connected, status = ndefStatus, onPush = vm::nfcNdefPush) }
         }
+
+        // --- IR spam -------------------------------------------------------------------------
+        if (showIr) {
+            if (filter == null) item { SpamSectionHeader("IR") }
+            // The same IR power spam as the IR screen (one shared run in the ViewModel).
+            item {
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant)) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                        IrPowerSpamControls(vm, connected, irCmdsOmitted)
+                        if (irCmdsOmitted) {
+                            Text(app.brucia.wardrive.DeviceFeatures.OMITTED_REASON, style = MaterialTheme.typography.bodySmall, color = cs.error)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
-/** Section header inside the Spam hub, so the list is grouped by transport (BLE / Wi-Fi / NFC). */
+/**
+ * IR power spam Start/Stop with its status line. Shared by the IR screen and the Spam hub so both
+ * drive the same vm.irPowerSpam run (a run started in one shows as running in the other).
+ */
+@Composable
+private fun IrPowerSpamControls(vm: WardriveViewModel, connected: Boolean, irCmdsOmitted: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val powerSpamming by vm.irPowerSpamBusy.collectAsState()
+    val powerSpamStatus by vm.irPowerSpamStatus.collectAsState()
+    Button(
+        enabled = connected && (powerSpamming || !irCmdsOmitted),
+        modifier = Modifier.fillMaxWidth(),
+        colors = BruciaButtonDefaults.buttonColors(containerColor = if (powerSpamming) Color(0xFFD32F2F) else cs.primary),
+        onClick = {
+            if (powerSpamming) vm.irPowerSpamStop()
+            else {
+                vm.irPowerSpamStart()
+                Toast.makeText(context, "IR power spam started", Toast.LENGTH_SHORT).show()
+            }
+        },
+    ) { Text(if (powerSpamming) "Stop IR power spam" else "IR power spam (all power codes)") }
+    Text(
+        "Authorized use only. Blasts power codes for TVs, projectors, audio and more (both regions + universal), repeating until you Stop.",
+        style = MaterialTheme.typography.bodySmall,
+        color = cs.onSurfaceVariant,
+    )
+    if (powerSpamStatus.isNotBlank()) {
+        Spacer(Modifier.height(4.dp))
+        Text(powerSpamStatus, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurface)
+    }
+}
+
+/** Section header inside the Spam hub, so the list is grouped by transport (BLE / Wi-Fi / NFC / IR). */
 @Composable
 private fun SpamSectionHeader(title: String) {
     val cs = MaterialTheme.colorScheme

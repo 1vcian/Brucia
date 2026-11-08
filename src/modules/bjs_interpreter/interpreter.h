@@ -13,6 +13,8 @@ void interpreterHandler(void *pvParameters);
 void run_bjs_script();
 bool run_bjs_script_headless(char *code);
 bool run_bjs_script_headless(FS &fs, const String &filename);
+/** True if [path] starts with the compiled-BruceJS magic (a .bin produced by `mqjs -o -m32`). */
+bool bjs_file_is_bytecode(FS &fs, const String &path);
 
 // Brucia companion: headless output capture + execution bound. While a capture
 // buffer is set, BruceJS console/print output is appended to it (bounded) instead

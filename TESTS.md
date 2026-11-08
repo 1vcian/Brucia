@@ -4,6 +4,66 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Tone, compiled JS, BLE console (upstream features, reworked) — 2026-11-07
+
+Tree: HEAD `c41bca36` (v0.1.9) plus uncommitted changes (this section and the two below).
+
+**1. Compilation and host tests (PASS)**
+
+- Firmware `pio run -e lilygo-t-embed-cc1101 -e m5stack-cardputer`: **SUCCESS**. App slot:
+  T-Embed 4,355,168 / 4,653,056 B (93.60%, warning), Cardputer 83.39%.
+- Android `./gradlew :app:testDebugUnitTest`: **1128 tests, 0 failures**; `:app:lintDebug`: 0 errors,
+  no warnings in the new files. New: `NusProtocolTest`, `ScriptServiceTest` (runFile command,
+  local rejections, stop), `CapsTest.scriptRunFileRequiresItsLiteralFlag`, `FeatureRegistryTest`
+  (51 tools, BLE console tab 52).
+- Python `discover -s tools`: **328 OK, 1 skipped** (live network). New:
+  - `test_bjs_bytecode.py`: mquickjs built on the host with the Brucia patch; real bytecode from
+    `mqjs -o`; valid files pass and run with the expected output; every truncation, bad
+    magic/version, misalignment, empty and trailing-garbage file rejected; 2 x 4000 random
+    corruptions with each copy against a PROT_NONE guard page (after it or before it): no fault in
+    the check, relocation or load of any accepted copy; control: without the check the same
+    truncated file faults. Guard pages instead of AddressSanitizer: ASan binaries do not start in
+    the sandboxed agent shell. Host bytecode is 64-bit; the device runs the same code with JSW=4.
+  - `test_ble_api_security.py`: line buffer and peer gate host-compiled; pairing, RX
+    permissions, per-peer notify, disconnect on an insecure link, vprintf fix (static).
+  - `test_cardputer_tone.py`: MCLK not routed on the Cardputer; tone channel per call, deleted
+    on every path, on `I2S_NUM_AUTO`.
+  - Updated: `test_firmware_script_abort.py` (shared driver), `test_lite_companion.py` (feature).
+- `tools/bjs_compile.py` produced a 32-bit `.bin` (magic `fb ac`) from a test script.
+
+**2. Flash: NOT RUN** (owner flashes from the phone).
+
+**3. Hardware: NOT RUN.** Owed: Cardputer ADV tones and songs (no squeal, LRCLK intact);
+`.bin` run from the device menu and from the app (Files > Run on device), a corrupt `.bin`
+refused; BLE console: enable on the device, PIN shown, phone pairs, `info` works, an unpaired
+phone cannot run commands or read output, Forget BLE pairs, reconnect after a device reboot.
+
+## F04 ARP lock + upstream Bruce fixes — 2026-11-07
+
+Tree: HEAD `c41bca36` (v0.1.9) plus uncommitted changes. Upstream fixes ported from
+`upstream/dev`: 8fdada3c, be8f3733, 7d9c1e7c, aa4c286f, ad24e96d, 59c0da06 (details in the backlog).
+
+**1. Compilation and host tests (PASS)**
+
+- `pio run -e lilygo-t-embed-cc1101 -e m5stack-cardputer`: **SUCCESS**.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **312 OK, 1 skipped** (live net).
+  F04 static check in `test_companion_prompts.py` fails on the previous ARPScanner (1 lock
+  vs 4 unlocks) and passes now. The upstream fixes have no new host tests here.
+
+Second batch: 76c5f66d DuckyScript DEFINE, 63881836 `led` CLI (clinum parsing,
+`LedCliCallbacks`), c7aad444 touch password Show/Hide. Rebuilt T-Embed + Cardputer: **SUCCESS**;
+Python **313 OK, 1 skipped**. T-Embed app slot 4,350,048 / 4,653,056 B (93.49%).
+
+**2. Flash: NOT RUN** (owner flashes from the phone).
+
+
+**3. Hardware: NOT RUN.** Owed: ARP scan on an Ethernet board; ESP-NOW receive commands
+(unknown peer asks for approval, "Always allow" then runs without asking, malformed/short
+frames dropped) and file share between two devices; LoRa change username; KeeLoq `.sub`
+send with code stepping; Recent RF loop; Wi-Fi join to the chosen BSSID and auto-connect
+to a saved open network; `led rgb/hex/br/effect/off` on the T-Embed ring and rejection of
+`led r abc`; a DuckyScript with `DEFINE`; Show/Hide on a touch board's password field.
+
 ## F35 App Store installer: authenticated, checked install — 2026-11-07
 
 Tree: HEAD `43f2972d` (v0.1.8) plus uncommitted F35 changes (`src/core/app_store_install.*`,

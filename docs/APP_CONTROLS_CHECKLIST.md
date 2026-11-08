@@ -725,6 +725,13 @@ limits. Keep per-control hardware results separate below.
 | [ ] | NDEF push payload field | Set payload | |
 | [ ] | "Send" button | `vm.nfcNdefPush()` | |
 
+## Spam IR (`SpamScreen` filter=ir, tab 53)
+
+| Tested | Control | What it does | Notes |
+|---|---|---|---|
+| [ ] | "Connect over USB" / "Reconnect over USB" button | USB connect | |
+| [ ] | "IR power spam (all power codes)" / "Stop IR power spam" button | `vm.irPowerSpamStart()` / `vm.irPowerSpamStop()` (`IrPowerSpamControls`) | Same run as the IR screen button; leaving the screen stops it; disabled on LITE (`ir_cmds` omitted) |
+
 ---
 
 # Intercept

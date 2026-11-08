@@ -212,6 +212,8 @@ Companion commands now live in the domain handlers under `src/companion/`; see
 | System Config > Clock | APP-TOOL | Gadgets (tab 20) + `clock_set` |
 | System Config > Startup App / Hide-Show Apps | MIRROR-ONLY | no command; Remote/Console |
 | System Config > Advanced (pins, BLE API, BadUSB/BLE, BLE name, net creds, factory reset) | MIRROR-ONLY | no command; Remote/Console |
+| BLE API (Nordic UART CLI bridge, from upstream dev 20bb8b18) | APP-TOOL | Tools > BLE console (tab 52); Brucia requires passkey pairing |
+| Compiled JS `.bin` (upstream dev fb5ce65e) | APP-TOOL | Files > Run on device (`script_run_file`); bytecode structure checked first |
 | Power (Deep Sleep / Sleep / Restart / Power Off) | MIRROR-ONLY | no command; Remote/Console |
 | Dev Mode (serial USB/UART, disable dev) | MIRROR-ONLY | no command; Remote/Console |
 | Pins Setup (I2C finder, SPI/I2C/UART/GPS pins) | MIRROR-ONLY | no command; Remote/Console |

@@ -127,7 +127,8 @@ void ping_target(ip_addr_t target) {
 }
 
 void ARPScanner::setup() {
-    LOCK_TCPIP_CORE();
+    // Brucia (F04): the lwIP core lock is taken only around each lwIP call, as in netcut.cpp. Held for
+    // the whole scan (as before), the tcpip thread could not process ARP replies between requests.
     hostslist_eth.clear();
 
     options.clear();
@@ -138,14 +139,11 @@ void ARPScanner::setup() {
 
     if (esp_netif_get_ip_info(esp_net_interface, &ip_info) != ESP_OK) {
         Serial.println("Can't get IP informations");
-        UNLOCK_TCPIP_CORE(); // Brucia: the lock taken above was never released on this path
         return;
     }
 
     if (ip_info.ip.addr == 0 || ip_info.netmask.addr == 0) {
         Serial.println("Ethernet has no IP/netmask, aborting ARP scan");
-        // Brucia: release before the key wait, so lwIP is not held while the user reads this.
-        UNLOCK_TCPIP_CORE(); // Brucia: the lock taken above was never released on this path
         displayError("Ethernet not ready", true);
         return;
     }
@@ -162,11 +160,12 @@ void ARPScanner::setup() {
     if (net_iface == nullptr || net_iface->linkoutput == nullptr ||
         net_iface->hwaddr_len != MAC_ADDRESS_LENGTH) {
         Serial.println("Network interface not ready for ARP scan");
-        UNLOCK_TCPIP_CORE(); // Brucia: the lock taken above was never released on this path
         return;
     }
 
+    LOCK_TCPIP_CORE();
     etharp_cleanup_netif(net_iface); // to avoid gateway duplication
+    UNLOCK_TCPIP_CORE();
 
     // send arp requests, read table each ARP_TABLE_SIZE requests
     uint16_t tableReadCounter = 0;
@@ -189,7 +188,9 @@ void ARPScanner::setup() {
             lastUpdate = millis();
         }
 
+        LOCK_TCPIP_CORE();
         err_t res = etharp_request(net_iface, &ip_be);
+        UNLOCK_TCPIP_CORE();
 
         if (res != ERR_OK) {
             Serial.println("Arp req for: " + IPAddress(ip_be.addr).toString() + "failed with ec: " + res);
@@ -201,12 +202,16 @@ void ARPScanner::setup() {
 
         // read table if we sent ARP_TABLE_SIZE requests
         if (tableReadCounter == ARP_TABLE_SIZE) {
+            LOCK_TCPIP_CORE();
             readArpTableETH(net_iface);
+            UNLOCK_TCPIP_CORE();
             tableReadCounter = 0;
         }
         // Stops search on EscPress
         if (check(EscPress)) break;
     }
+    LOCK_TCPIP_CORE();
+    readArpTableETH(net_iface); // replies to the last requests (fewer than ARP_TABLE_SIZE)
     UNLOCK_TCPIP_CORE();
     auto it = std::find_if(hostslist_eth.begin(), hostslist_eth.end(), [this](const Host &host) {
         return host.ip == gateway;
@@ -227,11 +232,12 @@ void ARPScanner::setup() {
         gateway_ip.addr = gateway;
 
         // Search gateway in the ARP table
+        LOCK_TCPIP_CORE();
         s8_t arp_find_result = etharp_find_addr(net_iface, &gateway_ip, &eth_ret, &ipaddr_ret);
+        readArpTableETH(net_iface); // Update hostlists
+        UNLOCK_TCPIP_CORE();
 
         if (arp_find_result < 0) { Serial.println("Gateway MAC not found."); }
-
-        readArpTableETH(net_iface); // Update hostlists
     }
 
 ScanHostMenu:

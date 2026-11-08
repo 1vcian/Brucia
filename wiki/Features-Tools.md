@@ -9,6 +9,26 @@ proxy, and session offload/reporting.
 ## Scripts
 Runs on-device BruceJS (JavaScript) headless and returns its output (`script_run`).
 
+Scripts stored on the device can be run from **Files**: open a `.js`, `.bjs` or compiled
+`.bin` and choose **Run on device** (`script_run_file`, firmware from this release on). The
+output and a Stop button stay in a dialog; Stop all ends the run as for `script_run`.
+
+A compiled script (`.bin`) is BruceJS bytecode built on a computer with
+`python3 tools/bjs_compile.py script.js` (it builds the `mqjs` compiler from the mquickjs
+version the firmware pins; run a firmware build once first). Before loading a `.bin` the device
+checks its structure: a truncated, corrupt or other-version file is refused ("invalid or
+incompatible bytecode file"). The check does not verify the code itself, so run only `.bin`
+files you trust, as with any script. On the device, the JS Interpreter menu and the file
+browser also list `.bin` files that carry the bytecode header.
+
+## BLE console
+A plain-text console over Bluetooth for when the device is not on USB. On the device enable
+**Config > Advanced > Toggle BLE API**: it advertises as "Bruce" and shows a 6-digit PIN
+(new each time it is turned on). In the app, **Tools > BLE console**: Scan, tap the device and
+pair with that PIN. Only the paired phone can run commands and see their output; any CLI command
+works, one per line (for example `info`). **Forget BLE pairs** in the same device menu removes
+every paired phone. The USB companion link is unaffected; this is a separate path.
+
 ## iButton
 1-Wire read and RW1990 rewrite (`ibutton_read`, `ibutton_write`). The write waits about 3 s
 for a key on the probe, writes it and reads it back, and reports whether the id landed

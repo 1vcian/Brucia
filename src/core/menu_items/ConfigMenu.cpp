@@ -196,6 +196,7 @@ void ConfigMenu::advancedMenu() {
             {"Set Device pins", [this]() { pinsMenu(); }           },
 #if !defined(LITE_VERSION)
             {"Toggle BLE API",  [this]() { enableBLEAPI(); }       },
+            {"Forget BLE pairs", [this]() { forgetBLEAPIPairings(); }},
             {"BadUSB/BLE",      [this]() { setBadUSBBLEMenu(); }   },
 #endif
             {"BLE name",

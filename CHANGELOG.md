@@ -7,6 +7,27 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- App: IR power spam is also in the Spam category ("Spam IR" tile and an IR section in the
+  Spam hub). It stays on the IR screen too; both drive the same run, so Stop works from either.
+- From upstream Bruce (dev branch): ESP-NOW hardening (short or malformed frames are dropped,
+  the peer list is capped, and a command from an unknown device asks for approval on screen),
+  LoRa "change username" no longer reads an uninitialized value, KeeLoq `.sub` files open the
+  emulation screen, Recent RF stays open after sending, Wi-Fi joins the exact network chosen and
+  auto-connect also joins saved open networks.
+- Ethernet ARP scan: the network stack is no longer locked for the whole scan, so replies are
+  processed while it runs.
+- From upstream Bruce: DuckyScript `DEFINE` constants; a `led` serial command for the RGB LED
+  (color, brightness, effect, off; malformed numbers are rejected); a Show/Hide button for
+  passwords on touch keyboards.
+- Cardputer ADV audio: the I2S clock pins no longer collide (MCLK was routed onto LRCLK), and short
+  tones use their own short-lived output so they cannot turn into a continuous squeal.
+- Compiled scripts: BruceJS `.bin` bytecode (built with `tools/bjs_compile.py`) runs from the
+  device's JS Interpreter and file browser and from the app (Files > Run on device). The device
+  checks the file's structure first and refuses a truncated, corrupt or incompatible one.
+- BLE console: the BLE API (Config > Advanced > Toggle BLE API) is now a standard Nordic UART
+  service and requires pairing with the 6-digit PIN the device shows; only the paired phone can run
+  commands or see their output. The app has a new Tools > BLE console. Before, the BLE API accepted
+  commands from any nearby device without pairing.
 - Follow-up hardening of the 0.1.7 stop/IR work (host-tested; transmit paths still need a device
   check):
   - IR power spam / jam detect / LoRa receive: a Stop can no longer land on the *next* run - a

@@ -79,6 +79,9 @@ extern "C" {
 #include "globals_js.h"
 
 char *script = NULL;
+// Length of [script]: compiled bytecode (.bin) is binary and may contain NUL bytes, so the size is
+// kept instead of strlen(). 0 means "text, use strlen".
+size_t scriptSize = 0;
 char *scriptDirpath = NULL;
 char *scriptName = NULL;
 
@@ -139,6 +142,22 @@ void interpreterHandler(void *pvParameters) {
     JS_SetLogFunc(ctx, js_log_func);
     JS_SetInterruptHandler(ctx, bjs_interrupt_handler); // bounds headless companion runs (g_bjsDeadlineMs)
 
+    // Compiled BruceJS (from upstream Bruce fb5ce65e). JS_LoadBytecode requires that no atom has been
+    // defined in RAM yet, so bytecode is loaded before the globals below are registered. Brucia:
+    // JS_CheckBytecode (patched into mquickjs) bounds every block and pointer first, because the
+    // relocation trusts the file and a truncated or corrupt one would read/write outside the buffer.
+    size_t codeSize = scriptSize ? scriptSize : strlen(script);
+    const bool isBytecode = JS_IsBytecode((const uint8_t *)script, codeSize);
+    JSValue val = JS_UNDEFINED;
+    if (isBytecode) {
+        if (JS_CheckBytecode((const uint8_t *)script, (uint32_t)codeSize) != 0 ||
+            JS_RelocateBytecode(ctx, (uint8_t *)script, (uint32_t)codeSize) != 0) {
+            val = JS_ThrowInternalError(ctx, "invalid or incompatible bytecode file");
+        } else {
+            val = JS_LoadBytecode(ctx, (const uint8_t *)script);
+        }
+    }
+
     js_timers_init(ctx);
 
     // Set global variables
@@ -163,10 +182,12 @@ void interpreterHandler(void *pvParameters) {
 
     printMemoryUsage("context created");
 
-    size_t scriptSize = strlen(script);
-    log_d("Script length: %zu\n", scriptSize);
-
-    JSValue val = JS_Eval(ctx, (const char *)script, scriptSize, scriptName, 0);
+    log_d("Script length: %zu (%s)\n", codeSize, isBytecode ? "bytecode" : "source");
+    if (isBytecode) {
+        if (!JS_IsException(val)) val = JS_Run(ctx, val);
+    } else {
+        val = JS_Eval(ctx, (const char *)script, codeSize, scriptName, 0);
+    }
 
     run_timers(ctx);
 
@@ -176,6 +197,7 @@ void interpreterHandler(void *pvParameters) {
     // Clean up.
     free((char *)script);
     script = NULL;
+    scriptSize = 0;
     free((char *)scriptDirpath);
     scriptDirpath = NULL;
     free((char *)scriptName);
@@ -221,14 +243,25 @@ void run_bjs_script() {
         };
         loopOptions(options);
     }
-    filename = loopSD(*fs, true, "BJS|JS");
+    filename = loopSD(*fs, true, "BJS|JS|BIN");
     vTaskDelay(pdMS_TO_TICKS(200));
     if (filename == "") { return; }
     run_bjs_script_headless(*fs, filename);
 }
 
+bool bjs_file_is_bytecode(FS &fs, const String &path) {
+    File f = fs.open(path, FILE_READ);
+    if (!f) return false;
+    uint8_t magic[2] = {0, 0};
+    const bool ok = f.read(magic, 2) == 2;
+    f.close();
+    // JS_BYTECODE_MAGIC (0xacfb) as the first uint16 of the little-endian header
+    return ok && (uint16_t)(magic[0] | (magic[1] << 8)) == JS_BYTECODE_MAGIC;
+}
+
 bool run_bjs_script_headless(char *code) {
     script = code;
+    scriptSize = 0; // NUL-terminated source
     if (script == NULL) { return false; }
     scriptDirpath = strdup("/scripts");
     scriptName = strdup("index.js");
@@ -242,8 +275,10 @@ bool run_bjs_script_headless(char *code) {
 }
 
 bool run_bjs_script_headless(FS &fs, const String &filename) {
-    script = readBigFile(&fs, filename);
+    size_t size = 0;
+    script = readBigFile(&fs, filename, true, &size);
     if (script == NULL) { return false; }
+    scriptSize = size;
 
     int slash = filename.lastIndexOf('/');
     if (slash < 0) {
@@ -330,7 +365,7 @@ getScriptsOptionsList(const String &currentPath, bool saveStartupScript, int rem
             int dotIndex = nameOnly.lastIndexOf(".");
             String ext = dotIndex >= 0 ? nameOnly.substring(dotIndex + 1) : "";
             ext.toUpperCase();
-            if (ext != "JS" && ext != "BJS") continue;
+            if (ext != "JS" && ext != "BJS" && !(ext == "BIN" && bjs_file_is_bytecode(*fs, fullPath))) continue;
 
             String entry_title = nameOnly.substring(0, nameOnly.lastIndexOf(".")); // remove the extension
             opt.push_back({entry_title.c_str(), [=]() {

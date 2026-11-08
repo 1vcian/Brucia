@@ -57,6 +57,18 @@ class ScriptService(
     }
 
     /**
+     * Run a script stored on the device ([path]: .js/.bjs source or compiled .bin bytecode) with
+     * `script_run_file` (`features.script_run_file`), with the same bounds, stop and reply as [run].
+     * Same return contract as [run].
+     */
+    fun runFile(path: String): Boolean = synchronized(lock) {
+        if (op.busy.value || _stopping.value) return false
+        val id = ++runSeq
+        op.start("$FILE_CMD ${path.trim()}", RUNNING, { precheckFile(path) }) { ok, out -> finish(id, ok, out) }
+        true
+    }
+
+    /**
      * Stop the running script on the device. Returns true when the stop frame was sent; false (no
      * frame) when no script runs, the reply already arrived, or a stop was already sent for it.
      */
@@ -130,6 +142,9 @@ class ScriptService(
         /** Firmware limit on the trimmed source (String.length(), i.e. UTF-8 bytes). */
         const val MAX_SOURCE_BYTES = 6000
         const val STOP_CMD = "script_stop"
+        const val FILE_CMD = "script_run_file"
+        /** Device files [runFile] accepts (case-insensitive), matching the firmware. */
+        val SCRIPT_EXTENSIONS = listOf(".js", ".bjs", ".bin")
         /** Bounds only the fire-and-forget write of the stop frame (it is never ACKed). */
         const val STOP_SEND_TIMEOUT_MS = 10_000L
         /** The firmware ends a stopped script within a few polls; after this, say it is slow. */
@@ -149,6 +164,20 @@ class ScriptService(
             src.trim().toByteArray(Charsets.UTF_8).size > MAX_SOURCE_BYTES -> "script too large"
             else -> null
         }
+
+        /** Local rejection text for [runFile], or null when [path] may be sent. */
+        fun precheckFile(path: String): String? {
+            val p = path.trim()
+            return when {
+                p.isEmpty() -> "Nothing to run."
+                !p.startsWith("/") || p.any { it == '\n' || it == '\r' } -> "Invalid script path."
+                !isScriptFile(p) -> "Not a script (.js, .bjs or compiled .bin)."
+                else -> null
+            }
+        }
+
+        /** True for a device file name [runFile] can run (a .bin still needs the bytecode magic). */
+        fun isScriptFile(name: String): Boolean = SCRIPT_EXTENSIONS.any { name.lowercase().endsWith(it) }
 
         /** The text a script_run reply shows; [stopSent] when the app asked this run to stop. */
         fun resultText(ok: Boolean, out: String, stopSent: Boolean): String = when {

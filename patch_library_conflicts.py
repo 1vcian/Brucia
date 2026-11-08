@@ -51,6 +51,107 @@ def cache_sbr_noise_bounds(content):
 # A file counts as already patched when it contains applied_marker, which
 # defaults to the literal replacement. Replacements using regex group
 # references are not literal, so they must name an explicit marker.
+BYTECODE_CHECK = r"""
+/* Brucia: structural check of an untrusted bytecode file (v2) before JS_RelocateBytecode walks it.
+   Same block walk as the relocation, but every block must have a known tag and lie inside the
+   buffer, and every pointer the relocation rewrites must name the start of a block of this file.
+   It does not verify the opcodes themselves: a deliberately crafted file is still code the user
+   chose to run. Returns 0 if OK. */
+int JS_CheckBytecode(const uint8_t *buf, uint32_t buf_len)
+{
+    const JSBytecodeHeader *hdr = (const JSBytecodeHeader *)buf;
+    const uint8_t *data, *ptr, *p_end;
+    uint32_t data_len, n_words, i;
+    uint8_t *starts;
+    int ret = -1, pass;
+
+    if (!buf || buf_len < sizeof(JSBytecodeHeader) || ((uintptr_t)buf % JSW) != 0)
+        return -1;
+    if (hdr->magic != JS_BYTECODE_MAGIC || hdr->version != JS_BYTECODE_VERSION)
+        return -1;
+    data = buf + sizeof(JSBytecodeHeader);
+    data_len = buf_len - sizeof(JSBytecodeHeader);
+    if (data_len == 0 || (data_len % JSW) != 0)
+        return -1;
+    p_end = data + data_len;
+    n_words = data_len / JSW;
+    starts = calloc((n_words + 7) / 8, 1);
+    if (!starts)
+        return -1;
+#define BC_START(off) (starts[(off) / JSW / 8] & (1 << (((off) / JSW) % 8)))
+/* a pointer JSValue is the block address plus JS_TAG_PTR */
+#define BC_OFF(v) ((uintptr_t)(v) - JS_TAG_PTR - hdr->base_addr)
+#define BC_TARGET_OK(v) (!JS_IsPtr(v) || (BC_OFF(v) < data_len && BC_OFF(v) % JSW == 0 && BC_START(BC_OFF(v))))
+    /* pass 0: walk the blocks and record their starts; pass 1: check every pointer */
+    for (pass = 0; pass < 2; pass++) {
+        for (ptr = data; ptr < p_end; ) {
+            int size, mtag;
+            if ((size_t)(p_end - ptr) < sizeof(JSWord))
+                goto done;
+            mtag = ((const JSMemBlockHeader *)ptr)->mtag;
+            switch (mtag) {
+            case JS_MTAG_FUNCTION_BYTECODE:
+                if ((size_t)(p_end - ptr) < sizeof(JSFunctionBytecode))
+                    goto done;
+                break;
+            case JS_MTAG_VALUE_ARRAY:
+                if ((size_t)(p_end - ptr) < sizeof(JSValueArray))
+                    goto done;
+                break;
+            case JS_MTAG_STRING:
+            case JS_MTAG_FLOAT64:
+            case JS_MTAG_BYTE_ARRAY:
+                break;
+            default:
+                goto done;
+            }
+            size = get_mblock_size(ptr);
+            if (size <= 0 || (size % JSW) != 0 || (size_t)size > (size_t)(p_end - ptr))
+                goto done;
+            if (pass == 0) {
+                uint32_t off = (uint32_t)(ptr - data);
+                starts[off / JSW / 8] |= 1 << ((off / JSW) % 8);
+            } else if (mtag == JS_MTAG_FUNCTION_BYTECODE) {
+                const JSFunctionBytecode *b = (const JSFunctionBytecode *)ptr;
+                if (!BC_TARGET_OK(b->func_name) || !BC_TARGET_OK(b->byte_code) ||
+                    !BC_TARGET_OK(b->cpool) || !BC_TARGET_OK(b->vars) ||
+                    !BC_TARGET_OK(b->ext_vars) || !BC_TARGET_OK(b->filename) ||
+                    !BC_TARGET_OK(b->pc2line))
+                    goto done;
+            } else if (mtag == JS_MTAG_VALUE_ARRAY) {
+                const JSValueArray *a = (const JSValueArray *)ptr;
+                if (sizeof(JSValueArray) + (size_t)a->size * sizeof(JSValue) > (size_t)size)
+                    goto done;
+                for (i = 0; i < a->size; i++) {
+                    if (!BC_TARGET_OK(a->arr[i]))
+                        goto done;
+                }
+            }
+            ptr += size;
+        }
+    }
+    /* the two roots: a function to run and the unique-string table */
+    if (!JS_IsPtr(hdr->main_func) || !BC_TARGET_OK(hdr->main_func) ||
+        ((const JSMemBlockHeader *)(data + BC_OFF(hdr->main_func)))->mtag !=
+            JS_MTAG_FUNCTION_BYTECODE)
+        goto done;
+    if (JS_IsPtr(hdr->unique_strings)) {
+        if (!BC_TARGET_OK(hdr->unique_strings) ||
+            ((const JSMemBlockHeader *)(data + BC_OFF(hdr->unique_strings)))->mtag !=
+                JS_MTAG_VALUE_ARRAY)
+            goto done;
+    }
+    ret = 0;
+done:
+#undef BC_TARGET_OK
+#undef BC_OFF
+#undef BC_START
+    free(starts);
+    return ret;
+}
+"""
+
+
 conflicts = [
     # Reject malformed SBR state before indexing the 2x5 noise arrays. The
     # public routine is void, so invalid direct calls return without mutation.
@@ -333,6 +434,25 @@ conflicts = [
         ".pio/libdeps/*/NFC-RFAL-fork/src/rfal_nfca.cpp",
         r'#define RFAL_NFCA_N_RETRANS         2U',
         '#define RFAL_NFCA_N_RETRANS         4U'
+    ),
+    # Compiled BruceJS (.bin): JS_RelocateBytecode walks the file trusting every block size and
+    # pointer ("the bytecode is not checked so it should come from a trusted source"). A truncated
+    # or corrupt file would make it read and write outside the buffer. JS_CheckBytecode bounds
+    # every block and requires every relocated pointer to name a block of the same file, before
+    # the interpreter relocates it (tools/test_bjs_bytecode.py fuzzes it on a host build).
+    (
+        ".pio/libdeps/*/mquickjs/mquickjs.h",
+        r'JS_BOOL JS_IsBytecode\(const uint8_t \*buf, size_t buf_len\);',
+        'JS_BOOL JS_IsBytecode(const uint8_t *buf, size_t buf_len);\n'
+        '/* Brucia: 0 if buf is a structurally valid bytecode file for this build (see mquickjs.c) */\n'
+        'int JS_CheckBytecode(const uint8_t *buf, uint32_t buf_len);'
+    ),
+    (
+        ".pio/libdeps/*/mquickjs/mquickjs.c",
+        # The optional group replaces an older Brucia version of the block (marker = current version).
+        r'(?s)(\n/\* Brucia: structural check of an untrusted bytecode file.*?)?\nint JS_RelocateBytecode2\(JSContext \*ctx, JSBytecodeHeader \*hdr,\n',
+        BYTECODE_CHECK + '\nint JS_RelocateBytecode2(JSContext *ctx, JSBytecodeHeader *hdr,\n',
+        'Brucia: structural check of an untrusted bytecode file (v2)'
     ),
 ]
 

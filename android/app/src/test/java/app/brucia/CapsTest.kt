@@ -13,6 +13,13 @@ class CapsTest {
         assertTrue(app.brucia.wardrive.DeviceFeatures.fromJson(JSONObject().put("verified_files", true)).verifiedFiles)
     }
 
+    @Test fun scriptRunFileRequiresItsLiteralFlag() {
+        val parse = app.brucia.wardrive.DeviceFeatures.Companion::fromJson
+        assertFalse(parse(null).scriptRunFile)
+        assertFalse(parse(JSONObject().put("script_run_file", "true")).scriptRunFile)
+        assertTrue(parse(JSONObject().put("script_run_file", true)).scriptRunFile)
+    }
+
     @Test fun transactionalUploadSupportRequiresItsOwnLiteralFlag() {
         val parse = app.brucia.wardrive.DeviceFeatures.Companion::fromJson
         assertFalse(parse(null).transactionalUploads)

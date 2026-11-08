@@ -10,11 +10,18 @@ public:
     void setup();
     void end();
     void update_mtu(uint16_t mtu);
+    /** 6-digit passkey the phone must enter to pair; a new one each time the API starts. */
+    uint32_t passkey() const { return passkey_; }
+    /** Forget every bonded phone (they must pair again with the passkey). */
+    static bool forgetPairings();
+
+    BLESerialService &serial() { return serial_service; }
 
 private:
     NimBLEServer *pServer;
     BatteryService battery_service;
     BLESerialService serial_service;
+    uint32_t passkey_ = 0;
 };
 #endif
 #endif // BLE_API_HPP

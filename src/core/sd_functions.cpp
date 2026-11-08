@@ -880,7 +880,8 @@ String loopSD(FS &fs, bool filePicker, const String &allowed_ext, String rootPat
                                                          }});
                     }
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
-                    if (filepath.endsWith(".bjs") || filepath.endsWith(".js")) {
+                    if (filepath.endsWith(".bjs") || filepath.endsWith(".js") ||
+                        (filepath.endsWith(".bin") && bjs_file_is_bytecode(fs, filepath))) {
                         options.insert(options.begin(), {"JS Script Run", [&]() {
                                                              delay(200);
                                                              run_bjs_script_headless(fs, filepath);

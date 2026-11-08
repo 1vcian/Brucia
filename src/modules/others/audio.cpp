@@ -14,6 +14,10 @@
 #include "AudioOutputI2SNoDAC.h"
 #include <ESP8266Audio.h>
 #include <ESP8266SAM.h>
+#if defined(ARDUINO_M5STACK_CARDPUTER)
+#include "driver/i2s_std.h"
+#include <algorithm>
+#endif
 
 void _setup_codec_speaker(bool enable) __attribute__((weak));
 void _setup_codec_speaker(bool enable) {}
@@ -129,7 +133,13 @@ static AudioOutputI2S *createConfiguredAudioOutput() {
         return nullptr;
     }
 
+#if defined(ARDUINO_M5STACK_CARDPUTER)
+    // From upstream Bruce 28f07c94: Cardputer ADV's ES8311 derives MCLK from BCLK. GPIO43 is LRCLK
+    // only (MCLK=WCLK=43 in the board ini); routing MCLK to the same GPIO overwrites LRCLK.
+    audioout->SetPinout(BCLK, WCLK, DOUT);
+#else
     audioout->SetPinout(BCLK, WCLK, DOUT, MCLK);
+#endif
     audioout->SetGain(bruceConfig.soundVolume / AUDIO_VOLUME_MAX);
 
     return audioout;
@@ -872,6 +882,75 @@ void audio_pcm_end() {
 
 #endif
 
+#if defined(HAS_NS4168_SPKR) && defined(ARDUINO_M5STACK_CARDPUTER) && !__has_include(<M5Unified.h>)
+// Short tones on Cardputer ADV (synthesis from upstream Bruce 28f07c94). The channel is opened for this
+// tone and deleted before returning, unlike upstream's channel that stayed open: the speaker, FM and
+// mic paths each open and close their own I2S channel, and I2S_NUM_AUTO never takes the mic's port.
+// When no port is free the tone is skipped. Trailing zero frames replace every DMA descriptor, so a
+// short tone cannot turn into a continuous squeal when the output stops.
+static void cardputerTone(unsigned int frequency, unsigned long duration) {
+    if (frequency == 0 || duration == 0) {
+        if (duration) delay(duration);
+        return;
+    }
+    constexpr uint32_t RATE = 48000;
+    constexpr int DESC = 4, FRAMES = 128;
+    _setup_codec_speaker(true);
+    delay(20);
+
+    i2s_chan_handle_t tx = nullptr;
+    i2s_chan_config_t chanCfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
+    chanCfg.dma_desc_num = DESC;
+    chanCfg.dma_frame_num = FRAMES;
+    if (i2s_new_channel(&chanCfg, &tx, nullptr) != ESP_OK) {
+        _setup_codec_speaker(false);
+        return;
+    }
+    i2s_std_config_t stdCfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(RATE),
+        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = (gpio_num_t)BCLK,
+            .ws = (gpio_num_t)WCLK,
+            .dout = (gpio_num_t)DOUT,
+            .din = I2S_GPIO_UNUSED,
+            .invert_flags = {.mclk_inv = false, .bclk_inv = false, .ws_inv = false},
+        },
+    };
+    stdCfg.slot_cfg.bit_shift = true;
+    if (i2s_channel_init_std_mode(tx, &stdCfg) != ESP_OK || i2s_channel_enable(tx) != ESP_OK) {
+        i2s_del_channel(tx);
+        _setup_codec_speaker(false);
+        return;
+    }
+
+    int16_t samples[FRAMES * 2];
+    const int16_t amplitude = (int16_t)(12000 * bruceConfig.soundVolume / 100);
+    const uint32_t halfPeriod = std::max<uint32_t>(1U, RATE / (frequency * 2U));
+    uint32_t phase = 0;
+    uint32_t framesLeft = (RATE * duration) / 1000U;
+    size_t written = 0;
+    while (framesLeft) {
+        const uint32_t frames = framesLeft > FRAMES ? FRAMES : framesLeft;
+        for (uint32_t i = 0; i < frames; ++i) {
+            const int16_t sample = ((phase / halfPeriod) & 1U) ? amplitude : -amplitude;
+            samples[i * 2] = sample;
+            samples[i * 2 + 1] = sample;
+            ++phase;
+        }
+        if (i2s_channel_write(tx, samples, frames * 4, &written, pdMS_TO_TICKS(200)) != ESP_OK) break;
+        framesLeft -= frames;
+        if (check(AnyKeyPress)) break; // like playTone: a key ends the tone
+    }
+    memset(samples, 0, sizeof(samples));
+    for (int i = 0; i < DESC; ++i) i2s_channel_write(tx, samples, sizeof(samples), &written, pdMS_TO_TICKS(200));
+    i2s_channel_disable(tx);
+    i2s_del_channel(tx);
+    _setup_codec_speaker(false);
+}
+#endif
+
 void _tone(unsigned int frequency, unsigned long duration) {
     if (!bruceConfig.soundEnabled) return;
 
@@ -887,6 +966,8 @@ void _tone(unsigned int frequency, unsigned long duration) {
         M5.Speaker.tone(frequency, duration);
         if (duration > 0) delay(duration);
     }
+#elif defined(ARDUINO_M5STACK_CARDPUTER)
+    cardputerTone(frequency, duration);
 #else
     playTone(frequency, duration, 0);
 #endif

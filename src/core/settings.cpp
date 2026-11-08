@@ -1682,6 +1682,25 @@ void enableBLEAPI() {
     }
 
     ble_api_enabled = !ble_api_enabled;
+
+    // From upstream Bruce 20bb8b18: feedback, so the toggle is not pressed repeatedly. Brucia: the
+    // phone must pair with this passkey before any command runs (Brucia app: Tools > BLE console).
+    if (ble_api_enabled) {
+        char pin[7];
+        snprintf(pin, sizeof(pin), "%06lu", (unsigned long)bleApi.passkey());
+        displayInfo(String("BLE API ON as 'Bruce'. Pair with PIN ") + pin, true);
+    } else {
+        displayInfo("BLE API OFF", true);
+    }
+}
+
+void forgetBLEAPIPairings() {
+    if (!ble_api_enabled) {
+        displayInfo("Turn the BLE API on first", true);
+        return;
+    }
+    if (BLE_API::forgetPairings()) displaySuccess("BLE API pairings forgotten", true);
+    else displayError("Could not forget pairings", true);
 }
 
 bool appStoreInstalled() {
