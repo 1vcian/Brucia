@@ -1,6 +1,8 @@
 # Work queue — single operational ledger
 
-Updated 2026-11-07. `VERSION` is 0.1.8; local HEAD is release commit `43f2972d`.
+Updated 2026-11-08. Local HEAD advanced to `09ef4a0f` (release 0.1.10), after
+`11fa008b` (F35), `c41bca36` (release 0.1.9) and `2df3213f` (further features/fixes).
+This review did not verify remote publication or hardware for those newer releases.
 F32 LoRa-teardown and F34 Remote-watchdog fixes were committed in `85cf0d30`;
 store branding followed in `a21a3965`. GitHub v0.1.8 is published with APK and
 T-Embed firmware assets (API verified 2026-11-07). This does not close physical acceptance. The
@@ -111,15 +113,16 @@ other open device checks remain unverified. Host results do not close them.
   responses and short/full-storage writes; no success or new installed marker on failure.
   Downstream plain-HTTP catalog/apps remain a separate trust problem in the third-party
   script. Source review only; no script executed or hardware/network fault injected.
-  **FIXED (HOST) 2026-11-07, uncommitted; device install NOT RUN.** `installAppStoreJS`
+  **PARTIALLY FIXED (HOST), committed in `11fa008b`; review 2026-11-08 leaves two software gaps OPEN; device install NOT RUN.** `installAppStoreJS`
   now uses `NetworkClientSecure.setCACert(BRUCIA_APP_STORE_ROOTS)` (`src/core/app_store_roots.h`:
   GTS R1-R4, GlobalSign Root CA, ISRG X1/X2, SSL.com ECC/RSA; the host is behind Cloudflare,
   which rotates between these CAs) and `http.begin(tls, url)`; no `setInsecure()` call remains.
   Integrity policy: authenticated TLS + exact Content-Length (HTTP/1.0, no chunking; missing
   length refused), 64 KiB bound, HTML/blank body refused. Portable `app_store::install` stages
   to `<dest>.part`, checks every write, flush and the re-read size, then replaces via
-  `<dest>.bak` with rollback; a leftover backup is restored first. Failure never shows success
-  and keeps an existing install. Tests: `tools/test_app_store_install.py` (host-compiled
+  `<dest>.bak` with rollback; a leftover backup is restored first. Covered failure cases
+  preserve an existing install, but flush/rollback claims need the corrections below.
+  Tests: `tools/test_app_store_install.py` (host-compiled
   core: interrupted/timeout/unsized/empty/blank/oversized/HTML, full storage, flush/size/rename
   failures, with and without a previous install; mutation-checked), adapter source checks,
   pinned-root fingerprints, untrusted local TLS server rejected; live (`BRUCIA_NET_TESTS=1`)
@@ -127,6 +130,40 @@ other open device checks remain unverified. Host results do not close them.
   These TLS checks use Python ssl, not mbedtls. Owed on device: install over Wi-Fi succeeds,
   store opens; a pulled Wi-Fi/unplug mid-download leaves no new install. Downstream
   plain-HTTP catalog/apps still OPEN (separate item).
+
+  Independent review 2026-11-08: focused suite rerun, 5 PASS + 1 live-network SKIP.
+  **P1: flush failures are not propagated by the device adapter.** `FsFiles::endWrite`
+  calls void `File.flush()`, then checks `getWriteError()`. The installed Arduino
+  `VFSFileImpl::flush` discards `fflush`/`fsync` results; `close` discards `fclose`;
+  `File` does not set the Print error flag for these failures. Reopening for size does
+  not prove sync succeeded. The fake's `flushFails -> false` does not model this path.
+  Next: propagate actual storage completion errors and test the adapter/driver boundary,
+  including sync failure with a correct-looking size, before claiming verified flush.
+  **P2: failed rollback is ignored.** If staging->destination and backup->destination
+  both fail, `install` returns the generic installation error and the old script is
+  absent from its normal path (old bytes remain in `.bak`). Independently reproduced
+  against the real module with `.codex_tmp/review-f35-20261108/probe.py`; a later retry
+  restores it when renames work again. Next: distinguish recovery-required failure,
+  preserve/report the backup, test both rename failures and recovery, and narrow the
+  unconditional "previous install stays intact" contract. No power-loss guarantee.
+  Device TLS acceptance also needs a cold boot with unset/stale clock: the installer
+  does not establish valid wall time; Python TLS tests use the computer's clock.
+  **P1 + P2 FIXED (HOST) 2026-11-09, uncommitted; device NOT RUN.** Installer writes through
+  `app_store::PosixFiles` on the VFS mountpoint (fflush/fsync/fclose results checked) and reads
+  the staged file back against the download hash; a refused rollback returns
+  `RECOVERY REQUIRED: ... App Store.js.bak ...`, shown as an error, restored on the next attempt.
+  Regressions in `tools/test_app_store_install.py` (real POSIX adapter with fsync/fclose
+  failing; double rename failure), mutation-checked. Clock: `CONFIG_MBEDTLS_HAVE_TIME_DATE` is
+  unset in this build, so certificate dates are not checked at all (unset clock does not block;
+  expired certificates are not rejected on date). Device install on SD and LittleFS still OPEN.
+  Independent review 2026-11-09 accepts these two storage/recovery fixes at host/source
+  level: fresh 7 PASS / 1 live SKIP; four independent production-copy mutations
+  (sync, close, read-back, rollback) caught by the behavioral harness. Evidence in
+  TESTS.md and `.codex_tmp/review-f35-20261109/`. No firmware build/flash/device use by
+  the reviewer. TLS date-check omission confirmed in installed sdkconfig/esp_config.h;
+  certificate validity-date enforcement stays a separate security follow-up, not a
+  capability established by Python's expired-certificate test. SD/LittleFS install,
+  full storage, Wi-Fi interruption and cold boot remain physical acceptance checks.
 
 **Upstream Bruce review (2026-11-07).** Brucia matches `upstream/main` a59213f3 (2026-09-10,
 latest Bruce release commit; no newer main). `upstream/dev` has 197 non-merge commits since,

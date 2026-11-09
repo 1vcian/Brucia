@@ -1741,33 +1741,6 @@ struct HttpBody : app_store::Body {
     }
 };
 
-struct FsFiles : app_store::Files {
-    FS &fs;
-    File file;
-    explicit FsFiles(FS &f) : fs(f) {}
-    bool exists(const std::string &p) override { return fs.exists(p.c_str()); }
-    bool remove(const std::string &p) override { return fs.remove(p.c_str()); }
-    bool rename(const std::string &a, const std::string &b) override { return fs.rename(a.c_str(), b.c_str()); }
-    bool beginWrite(const std::string &p) override {
-        file = fs.open(p.c_str(), FILE_WRITE);
-        return (bool)file;
-    }
-    size_t write(const uint8_t *d, size_t n) override { return file ? file.write(d, n) : 0; }
-    bool endWrite() override {
-        if (!file) return false;
-        file.flush();
-        const bool ok = !file.getWriteError();
-        file.close();
-        return ok;
-    }
-    long size(const std::string &p) override {
-        File f = fs.open(p.c_str(), FILE_READ);
-        if (!f) return -1;
-        const long n = (long)f.size();
-        f.close();
-        return n;
-    }
-};
 } // namespace
 
 // Installs the Bruce community App Store script (third-party host, BRUCIA_UPSTREAM_APP_STORE_URL in
@@ -1822,10 +1795,20 @@ void installAppStoreJS() {
         return;
     }
 
+    if (!fs->mountpoint()) {
+        http.end();
+        displayWarning("App Store not installed: storage has no mountpoint", true);
+        return;
+    }
     HttpBody body(http);
-    FsFiles files(*fs);
+    // POSIX on the VFS mountpoint, not Arduino File: File.flush()/close() drop fsync/fclose errors.
+    app_store::PosixFiles files(fs->mountpoint());
     const std::string err = app_store::install(body, files, "/BruceJS/Tools/App Store.js");
     http.end();
+    if (err.rfind(app_store::RECOVERY_REQUIRED, 0) == 0) {
+        displayError(String("App Store: ") + err.c_str(), true);
+        return;
+    }
     if (!err.empty()) {
         displayWarning(String("App Store not installed: ") + err.c_str(), true);
         return;

@@ -2,8 +2,10 @@
 """F35: App Store installer trust and complete-file install.
 
 Compiles the real src/core/app_store_install.cpp against fake download/storage faults
-(interrupted, empty, oversized, unsized, HTML, full storage, failed flush/rename), checks the
-device adapter source (pinned CA, never setInsecure) and the pinned roots themselves.
+(interrupted, empty, oversized, unsized, HTML, full storage, failed flush/rename, bytes lost after a
+"successful" write, rollback refused), runs the real POSIX storage adapter on a temp directory with
+fsync/fclose failing, checks the device adapter source (pinned CA, never setInsecure, no Arduino
+File whose flush/close drop errors) and the pinned roots themselves.
 
 Limits: the TLS checks use Python's ssl with the pinned roots, not mbedtls on the device; the
 live check against the real store host runs only with BRUCIA_NET_TESTS=1.
@@ -55,7 +57,8 @@ struct FakeFs : Files {
     std::map<std::string, std::string> files;
     std::string open; bool isOpen = false;
     long capacity = 1 << 30;         // bytes the storage accepts in total
-    bool flushFails = false, sizeLies = false;
+    bool flushFails = false, sizeLies = false, lostOnFlush = false, readFails = false;
+    std::string reading; size_t rpos = 0; bool isReading = false;
     std::set<std::pair<std::string, std::string>> failRename;
     long used() const { long n = 0; for (auto &f : files) n += (long)f.second.size(); return n; }
     bool exists(const std::string &p) override { return files.count(p) > 0; }
@@ -71,13 +74,47 @@ struct FakeFs : Files {
         size_t w = std::min(n, (size_t)room);
         files[open].append((const char *)d, w); return w;
     }
-    bool endWrite() override { assert(isOpen); isOpen = false; return !flushFails; }
+    bool endWrite() override {
+        assert(isOpen); isOpen = false;
+        // A sync error the driver swallowed: same size, but the last bytes never reached the medium.
+        if (lostOnFlush && !files[open].empty()) files[open].back() ^= 0x20;
+        return !flushFails;
+    }
     long size(const std::string &p) override { if (!files.count(p)) return -1; return (long)files[p].size() + (sizeLies ? 1 : 0); }
+    bool beginRead(const std::string &p) override {
+        assert(!isOpen && !isReading); if (!files.count(p)) return false;
+        reading = p; rpos = 0; isReading = true; return true;
+    }
+    long read(uint8_t *b, size_t cap) override {
+        assert(isReading); if (readFails) return -1;
+        const std::string &d = files[reading]; size_t n = std::min(cap, d.size() - rpos);
+        memcpy(b, d.data() + rpos, n); rpos += n; return (long)n;
+    }
+    void endRead() override { isReading = false; }
 };
+
+// The real POSIX adapter, with storage that accepts every write and then fails to sync or close.
+struct FailingPosix : PosixFiles {
+    bool syncFails = false, closeFails = false;
+    using PosixFiles::PosixFiles;
+    int syncFd(int fd) override { return syncFails ? -1 : PosixFiles::syncFd(fd); }
+    int closeFile(std::FILE *f) override { int r = PosixFiles::closeFile(f); return closeFails ? -1 : r; }
+};
+static std::string slurp(const std::string &path) {
+    std::FILE *f = std::fopen(path.c_str(), "rb"); if (!f) return "<missing>";
+    std::string d; char b[512]; size_t n; while ((n = std::fread(b, 1, sizeof b, f)) > 0) d.append(b, n);
+    std::fclose(f); return d;
+}
+static void put(const std::string &path, const std::string &d) {
+    std::FILE *f = std::fopen(path.c_str(), "wb"); std::fwrite(d.data(), 1, d.size(), f); std::fclose(f);
+}
+static bool there(const std::string &path) { std::FILE *f = std::fopen(path.c_str(), "rb"); if (f) std::fclose(f); return f != nullptr; }
 
 static const std::string DEST = "/BruceJS/Tools/App Store.js";
 static const std::string PART = DEST + ".part", BAK = DEST + ".bak";
 static std::string script(size_t n) { std::string s = "function e(){}"; while (s.size() < n) s += "x"; s.resize(n); return s; }
+
+static bool recoveryRequired(const std::string &e) { return e.rfind(RECOVERY_REQUIRED, 0) == 0 && e.find(".bak") != std::string::npos; }
 
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); return 1; } } while (0)
 #define CASE(name) printf("case %s\n", name)
@@ -89,7 +126,7 @@ static bool clean(FakeFs &fs, const char *old) {
     return !fs.exists(DEST);
 }
 
-int main() {
+int main(int argc, char **argv) {
     const std::string s = script(10821);
     { CASE("fresh install");
       FakeFs fs; FakeBody b(s, (long)s.size());
@@ -121,6 +158,10 @@ int main() {
         CHECK(install(b, fs, DEST) != ""); CHECK(clean(fs, old)); }
       { CASE("size re-read mismatch"); FakeFs fs; if (old) fs.files[DEST] = old; fs.sizeLies = true; FakeBody b(s, (long)s.size());
         CHECK(install(b, fs, DEST) == "written size does not match download"); CHECK(clean(fs, old)); }
+      { CASE("bytes lost although every write and the flush reported success"); FakeFs fs; if (old) fs.files[DEST] = old; fs.lostOnFlush = true; FakeBody b(s, (long)s.size());
+        CHECK(install(b, fs, DEST) == "stored script differs from download"); CHECK(clean(fs, old)); CHECK(!fs.isReading); }
+      { CASE("read back fails"); FakeFs fs; if (old) fs.files[DEST] = old; fs.readFails = true; FakeBody b(s, (long)s.size());
+        CHECK(install(b, fs, DEST) == "stored script differs from download"); CHECK(clean(fs, old)); CHECK(!fs.isReading); }
       { CASE("final rename fails"); FakeFs fs; if (old) fs.files[DEST] = old; fs.failRename.insert({PART, DEST}); FakeBody b(s, (long)s.size());
         CHECK(install(b, fs, DEST) == "cannot install downloaded script"); CHECK(clean(fs, old)); }
     }
@@ -131,6 +172,37 @@ int main() {
     { CASE("crash between renames: backup restored, then a failed retry keeps it");
       FakeFs fs; fs.files[BAK] = "old"; FakeBody b(s, (long)s.size(), 100);
       CHECK(install(b, fs, DEST) == "download interrupted"); CHECK(clean(fs, "old")); }
+    { CASE("final rename and rollback both fail: recovery required, old bytes kept in .bak");
+      FakeFs fs; fs.files[DEST] = "old"; fs.failRename.insert({PART, DEST}); fs.failRename.insert({BAK, DEST});
+      FakeBody b(s, (long)s.size());
+      const std::string e = install(b, fs, DEST);
+      CHECK(recoveryRequired(e)); CHECK(!fs.exists(DEST)); CHECK(fs.files[BAK] == "old"); CHECK(!fs.exists(PART));
+      // The next attempt puts the old script back before anything else, even when it fails again.
+      fs.failRename.clear(); FakeBody again(s, (long)s.size(), 100);
+      CHECK(install(again, fs, DEST) == "download interrupted"); CHECK(clean(fs, "old")); }
+    { CASE("leftover backup that cannot be restored: recovery required, nothing downloaded");
+      FakeFs fs; fs.files[BAK] = "old"; fs.failRename.insert({BAK, DEST}); FakeBody b(s, (long)s.size());
+      CHECK(recoveryRequired(install(b, fs, DEST))); CHECK(b.pos == 0); CHECK(fs.files[BAK] == "old"); CHECK(!fs.exists(DEST)); }
+
+    // Real POSIX adapter on a temp directory (argv[1]); DEST's directory is created by the caller.
+    const std::string root = argc > 1 ? argv[1] : "";
+    if (!root.empty()) {
+        { CASE("posix: fresh install, then update");
+          FailingPosix fs(root); FakeBody b(s, (long)s.size());
+          CHECK(install(b, fs, DEST) == ""); CHECK(slurp(root + DEST) == s);
+          std::string s2 = script(5000); s2[0] = 'v'; FakeBody b2(s2, (long)s2.size());
+          CHECK(install(b2, fs, DEST) == ""); CHECK(slurp(root + DEST) == s2);
+          CHECK(!there(root + PART) && !there(root + BAK)); }
+        for (int mode = 0; mode < 2; mode++) {
+          CASE(mode == 0 ? "posix: fsync fails after every write succeeded" : "posix: fclose fails after every write succeeded");
+          put(root + DEST, "old");
+          FailingPosix fs(root); (mode == 0 ? fs.syncFails : fs.closeFails) = true; FakeBody b(s, (long)s.size());
+          CHECK(install(b, fs, DEST) == "storage flush failed (full?)");
+          CHECK(slurp(root + DEST) == "old"); CHECK(!there(root + PART) && !there(root + BAK));
+        }
+        { CASE("posix: missing directory"); FailingPosix fs(root + "/nope"); FakeBody b(s, (long)s.size());
+          CHECK(install(b, fs, DEST) == "cannot create staging file"); }
+    }
     puts("ALL OK");
     return 0;
 }
@@ -151,9 +223,12 @@ class InstallLogicTest(unittest.TestCase):
             build = subprocess.run([compiler(), "-std=c++17", "-Wall", "-Werror", "-I", str(CORE), str(src),
                                     str(CORE / "app_store_install.cpp"), "-o", str(exe)], capture_output=True, text=True)
             self.assertEqual(0, build.returncode, build.stderr)
-            run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+            storage = Path(tmp) / "storage"
+            (storage / "BruceJS/Tools").mkdir(parents=True)
+            run = subprocess.run([str(exe), str(storage)], capture_output=True, text=True, timeout=30)
             self.assertEqual(0, run.returncode, run.stdout + run.stderr)
             self.assertIn("ALL OK", run.stdout)
+            self.assertIn("case posix: fsync fails", run.stdout)
 
 
 class AdapterSourceTest(unittest.TestCase):
@@ -177,6 +252,23 @@ class AdapterSourceTest(unittest.TestCase):
         self.assertNotIn("file.print", self.fn)
         ok = self.fn.index("displaySuccess(\"Bruce App Store installed\"")
         self.assertLess(self.fn.index("if (!err.empty())"), ok)
+
+    def test_storage_adapter_reports_sync_errors(self):
+        # Arduino File.flush()/close() discard fflush/fsync/fclose results (vfs_api.cpp), so a
+        # File-based adapter cannot see a failed sync: the installer must use the POSIX adapter.
+        self.assertIn("app_store::PosixFiles files(fs->mountpoint());", self.fn)
+        self.assertNotIn("getWriteError", self.file)
+        self.assertNotIn("struct FsFiles", self.file)
+        impl = (CORE / "app_store_install.cpp").read_text()
+        end = impl[impl.index("bool PosixFiles::endWrite()"):]
+        end = end[:end.index("\n}\n")]
+        for call in ("std::fflush(out_) != 0", "syncFd(fileno(out_)) != 0", "closeFile(out_) != 0"):
+            self.assertIn(call, end)
+
+    def test_recovery_required_is_shown_as_an_error(self):
+        rec = self.fn.index("err.rfind(app_store::RECOVERY_REQUIRED, 0) == 0")
+        self.assertLess(rec, self.fn.index("if (!err.empty())"))
+        self.assertIn("displayError(", self.fn[rec:self.fn.index("if (!err.empty())")])
 
 
 def pinned_pems():

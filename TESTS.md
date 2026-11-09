@@ -66,8 +66,86 @@ to a saved open network; `led rgb/hex/br/effect/off` on the T-Embed ring and rej
 
 ## F35 App Store installer: authenticated, checked install — 2026-11-07
 
-Tree: HEAD `43f2972d` (v0.1.8) plus uncommitted F35 changes (`src/core/app_store_install.*`,
-`src/core/app_store_roots.h`, `installAppStoreJS` in `settings.cpp`, tests). Not released.
+Original work was based on `43f2972d` (v0.1.8), then committed as `11fa008b` and
+included in local release commits 0.1.9/0.1.10. Independent review 2026-11-08
+observed HEAD advance to `09ef4a0f`; remote publication of these versions was not
+checked by this reviewer.
+
+**Independent follow-up 2026-11-08: F35 not fully closed in software.**
+`python3 tools/test_app_store_install.py`: 6 discovered, **5 PASS / 1 SKIP** (live
+network). Initial sandbox run could not bind the localhost TLS server; approved
+rerun outside the sandbox passed. No device, new build, flash or remote TLS check.
+
+- Flush gap (source confirmed): `FsFiles::endWrite` checks `getWriteError()` after
+  void `File.flush()`. Installed Arduino FS `vfs_api.cpp` discards `fflush`, `fsync`
+  and `fclose` return values; `FS.cpp` does not set the Print error flag for them.
+  The fake's flush failure return is not supplied by this real adapter. A correct
+  size alone does not establish successful sync. Need an adapter-level regression
+  for sync failure despite all writes/size appearing successful, and error propagation.
+- Rollback gap (host reproduced): `.codex_tmp/review-f35-20261108/probe.py` compiles
+  the actual installer with both final promotion and backup restoration failing.
+  Result: generic error, no destination, old bytes retained in `.bak`, no staging.
+  A subsequent retry restores the old path when rename is available. Source hash,
+  harness and output are retained beside the probe. This is recovery-required,
+  not loss of the old bytes; the unconditional old-install-preserved claim is too broad.
+- Add device TLS case: cold boot with unset/stale clock, then valid clock. The
+  installer does not arrange clock synchronization; host Python TLS uses host time.
+  Certificate errors must remain visible without any insecure fallback.
+
+No production code changed by this review. Existing hardware NOT RUN statuses remain.
+
+**Fix for both gaps 2026-11-09 (uncommitted, on top of `09ef4a0f`).**
+
+- Flush: the device adapter no longer uses Arduino `File`. `app_store::PosixFiles` writes
+  through POSIX on the FS mountpoint (`fs->mountpoint()` + path, the ESP-IDF VFS) and
+  `endWrite()` fails on `ferror`, `fflush`, `fsync` or `fclose`. After the close the
+  installer also reads the staging file back and compares it (length + FNV-1a 64) with the
+  downloaded bytes ("stored script differs from download"). Limit: a read-back can still be
+  served from a cache; it does not prove the medium survives a power loss.
+- Rollback: when both staging->destination and backup->destination fail, `install` returns a
+  message starting with `RECOVERY REQUIRED:` naming `App Store.js.bak` and saying the next
+  attempt restores it; the device shows it with `displayError`. Same for a leftover backup
+  that cannot be restored at the start (nothing is downloaded then). Header contract narrowed.
+- Clock: this Arduino build has `CONFIG_MBEDTLS_HAVE_TIME_DATE` unset (esp32s3 sdkconfig), so
+  mbedtls does not check certificate validity dates: an unset clock does not by itself block
+  the handshake, and an expired or not-yet-valid certificate is not rejected on date (chain to
+  a pinned root and hostname are still checked). The cold-boot device case stays in the list.
+
+Compilation and host tests (PASS):
+- `tools/test_app_store_install.py`: 8 discovered, 7 PASS / 1 SKIP (live network). New cases:
+  bytes changed after every write and the flush reported success; read-back error; final
+  rename and rollback both failing (old bytes in `.bak`, recovery message, next attempt
+  restores); leftover backup not restorable; the real `PosixFiles` on a temp directory for
+  install/update, `fsync` failing and `fclose` failing after successful writes (old install
+  kept, no `.part`/`.bak`), missing directory; source checks that `settings.cpp` uses
+  `PosixFiles` and shows recovery as an error.
+- Mutation check: ignoring the `fsync` result, ignoring the `fclose` result, skipping the
+  read-back and ignoring the rollback result each make the suite fail.
+- Full suite `python3 -m unittest discover -s tools -p 'test_*.py'`: 330 OK, 1 skipped.
+- Firmware builds: `lilygo-t-embed-cc1101` SUCCESS, `m5stack-cardputer` SUCCESS.
+- The reviewer's `.codex_tmp/review-f35-20261108/probe.py` was not rerun: its fake storage
+  predates the read-back methods added to `Files`; the same scenario is now in the suite.
+
+Flash: NOT RUN. Hardware: NOT RUN (install on SD and on LittleFS, Wi-Fi pulled mid-download,
+cold boot with unset clock, full storage).
+
+**Independent verification 2026-11-09: the two storage/recovery fixes are accepted
+at source/host level.** Fresh `python3 tools/test_app_store_install.py`: **7 PASS,
+1 live-network SKIP**. The localhost TLS test required an approved run outside the
+sandbox (initial bind was denied); it then passed. Independent mutations in copies
+of the production module, `.codex_tmp/review-f35-20261109/mutations.py`, all failed
+the behavioral harness as expected: ignore sync result, ignore close result, bypass
+read-back comparison, ignore failed rollback. Source hash and results retained beside
+the script; production files were not mutated. The POSIX adapter uses the selected
+Arduino FS mountpoint and checks all three completion return values.
+
+TLS limit independently confirmed in the installed ESP32-S3 sdkconfig and mbedtls
+`esp_config.h`: `CONFIG_MBEDTLS_HAVE_TIME_DATE` unset disables date verification;
+the secure-client source still sets `MBEDTLS_SSL_VERIFY_REQUIRED` and the hostname.
+Python's expired-certificate rejection must not be presented as device acceptance.
+Certificate validity-date enforcement remains a separate security follow-up; the
+cold-boot case alone cannot establish it. No fresh firmware build, flash, remote TLS
+test or hardware acceptance was performed in this independent review.
 
 **1. Compilation and host tests (PASS)**
 

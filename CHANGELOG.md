@@ -7,6 +7,9 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- App Store install (F35 follow-up): the downloaded script is written with storage sync errors
+  checked and read back before it replaces the old one; if the old script cannot be put back it
+  stays in `App Store.js.bak`, an error says so, and the next install attempt restores it.
 - App: IR power spam is also in the Spam category ("Spam IR" tile and an IR section in the
   Spam hub). It stays on the IR screen too; both drive the same run, so Stop works from either.
 - From upstream Bruce (dev branch): ESP-NOW hardening (short or malformed frames are dropped,
