@@ -12,6 +12,23 @@ header pointing back to this document.
 > This file documents attribution for copyleft compliance. It is not legal
 > advice; if you redistribute Bruce, review these obligations yourself.
 
+## Optional dictionary downloads
+
+The Android app offers these external data sources on demand; their contents are
+not bundled into the APK by this integration. Upstream branches may change.
+
+- [Probable-Wordlists](https://github.com/berzerk0/Probable-Wordlists), by berzerk0
+  and contributors: WPA-Length top 4,800 and top 204k, CC BY-SA 4.0. These are
+  popularity-ordered general passwords filtered by length, not Wi-Fi-specific captures.
+- [Flipper firmware Classic dictionary](https://github.com/flipperdevices/flipperzero-firmware/blob/dev/applications/main/nfc/resources/nfc/assets/mf_classic_dict.nfc):
+  Flipper firmware contributors; its header attributes the dictionary to Proxmark3.
+- [Proxmark3 Classic dictionary](https://github.com/RfidResearchGroup/proxmark3/blob/master/client/dictionaries/mfc_default_keys.dic):
+  RfidResearchGroup / Iceman and community contributors.
+
+MIFARE dictionaries are data for the existing key-check operation; downloading one
+does not port the upstream project's recovery algorithms. Refer to each upstream
+repository for its license and notices before redistributing downloaded data.
+
 ## Sub-GHz protocols / KeeLoq
 
 ### Flipper Zero firmware — GPL-3.0-or-later

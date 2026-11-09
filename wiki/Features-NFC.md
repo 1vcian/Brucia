@@ -17,6 +17,20 @@ A MIFARE Classic key-dictionary check runs on the device (`mifare_keycheck`), ba
 phone-side dictionary of 65+ known default keys plus Crypto-1 / Ultralight / NTAG analysis
 and a clone-risk assessment. Authorized testing only.
 
+Use **Add Flipper Classic dictionary** or **Add Proxmark3 Classic dictionary** to
+download extra known keys over HTTPS. These lists overlap; duplicates are removed
+when added to the current session. The bundled keys remain available. Downloading
+does not run a check or write a tag: start the existing key check separately.
+
+**Import keys** accepts plain text (`.txt`, `.dic` or `.nfc`): one 12-hex key per line,
+with optional `#` comments. Imports/downloads are limited to 1 MiB and 50,000 unique
+extra keys. Errors keep the previous extra keys; Cancel/Clear discards late results.
+Extra keys remain in memory for this app session, not across an app restart.
+
+This is a MIFARE Classic dictionary check, not a password search for every NFC tag.
+NTAG/Ultralight and DESFire use different authentication schemes. A dictionary miss
+does not establish that a card is secure; finding a key does not prove a clone will work.
+
 ## NDEF
 An NDEF builder on the phone, plus **NDEF push**: emulate a URL/text/contact NDEF tag to
 another phone (`nfc_ndef_push`).

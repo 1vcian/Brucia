@@ -29,12 +29,28 @@ data class DownloadableWordlist(
 object WordlistCatalog {
     val all: List<DownloadableWordlist> = listOf(
         DownloadableWordlist(
+            name = "probable-wpa-4800.txt",
+            title = "Probable WPA top 4,800",
+            url = "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/master/Real-Passwords/WPA-Length/Top4800-WPA-probable-v2.txt",
+            approxBytes = 45_276L,
+            entries = "4.8k",
+            description = "berzerk0 / Probable-Wordlists (CC BY-SA 4.0). Popularity-ordered, 8-40 characters; general passwords filtered by length, not Wi-Fi captures.",
+        ),
+        DownloadableWordlist(
+            name = "probable-wpa-204k.txt",
+            title = "Probable WPA top 204k",
+            url = "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/master/Real-Passwords/WPA-Length/Top204Thousand-WPA-probable-v2.txt",
+            approxBytes = 2_121_750L,
+            entries = "204k",
+            description = "berzerk0 / Probable-Wordlists (CC BY-SA 4.0). Includes the smaller list; no need to run both. Not a guarantee of recovery.",
+        ),
+        DownloadableWordlist(
             name = "rockyou.txt",
             title = "rockyou.txt",
             url = "${BrandLinks.DOWNLOAD_PREFIX}wordlists/rockyou.txt",
             approxBytes = 139_921_507L,
             entries = "14.3M",
-            description = "The classic real-world password dump - the standard WPA wordlist",
+            description = "General password corpus; not Wi-Fi-specific. No guaranteed match.",
         ),
         DownloadableWordlist(
             name = "top-1M.txt",
@@ -42,7 +58,7 @@ object WordlistCatalog {
             url = "${BrandLinks.DOWNLOAD_PREFIX}wordlists/top-1M.txt",
             approxBytes = 8_755_171L,
             entries = "1M",
-            description = "One million most common passwords (fast, high hit rate)",
+            description = "Common-password corpus; usefulness depends on the tested password.",
         ),
         DownloadableWordlist(
             name = "top-100k.txt",

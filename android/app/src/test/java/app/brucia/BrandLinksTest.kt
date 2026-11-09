@@ -9,7 +9,7 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
-/** The updater, release catalog and wordlist URLs come from brand.json (docs/LAUNCH.md), not literals. */
+/** Project-hosted downloads follow brand.json; explicitly listed community sources retain their origin. */
 class BrandLinksTest {
     private val brand: JSONObject by lazy {
         var dir: File? = File(System.getProperty("user.dir")).absoluteFile
@@ -33,7 +33,15 @@ class BrandLinksTest {
     @Test fun updaterAndWordlistsUseTheCentralConfig() {
         assertEquals(BrandLinks.RELEASES_API, AppUpdater.RELEASES_API)
         assertTrue(WordlistCatalog.all.isNotEmpty())
-        for (entry in WordlistCatalog.all) assertTrue(entry.url, entry.url.startsWith(BrandLinks.DOWNLOAD_PREFIX))
+        val community = mapOf(
+            "probable-wpa-4800.txt" to "Top4800-WPA-probable-v2.txt",
+            "probable-wpa-204k.txt" to "Top204Thousand-WPA-probable-v2.txt",
+        )
+        for (entry in WordlistCatalog.all) {
+            val upstream = community[entry.name]
+            if (upstream == null) assertTrue(entry.url, entry.url.startsWith(BrandLinks.DOWNLOAD_PREFIX))
+            else assertEquals("https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/master/Real-Passwords/WPA-Length/$upstream", entry.url)
+        }
     }
 
     @Test fun updaterAcceptsCurrentAndLaunchRepositoryNamesOnly() {

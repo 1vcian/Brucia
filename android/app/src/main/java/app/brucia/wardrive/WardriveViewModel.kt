@@ -26,6 +26,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import app.brucia.ble.BleDevice
 import app.brucia.automation.MacroRunner
+import app.brucia.nfc.MifareDictionary
+import app.brucia.nfc.MifareDictionaryService
 import app.brucia.nfc.MifareKeyCheckService
 import app.brucia.session.CommandTasks
 import app.brucia.protocol.CommandCapabilities
@@ -472,8 +474,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         stopSender = directStop)
     }
     val mifare get() = mifareKeyCheck.status
-    private val _mifareUserKeys = MutableStateFlow<List<String>>(emptyList())
-    val mifareUserKeys: StateFlow<List<String>> = _mifareUserKeys.asStateFlow()
+    private val mifareDictionaries = MifareDictionaryService(viewModelScope)
+    val mifareDictionary = mifareDictionaries.status
+    val mifareDictionarySources = MifareDictionary.sources
 
     private val _console = MutableStateFlow<List<String>>(emptyList())
     val console: StateFlow<List<String>> = _console.asStateFlow()
@@ -1974,22 +1977,25 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // --- MIFARE key-dictionary attack (bundled defaults + optional user keys) ---
     /** Import extra MIFARE keys from a text file (one 12-hex key per line). */
     fun importMifareKeys(uri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val text = getApplication<Application>().contentResolver.openInputStream(uri)!!
-                    .use { it.readBytes().toString(Charsets.UTF_8) }
-                _mifareUserKeys.value = (_mifareUserKeys.value + NfcSecurity.parseKeys(text)).distinct()
-            } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "import NFC keys failed", e) }
+        mifareDictionaries.load("Imported file") {
+            val stream = getApplication<Application>().contentResolver.openInputStream(uri)
+                ?: throw IOException("Cannot open key dictionary")
+            MifareDictionary.read(stream)
         }
     }
 
-    fun clearMifareUserKeys() { _mifareUserKeys.value = emptyList() }
+    fun downloadMifareKeys(id: String) {
+        val source = mifareDictionarySources.firstOrNull { it.id == id } ?: return
+        mifareDictionaries.load(source.title) { MifareDictionary.download(source) }
+    }
+    fun cancelMifareDictionaryLoad() = mifareDictionaries.cancel()
+    fun clearMifareUserKeys() = mifareDictionaries.clear()
     fun resetMifareAttack() = mifareKeyCheck.reset()
     fun stopMifareKeyCheck() = mifareKeyCheck.stop()
 
     /** Existing bundled and imported dictionary, snapshotted by the batch service. */
     fun runMifareKeyCheck() = mifareKeyCheck.start(
-        NfcSecurity.loadKeyDictionary(getApplication()) + _mifareUserKeys.value
+        NfcSecurity.loadKeyDictionary(getApplication()) + mifareDictionary.value.keys
     )
 
     // --- Sub-GHz capture / replay via the CLI (device decodes; phone stores) ---
@@ -3154,29 +3160,37 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun downloadWordlist(name: String, url: String) {
         if (downloadJobs[name]?.isActive == true) return
-        val job = viewModelScope.launch(Dispatchers.IO) {
-            _downloads.value = _downloads.value + (name to DownloadProgress(name, 0, 0, true))
+        val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            val owner = coroutineContext[Job]!!
+            _downloads.update { it + (name to DownloadProgress(name, 0, 0, true)) }
             try {
-                WordlistStore.download(
-                    getApplication(), url, name,
-                    onProgress = { done, total ->
-                        _downloads.value = _downloads.value + (name to DownloadProgress(name, done, total, true))
-                    },
-                    isCancelled = { downloadJobs[name]?.isActive != true },
-                )
-                _downloads.value = _downloads.value - name
-                _wordlists.value = WordlistStore.list(getApplication())
+                val lists = withContext(Dispatchers.IO) {
+                    WordlistStore.download(
+                        getApplication(), url, name,
+                        onProgress = { done, total ->
+                            _downloads.update { if (owner.isActive) it + (name to DownloadProgress(name, done, total, true)) else it }
+                        },
+                        isCancelled = { !owner.isActive },
+                    )
+                    WordlistStore.list(getApplication())
+                }
+                _downloads.update { it - name }
+                _wordlists.value = lists
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _downloads.value = _downloads.value + (name to DownloadProgress(name, 0, 0, false, e.message ?: "failed"))
+                if (owner.isActive) _downloads.update { it + (name to DownloadProgress(name, 0, 0, false, e.message ?: "failed")) }
+            } finally {
+                if (downloadJobs[name] === owner) downloadJobs.remove(name)
             }
         }
         downloadJobs[name] = job
+        job.start()
     }
 
     fun cancelDownload(name: String) {
-        downloadJobs[name]?.cancel()
-        downloadJobs.remove(name)
-        _downloads.value = _downloads.value - name
+        downloadJobs.remove(name)?.cancel()
+        _downloads.update { it - name }
     }
 
     fun wordlistDownloaded(name: String): Boolean = WordlistStore.has(getApplication(), name)

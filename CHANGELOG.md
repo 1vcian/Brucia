@@ -7,6 +7,14 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Dictionaries: added Probable WPA top 4,800 / 204k alongside RockYou and SecLists,
+  plus on-demand Flipper and Proxmark3 MIFARE Classic dictionaries in NFC. Imports
+  accept comments/BOM, deduplicate keys and report errors without discarding earlier
+  keys. Extra NFC keys last for the app session; downloading does not test a tag.
+- Dictionary downloads now require HTTPS across redirects, bound response sizes,
+  reject incomplete responses and HTML/archive bodies, and preserve the existing
+  wordlist until a replacement is ready. Cancel/Clear fences late NFC load results.
+  Software tests and source downloads checked; phone/tag acceptance remains open.
 - Community documentation refresh: a shorter README with clear setup and contribution
   paths, a task-oriented wiki home, linked feature guides, and practical issue/PR templates.
   Removed explanations of the project's jokes and repeated introductory audit text;

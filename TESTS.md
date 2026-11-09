@@ -4,6 +4,32 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Additional Wi-Fi / NFC dictionaries — 2026-11-10
+
+Probable WPA top 4,800 and top 204k added to the existing Wi-Fi catalog. NFC adds
+Flipper/Proxmark3 Classic sources to the existing bundled/imported key-check path;
+no firmware or cryptographic attack implementation changed. NFC keys remain in memory
+for the app session. Source downloads do not start key checks or write to a tag.
+
+Host source validation (curl with TLS verification, no RF/tag action): Probable files
+45,276 B / 4,800 lines and 2,121,750 B / 203,806 lines; all nonempty lines 8–40
+characters. Flipper dictionary 38,847 B / 2,038 unique Classic keys; Proxmark3
+46,037 B / 2,511 keys. Counts describe the retrieved upstream branches, not fixed
+future content. No data files bundled. These host requests do not test Android TLS.
+
+Focused JVM regressions cover truncated/oversized/HTML/archive/error downloads,
+cancellation, preservation of previous files, HTTPS redirect refusal, comments/BOM,
+key deduplication, malformed imports and late-result fencing after Clear. Existing
+MIFARE batch service, catalog and brand-link checks included: 36 tests, 0 failures.
+`:app:lintDebug` passes (0 errors, 1 OldTargetApi warning); `:app:assembleDebug` passes.
+Brand host checks: 11 PASS, 1 SKIP. Debug APK compiled;
+no installation or flash. Full release verification is recorded after publication.
+
+Phone/tag acceptance still NOT RUN: add each source, cancel during download, import
+a commented .dic/.nfc, Clear and re-add, rotate during load, and check known keys on
+an owned MIFARE Classic tag. Confirm no card operation starts on download/import.
+NTAG/Ultralight/DESFire are outside this Classic dictionary workflow.
+
 ## Community documentation refresh — 2026-11-09
 
 README, wiki home/feature/contribution guides, FAQ, navigation, usage, site copy and

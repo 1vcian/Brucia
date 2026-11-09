@@ -6052,7 +6052,8 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     var analyze by rememberSaveable { mutableStateOf(false) }
     var ndefUrl by rememberSaveable { mutableStateOf("") }
     val mifare by vm.mifare.collectAsState()
-    val mifareUserKeys by vm.mifareUserKeys.collectAsState()
+    val mifareDictionary by vm.mifareDictionary.collectAsState()
+    val mifareUserKeys = mifareDictionary.keys
     val ndefStatus by vm.nfcNdefStatus.collectAsState()
     val emvStatus by vm.nfcEmvStatus.collectAsState()
     val uidStatus by vm.nfcUidStatus.collectAsState()
@@ -6147,15 +6148,32 @@ private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 Spacer(Modifier.height(10.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
-                        enabled = connected && !mifare.running && !keycheckOmitted,
+                        enabled = connected && !mifare.running && !mifareDictionary.busy && !keycheckOmitted,
                         modifier = Modifier.weight(1f),
                         onClick = { vm.runMifareKeyCheck(); Toast.makeText(context, "Running key attack...", Toast.LENGTH_SHORT).show() }
                     ) { Text(if (mifare.running) "Running..." else "Run key attack") }
                     OutlinedButton(
-                        enabled = !mifare.running,
+                        enabled = !mifare.running && !mifareDictionary.busy,
                         modifier = Modifier.weight(1f),
                         onClick = { keyImportLauncher.launch(arrayOf("*/*")) }
                     ) { Text("Import keys") }
+                }
+                Text("MIFARE Classic only: 12 hexadecimal digits per key. Not a dictionary for NTAG, Ultralight or DESFire.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                Text("Extra keys are kept for this app session. Import/download adds to the bundled keys; duplicates are removed.",
+                    style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                vm.mifareDictionarySources.forEach { source ->
+                    OutlinedButton(
+                        enabled = !mifare.running && !mifareDictionary.busy,
+                        onClick = { vm.downloadMifareKeys(source.id) },
+                    ) { Text("Add ${source.title}") }
+                    Text(source.description, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                }
+                if (mifareDictionary.message.isNotBlank()) {
+                    Text(mifareDictionary.message, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+                if (mifareDictionary.busy) {
+                    TextButton(onClick = { vm.cancelMifareDictionaryLoad() }) { Text("Cancel dictionary load") }
                 }
                 if (keycheckOmitted) {
                     Text(app.brucia.wardrive.DeviceFeatures.OMITTED_REASON, style = MaterialTheme.typography.bodySmall, color = cs.error)
@@ -8512,7 +8530,7 @@ private fun CrackScreen(vm: WardriveViewModel) {
         item {
             Spacer(Modifier.height(4.dp))
             Text("Download real wordlists", color = cs.primary, fontWeight = FontWeight.SemiBold)
-            Text("rockyou and SecLists, straight to the phone", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            Text("RockYou, SecLists and Probable WPA lists. Downloading does not start a test.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
         items(vm.wordlistCatalog) { entry ->
                 CatalogRow(
@@ -8557,7 +8575,7 @@ private fun CatalogRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(entry.title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
-                    Text("${entry.entries} entries  -  ~${entry.approxBytes / 1_000_000}MB", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text("${entry.entries} entries  -  " + if (entry.approxBytes < 1_000_000) "~${entry.approxBytes / 1_000} KB" else "~${entry.approxBytes / 1_000_000} MB", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
                 when {
                     progress?.running == true -> OutlinedButton(onClick = onCancel) { Text("Cancel") }

@@ -4,8 +4,6 @@ import android.content.Context
 import android.annotation.SuppressLint
 import android.net.Uri
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 
 data class WordlistInfo(val name: String, val lines: Int, val sizeBytes: Long)
 
@@ -44,57 +42,8 @@ object WordlistStore {
         isCancelled: () -> Boolean,
     ): WordlistInfo {
         val dest = File(dir(ctx), sanitize(name))
-        val part = File(dir(ctx), sanitize(name) + ".part")
-        var current = URL(url)
-        var conn = open(current)
-        var redirects = 0
-        while (conn.responseCode in 301..308 && redirects < 5) {
-            val loc = conn.getHeaderField("Location") ?: break
-            conn.disconnect()
-            current = URL(current, loc)
-            conn = open(current)
-            redirects++
-        }
-        if (conn.responseCode / 100 != 2) {
-            conn.disconnect()
-            throw java.io.IOException("HTTP ${conn.responseCode}")
-        }
-        val total = conn.contentLengthLong
-        try {
-            conn.inputStream.use { input ->
-                part.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    var done = 0L
-                    var lastReport = 0L
-                    while (true) {
-                        if (isCancelled()) throw InterruptedException("cancelled")
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        done += n
-                        if (done - lastReport > 512 * 1024) {
-                            onProgress(done, total); lastReport = done
-                        }
-                    }
-                    onProgress(done, total)
-                }
-            }
-        } catch (e: Exception) {
-            part.delete()
-            throw e
-        } finally {
-            conn.disconnect()
-        }
-        if (dest.exists()) dest.delete()
-        part.renameTo(dest)
+        DictionaryDownload.store(dest, url, 512L * 1024 * 1024, isCancelled, onProgress)
         return info(dest)
-    }
-
-    private fun open(url: URL): HttpURLConnection = (url.openConnection() as HttpURLConnection).apply {
-        instanceFollowRedirects = false
-        connectTimeout = 15000
-        readTimeout = 30000
-        setRequestProperty("User-Agent", "Brucia")
     }
 
     fun delete(ctx: Context, name: String): Boolean = File(dir(ctx), sanitize(name)).delete()

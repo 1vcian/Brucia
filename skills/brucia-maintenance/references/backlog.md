@@ -1,5 +1,13 @@
 # Work queue — single operational ledger
 
+Dictionary alternatives 2026-11-10: Probable WPA 4,800/204k added alongside existing
+RockYou/SecLists; Flipper/Proxmark3 Classic key downloads added in NFC. Modular bounded
+HTTPS loader + NFC import service; deduplication, visible failure, Cancel/Clear fencing,
+previous dictionary preservation. No firmware/crypto changes; NFC data lasts for the
+app session. Host endpoints/formats checked and focused JVM checks run; TESTS.md has
+limits. User explicitly requested commit, push and release after implementation.
+Remaining: phone download/import/cancel/rotation and known owned Classic-tag checks.
+
 Community presentation 2026-11-09: README, wiki home/navigation/feature guides,
 contribution paths, usage/FAQ, site copy and issue/PR templates refreshed. Repeated
 audit-style introductions condensed into useful hardware notes and evidence links;

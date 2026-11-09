@@ -62,8 +62,12 @@ Brucia moves this workflow into Android with capture import, wordlists and resul
 device captures a PMKID (`wifi_pmkid`) or a 4-way handshake (`wifi_handshake`); the phone
 does the rest:
 
-- **Download real wordlists** in-app (rockyou, SecLists top-1M / 100k / 12k), plus a
+- **Download real wordlists** in-app (rockyou, SecLists top-1M / 100k / 10k), plus a
   built-in offline quick list and import of any `.txt`.
+- **Probable WPA top 4,800 / 204k** are additional downloads from berzerk0's
+  Probable-Wordlists. Entries are ordered by popularity and filtered to 8–40 characters;
+  they are general-password collections, not captured Wi-Fi credentials. The larger
+  file includes the smaller one. RockYou and SecLists remain available.
 - Several built-in dictionaries: common WPA, numeric/dates, keyboard walks, Italian,
   router defaults, plus a rockyou-scale import manager.
 - Pull a captured `.pcap` from the device SD over USB (`fs_read`) or import one, or paste

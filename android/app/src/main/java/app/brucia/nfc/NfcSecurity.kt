@@ -19,12 +19,7 @@ object NfcSecurity {
     )
 
     /** Parse a MIFARE key dictionary (one 12-hex key per line), filtering invalid lines. */
-    fun parseKeys(text: String): List<String> =
-        text.lineSequence()
-            .map { it.trim().uppercase() }
-            .filter { it.length == 12 && it.all { c -> c in "0123456789ABCDEF" } }
-            .distinct()
-            .toList()
+    fun parseKeys(text: String): List<String> = MifareDictionary.parse(text)
 
     /** Load the bundled MIFARE key dictionary (assets/mifare_keys.txt), or the defaults. */
     fun loadKeyDictionary(context: Context): List<String> = try {
