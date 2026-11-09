@@ -3,7 +3,7 @@
 // Product identity. Bruce-compatible commands and capture/config formats keep
 // their original names; visible product labels and new-install defaults live here.
 // Public links (repository, site, wiki, releases, upstream credit) are generated
-// from brand.json into brucia_brand.h; see docs/LAUNCH.md for the BruciaDev -> Brucia switch.
+// from brand.json into brucia_brand.h (docs/LAUNCH.md).
 #include "brucia_brand.h"
 
 #define BRUCIA_PRODUCT_NAME BRUCIA_NAME

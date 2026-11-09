@@ -19,7 +19,7 @@ Pick one method.
 
 ### Browser flasher (easiest)
 
-1. Open **https://1vcian.me/BruciaDev/** in Chrome or Edge (desktop, or Chrome on
+1. Open **https://1vcian.me/Brucia/** in Chrome or Edge (desktop, or Chrome on
    Android via USB-OTG).
 2. Plug in the T-Embed CC1101 with a **data** USB-C cable.
 3. Click **Connect & Flash**.
@@ -40,7 +40,7 @@ See [[Building]] for the full toolchain setup.
 ## 2. Install the app
 
 - Download the APK from the project
-  [Releases](https://github.com/1vcian/BruciaDev/releases) and install it (allow
+  [Releases](https://github.com/1vcian/Brucia/releases) and install it (allow
   installation from unknown sources), **or**
 - Build it yourself:
 

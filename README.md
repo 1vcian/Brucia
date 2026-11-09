@@ -230,14 +230,14 @@ the [supported list](ROADMAP.md) works; this is just the one Brucia is verified 
 
 **1. Flash the firmware** (pick one)
 
-- **Browser** (easiest): open **https://1vcian.me/BruciaDev/** in Chrome/Edge, plug in the
+- **Browser** (easiest): open **https://1vcian.me/Brucia/** in Chrome/Edge, plug in the
   T-Embed CC1101 with a *data* USB-C cable, click *Connect & Flash*.
 - **From source**: build with `python3 tools/build_firmware.py -e lilygo-t-embed-cc1101`,
   then `pio run -e lilygo-t-embed-cc1101 -t upload`. Prerequisites and exact steps:
   [CONTRIBUTING.md](CONTRIBUTING.md#build--test).
 
 **2. Install the app** - download the APK from
-[Releases](https://github.com/1vcian/BruciaDev/releases), or build it:
+[Releases](https://github.com/1vcian/Brucia/releases), or build it:
 `cd android && ./gradlew :app:assembleDebug` (JDK 21-25 and Android SDK platform 37; see
 [CONTRIBUTING.md](CONTRIBUTING.md#build--test)).
 
@@ -275,7 +275,7 @@ For how Brucia compares to Flipper Zero and Bruce, see the [feature comparison](
 
 ## Documentation
 
-- [Project wiki](https://github.com/1vcian/BruciaDev/wiki) - getting started, features, architecture, protocol, building, FAQ
+- [Project wiki](https://github.com/1vcian/Brucia/wiki) - getting started, features, architecture, protocol, building, FAQ
 - [test evidence](TESTS.md) - current verification evidence and pending acceptance
 - [SECURITY.md](SECURITY.md) - authorized-use policy and responsible disclosure
 - [docs/USAGE.md](docs/USAGE.md) - flash, connect, and use every tab

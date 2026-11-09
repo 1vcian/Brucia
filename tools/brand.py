@@ -236,7 +236,7 @@ def write(root: Path = ROOT) -> list[str]:
 
 
 def apply_launch(raw: dict) -> dict:
-    """Return brand values after the BruciaDev -> Brucia switch (see docs/LAUNCH.md)."""
+    """Return brand values with the "launch" block applied (see docs/LAUNCH.md)."""
     out = json.loads(json.dumps(raw))
     for key in ("github_repo", "site_url", "release_remote"):
         out[key] = raw["launch"][key]

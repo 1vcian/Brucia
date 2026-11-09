@@ -53,7 +53,7 @@ cd android && ./gradlew :app:testDebugUnitTest   # app unit + screenshot tests
 
 ## License
 
-[AGPL-3.0](https://github.com/1vcian/BruciaDev/blob/main/LICENSE). Brucia is a
+[AGPL-3.0](https://github.com/1vcian/Brucia/blob/main/LICENSE). Brucia is a
 derivative of [Bruce](https://github.com/BruceDevices/firmware) and complementary to
 its official app.
 

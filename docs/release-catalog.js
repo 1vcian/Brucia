@@ -6,8 +6,7 @@
      "sha256:" + 64 lowercase hex): the asset is not offered (it still counts for ambiguity);
    - mismatch after download: hard failure, nothing reaches the flasher.
    Repository links come from brand.js (generated from brand.json); assets are accepted from the
-   current repository and the BruciaDev/Brucia names listed there, so the BruciaDev -> Brucia rename
-   (docs/LAUNCH.md) keeps working. */
+   current repository and any other names in accepted_release_repos (used only across a rename). */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(require("./brand.js"));
   else root.BruciaReleases = factory(root.BruciaBrand);

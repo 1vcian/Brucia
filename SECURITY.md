@@ -55,7 +55,7 @@ without warranty of any kind, as stated in the license.
 
 If you find a security issue in Brucia (firmware, app, or build tooling):
 
-- Preferably, open a [GitHub issue](https://github.com/1vcian/BruciaDev/issues) with
+- Preferably, open a [GitHub issue](https://github.com/1vcian/Brucia/issues) with
   a clear description and reproduction steps. For most findings in a hobbyist
   security-research tool, a public issue is fine.
 - If the issue is sensitive (for example, it could be used to attack users of the

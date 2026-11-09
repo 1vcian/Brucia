@@ -2,10 +2,12 @@
   "about": "Single source of Brucia's public identity and links. Edit only together with docs/LAUNCH.md, then run: python3 tools/brand.py write",
   "name": "Brucia",
   "github_owner": "1vcian",
-  "github_repo": "BruciaDev",
-  "site_url": "https://1vcian.me/BruciaDev/",
-  "release_remote": "brucia-dev",
-  "accepted_release_repos": ["BruciaDev", "Brucia"],
+  "github_repo": "Brucia",
+  "site_url": "https://1vcian.me/Brucia/",
+  "release_remote": "origin",
+  "accepted_release_repos": [
+    "Brucia"
+  ],
   "launch": {
     "github_repo": "Brucia",
     "site_url": "https://1vcian.me/Brucia/",

@@ -3,7 +3,7 @@ package app.brucia
 /**
  * Brucia's public links. The values come from the repo-root brand.json through BuildConfig
  * (android/app/build.gradle.kts), the same file the firmware header and the website are generated
- * from; every URL is derived here so the BruciaDev -> Brucia switch (docs/LAUNCH.md) is one change.
+ * from; every URL is derived here so a repository or site change is one edit (docs/LAUNCH.md).
  */
 object BrandLinks {
     val NAME: String = BuildConfig.BRAND_NAME
@@ -19,9 +19,8 @@ object BrandLinks {
     val RELEASES_API: String = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
 
     /**
-     * Release asset prefixes the updater accepts: the current repository plus the other names in
-     * brand.json (BruciaDev and Brucia), so an app built before the rename still accepts assets that
-     * GitHub reports under the new name, and the reverse.
+     * Release asset prefixes the updater accepts: the current repository plus any other names in
+     * brand.json `accepted_release_repos` (used only across a repository rename).
      */
     val ACCEPTED_DOWNLOAD_PREFIXES: List<String> = (
         listOf(GITHUB_REPO) + BuildConfig.BRAND_ACCEPTED_RELEASE_REPOS.split(',').filter { it.isNotBlank() }

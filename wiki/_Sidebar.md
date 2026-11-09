@@ -22,7 +22,7 @@
 
 **Links**
 
-- [Repository](https://github.com/1vcian/BruciaDev)
-- [Releases](https://github.com/1vcian/BruciaDev/releases)
-- [Web flasher](https://1vcian.me/BruciaDev/)
+- [Repository](https://github.com/1vcian/Brucia)
+- [Releases](https://github.com/1vcian/Brucia/releases)
+- [Web flasher](https://1vcian.me/Brucia/)
 - [Bruce (upstream)](https://github.com/BruceDevices/firmware)

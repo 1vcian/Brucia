@@ -1,6 +1,6 @@
 """brand.json is the single source of Brucia's public links (see docs/LAUNCH.md).
 
-Checks: derived values and validation, generated/managed files in sync, the BruciaDev -> Brucia
+Checks: derived values and validation, generated/managed files in sync, the launch
 switch end to end on a copy, firmware brand-macro hygiene, and a scanner that fails when a
 Brucia repo/site link or a Bruce upstream link appears outside the central config and the
 reasoned allowlist below.
@@ -22,7 +22,7 @@ ROOT = brand.ROOT
 # with the reason. Managed files (brand.MANAGED_GLOBS) may contain own links only while in sync.
 ALLOWLIST = [
     ("brand.json", {"own", "upstream"}, "the central config itself"),
-    ("docs/LAUNCH.md", {"own", "upstream"}, "documents the BruciaDev -> Brucia switch, both names on purpose"),
+    ("docs/LAUNCH.md", {"own", "upstream"}, "documents the repository/site switch"),
     ("CHANGELOG.md", {"own", "upstream"}, "historical release records and published tag links; upstream credit"),
     ("TESTS.md", {"own"}, "evidence log quoting what devices displayed at the time"),
     ("skills/brucia-maintenance/references/*.md", {"own"}, "task history and release evidence"),
@@ -111,7 +111,7 @@ class DeriveTest(unittest.TestCase):
     def setUp(self):
         self.raw = brand.load()
 
-    def test_current_values_stay_on_bruciadev_until_launch(self):
+    def test_current_values_are_the_public_repository(self):
         d = brand.derive(self.raw)
         self.assertEqual("Brucia", d["name"])
         self.assertEqual(f"https://github.com/{d['repo_slug']}", d["repo_url"])
@@ -119,6 +119,11 @@ class DeriveTest(unittest.TestCase):
         self.assertEqual(f"https://api.github.com/repos/{d['repo_slug']}/releases/latest", d["releases_api"])
         self.assertEqual(d["site_url"] + "wiki/", d["wiki_url"])
         self.assertIn(d["download_prefix"], d["accepted_download_prefixes"])
+        # Launched 2026-11-09: the repository was renamed BruciaDev -> Brucia; the old name is gone.
+        self.assertEqual("Brucia", d["github_repo"])
+        self.assertEqual("origin", d["release_remote"])
+        self.assertEqual([d["download_prefix"]], d["accepted_download_prefixes"])
+        self.assertNotIn("BruciaDev", json.dumps(self.raw))
 
     def test_launch_switch_changes_repo_site_and_remote_only(self):
         before, after = brand.derive(self.raw), brand.derive(brand.apply_launch(self.raw))
@@ -137,8 +142,8 @@ class DeriveTest(unittest.TestCase):
             with self.assertRaises(ValueError, msg=f"{key}={value!r}"):
                 brand.derive(raw)
         raw = json.loads(json.dumps(self.raw))
-        raw["accepted_release_repos"] = [self.raw["github_repo"]]
-        with self.assertRaises(ValueError, msg="launch repo must stay accepted for the updater migration"):
+        raw["accepted_release_repos"] = ["Other"]
+        with self.assertRaises(ValueError, msg="the current/launch repo must be accepted by the updater"):
             brand.derive(raw)
 
 

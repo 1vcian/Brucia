@@ -26,7 +26,7 @@ Existing phone-assisted tools to verify and demonstrate; this is not an exclusiv
 - **Full remote control + live screen mirror** - the app drives every device menu.
 
 See [[Features-Tools]], [[Features-Audio]], [[Features-Wi-Fi]] and [[Features-Device]] for details,
-and the [feature comparison](https://github.com/1vcian/BruciaDev/blob/main/docs/COMPARISON.md) for the
+and the [feature comparison](https://github.com/1vcian/Brucia/blob/main/docs/COMPARISON.md) for the
 current scope, hardware limits and verification status.
 
 Features are organized into the pages below. Each page has one section per feature, with

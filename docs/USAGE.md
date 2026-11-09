@@ -8,7 +8,7 @@ explicitly permitted to test.
 
 Pick one:
 
-- **Browser** (easiest): open https://1vcian.me/BruciaDev/ in desktop Chrome or Edge, plug the LilyGo T-Embed CC1101 with a **data**
+- **Browser** (easiest): open https://1vcian.me/Brucia/ in desktop Chrome or Edge, plug the LilyGo T-Embed CC1101 with a **data**
   USB-C cable, click *Connect & Flash*.
 - **Android app**: use Device → Updates with the board connected over USB-OTG.
 - **From source**: `python3 tools/build_firmware.py -e lilygo-t-embed-cc1101`, then

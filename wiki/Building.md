@@ -32,7 +32,7 @@ pre-build library patches apply on the first build.
 
 A merged, flashable image is produced at
 `.pio/build/lilygo-t-embed-cc1101/firmware.factory.bin` - this is what the browser
-flasher at https://1vcian.me/BruciaDev/ serves.
+flasher at https://1vcian.me/Brucia/ serves.
 
 Notes:
 - The board is an ESP32-S3 with native USB CDC; no external USB-serial adapter is

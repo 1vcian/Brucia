@@ -21,7 +21,7 @@ object ReleaseCatalog {
 
     /** GitHub release metadata nests about four levels; Android's org.json recursion is unbounded. */
     private const val MAX_DEPTH = 32
-    /** Current repository plus the BruciaDev/Brucia names from brand.json (rename migration). */
+    /** Current repository plus brand.json `accepted_release_repos`. */
     private val DOWNLOAD_PREFIXES: List<String> get() = app.brucia.BrandLinks.ACCEPTED_DOWNLOAD_PREFIXES
 
     fun parse(body: String): Release {

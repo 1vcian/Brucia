@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # One-command release: bumps the single VERSION file, rebuilds firmware + app from it, and publishes
-# a release with the APK + firmware bin to the repository named in brand.json (the PRIVATE BruciaDev
-# repo while the project is private; docs/LAUNCH.md covers the switch to Brucia).
-# The public repo (origin) is intentionally NOT touched here - do not publish publicly until tested.
+# a release with the APK + firmware bin to the repository named in brand.json (1vcian/Brucia, pushed
+# through the git remote brand.json names as release_remote).
 #
 # Usage: ./release.sh [major|minor|patch] ["changelog notes"]
 #   The optional second argument is the release changelog. It becomes the GitHub release BODY (which

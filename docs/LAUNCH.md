@@ -1,9 +1,10 @@
-# Launch: BruciaDev -> Brucia
+# Launch: public repository
 
-Status: **not started**. The project lives in the private repository `1vcian/BruciaDev`
-(site `https://1vcian.me/BruciaDev/`, wiki `https://1vcian.me/BruciaDev/wiki/`). At launch it
-becomes `1vcian/Brucia` (site `https://1vcian.me/Brucia/`). This file is the procedure; do not
-run it until the owner decides to launch.
+Status: **done 2026-11-09.** The repository is `1vcian/Brucia` (public), the site is
+`https://1vcian.me/Brucia/` (wiki `https://1vcian.me/Brucia/wiki/`), and releases are published
+there by `release.sh` through the git remote `origin`. The old private name is no longer used
+anywhere in the configuration; GitHub redirects web, git and API requests from the old name, so
+apps built before the rename still find new releases.
 
 ## The central config
 
@@ -24,86 +25,35 @@ organisation link is hardcoded outside `brand.json` and the reasoned allowlist i
 It also performs the whole switch on a temporary copy, so the procedure below is tested before
 it is used.
 
-### Release-name migration
+### Changing the repository or site again
 
-`accepted_release_repos` lists `BruciaDev` and `Brucia`. The app and the web flasher accept
-release assets whose URL is `https://github.com/1vcian/<either name>/releases/download/<tag>/<asset>`
-(the exact spelling only, as before). After the rename, GitHub reports assets under the new
-name. Apps built from this change onwards accept both names; **apps built before it accept only
-`BruciaDev` and will not offer the update**: those installs need one manual APK install from
-the Releases page. Publish at least one release from BruciaDev with this change before
-launching, and ask testers to update to it.
+1. Edit `github_repo` / `site_url` / `release_remote` in `brand.json` (and the `launch` block),
+   keeping the old repository name in `accepted_release_repos` for as long as installed apps may
+   still see asset URLs under it.
+2. `python3 tools/brand.py write`, then `python3 tools/brand.py check` and the test suites
+   (`python3 -m unittest discover -s tools -p 'test_*.py'`, `node --test tools/test_site_release.cjs`,
+   `cd android && ./gradlew :app:testDebugUnitTest :app:lintDebug`).
+3. Commit and run `./release.sh`.
 
-## Before launch
+### Left from the rename
 
-1. Hardware checks of the branded firmware (list below) are done and recorded in `TESTS.md`.
-2. A bridge release with this change is published from BruciaDev, and the testers' apps run it.
-3. Decide what happens to the existing public repository `1vcian/Brucia` (the `origin` remote,
-   which still holds the old public history). Its name must be free before the rename.
-
-## Switch steps
-
-Order matters: the GitHub redirect from the old name is what keeps installed apps updating.
-
-1. **Free the name.** Rename the existing public `1vcian/Brucia` (for example to
-   `Brucia-archive`) or archive and rename it. Do not create anything new named `Brucia` yet.
-2. **Rename the repository.** In GitHub settings rename `1vcian/BruciaDev` to `1vcian/Brucia`.
-   GitHub keeps releases, tags and issues and redirects web, git and API requests from
-   `BruciaDev` to `Brucia`. **Never create a new repository named `BruciaDev` afterwards**: it
-   would break this redirect. Installed apps query
-   `https://api.github.com/repos/1vcian/BruciaDev/releases/latest`; GitHub answers with a 301 to
-   the renamed repository and `UpdateHttp.follow` follows HTTPS redirects.
-3. **Visibility.** Make the repository public when ready. While private, the updater and the web
-   flasher report that no release is available (current behaviour) and the source link shown by
-   the firmware and the app cannot be opened by the public.
-4. **Change the central value.** In a clean working copy on `main`:
-   ```sh
-   python3 tools/brand.py launch     # copies "launch" into the current values and rewrites files
-   git diff                           # brand.json, include/brucia_brand.h, docs/brand.js, managed links
-   git remote -v                      # release_remote is now "origin": it must point to 1vcian/Brucia
-   ```
-   Keep both names in `accepted_release_repos`.
-5. **Verify.**
-   ```sh
-   python3 tools/brand.py check
-   python3 -m unittest discover -s tools -p 'test_*.py'
-   node --test tools/test_site_release.cjs
-   python3 tools/test_android_logic.py
-   cd android && ./gradlew :app:testDebugUnitTest :app:lintDebug :app:verifyPaparazziDebug :app:assembleDebug
-   ```
-   If a Paparazzi snapshot shows a changed link, re-record it and review the image.
-6. **Commit and release.** Commit the switch, then run `./release.sh` as usual: it now pushes to
-   `origin` and publishes to `1vcian/Brucia`. The firmware built from it shows the new links; the
-   app built from it queries the new repository directly.
-7. **GitHub Pages.** Enable Pages for `1vcian/Brucia` (branch `main`, folder `/docs`). The project
-   site moves from `https://1vcian.me/BruciaDev/` to `https://1vcian.me/Brucia/`; Pages does not
-   redirect project paths on a rename.
-8. **Website redirect.** In the repository that serves the `1vcian.me` user site, add
-   `BruciaDev/index.html`, `BruciaDev/wiki/index.html` and `BruciaDev/404.html` with a
-   `<meta http-equiv="refresh" content="0; url=https://1vcian.me/Brucia/">` (wiki page:
-   `.../Brucia/wiki/`), a `<link rel="canonical">` and a visible link. This works only because no
-   project repository named `BruciaDev` exists any more. It keeps the QR codes and NFC defaults of
-   older firmware, old README links and bookmarks working.
-9. **Release asset URLs.** Old asset URLs (`.../BruciaDev/releases/download/...`, including the
-   `wordlists` tag) keep working through the GitHub redirect. New builds use `.../Brucia/...`.
-10. **After launch.** Check from a phone with a bridge-release app that "Check for updates" finds
-    the new release, downloads it and verifies it. Check the web flasher at the new address.
-    Keep `BruciaDev` in `accepted_release_repos` until no tester runs a BruciaDev-era build.
-
-Optional after launch: the CC1101 wiring QR codes in `src/core/settings.cpp` point at images in
-the upstream Bruce repository (`media/connections/`); Brucia's repository has only one of them.
-Repoint them to `BRUCIA_REPO_URL` once both images are in Brucia's public repository.
+- Firmware flashed before the rename shows QR codes and NFC defaults pointing at the old site
+  path. GitHub Pages does not redirect project paths on a rename; a redirect page under the old
+  path in the repository that serves `1vcian.me` would keep them working (not done).
+- The CC1101 wiring QR codes in `src/core/settings.cpp` point at images in the upstream Bruce
+  repository (`media/connections/`); repoint them to `BRUCIA_REPO_URL` once both images are in
+  Brucia's repository.
 
 ## Hardware checks for the branding change
 
-Not yet verified on a device (firmware needs a build). Record results in `TESTS.md`.
+Not yet verified on a device. Record results in `TESTS.md`.
 
 - Boot screen and boot animation: "Brucia" and the version.
-- Device Info screen: "Brucia <version>", "Based on Bruce (AGPL-3.0)", "Source: github.com/1vcian/BruciaDev",
+- Device Info screen: "Brucia <version>", "Based on Bruce (AGPL-3.0)", "Source: github.com/1vcian/Brucia",
   "Upstream: github.com/BruceDevices/firmware".
 - Serial: boot banner reads BRUCIA, with the credit and source lines; `info` prints Source and Upstream.
-- Companion mode from the menu: the QR opens `https://github.com/1vcian/BruciaDev/releases/latest`;
-  the status screen shows `github.com/1vcian/BruciaDev`.
+- Companion mode from the menu: the QR opens `https://github.com/1vcian/Brucia/releases/latest`;
+  the status screen shows `github.com/1vcian/Brucia`.
 - QR Codes menu on a fresh config: "Brucia AP", "Brucia guide" (site URL), "Bruce upstream".
 - WebUI in AP mode: the screen shows the configured AP SSID/password (not a hardcoded "BruceNet");
   the browser title is Brucia; Info dialog shows the Bruce credit and the source link.
@@ -126,10 +76,9 @@ Not yet verified on a device (firmware needs a build). Record results in `TESTS.
   organisation, inherited board JSON vendor URLs, upstream PCB documents, inherited SD-card content
   (Bruce theme builder, example JS bookmarks) and the upstream WebUI customization guide.
 
-## Documentation regeneration at launch
+## Documentation regeneration
 
-Rewrite these after the switch, describing only what is verified at that point (see `TESTS.md`).
-Do not write them before launch.
+Still to do after the launch, describing only what is verified at that point (see `TESTS.md`).
 
 - `README.md`: project description, install paths, links, status of hardware verification.
 - Wiki pages (`wiki/*.md`, rendered by `docs/wiki/`): Home, Getting Started, Features,

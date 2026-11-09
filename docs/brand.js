@@ -4,20 +4,19 @@
   "use strict";
   var brand = Object.freeze({
     "name": "Brucia",
-    "repo_url": "https://github.com/1vcian/BruciaDev",
-    "repo_display": "github.com/1vcian/BruciaDev",
-    "releases_url": "https://github.com/1vcian/BruciaDev/releases",
-    "latest_release_url": "https://github.com/1vcian/BruciaDev/releases/latest",
-    "download_prefix": "https://github.com/1vcian/BruciaDev/releases/download/",
+    "repo_url": "https://github.com/1vcian/Brucia",
+    "repo_display": "github.com/1vcian/Brucia",
+    "releases_url": "https://github.com/1vcian/Brucia/releases",
+    "latest_release_url": "https://github.com/1vcian/Brucia/releases/latest",
+    "download_prefix": "https://github.com/1vcian/Brucia/releases/download/",
     "accepted_download_prefixes": [
-      "https://github.com/1vcian/BruciaDev/releases/download/",
       "https://github.com/1vcian/Brucia/releases/download/"
     ],
-    "releases_api": "https://api.github.com/repos/1vcian/BruciaDev/releases/latest",
-    "raw_wiki_base": "https://raw.githubusercontent.com/1vcian/BruciaDev/main/wiki/",
-    "github_wiki_url": "https://github.com/1vcian/BruciaDev/wiki/",
-    "site_url": "https://1vcian.me/BruciaDev/",
-    "wiki_url": "https://1vcian.me/BruciaDev/wiki/",
+    "releases_api": "https://api.github.com/repos/1vcian/Brucia/releases/latest",
+    "raw_wiki_base": "https://raw.githubusercontent.com/1vcian/Brucia/main/wiki/",
+    "github_wiki_url": "https://github.com/1vcian/Brucia/wiki/",
+    "site_url": "https://1vcian.me/Brucia/",
+    "wiki_url": "https://1vcian.me/Brucia/wiki/",
     "upstream_name": "Bruce",
     "upstream_repo_url": "https://github.com/BruceDevices/firmware"
   });
