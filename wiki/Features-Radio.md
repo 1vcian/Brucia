@@ -1,8 +1,6 @@
 # Radio: NRF24, LoRa and FM
 
-> Public reference: Stock T-Embed does not include every optional module; check ownership conflicts. Presence, successful replies and physical effects are
-> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
-> and [Tutorials](Tutorials.md) before relying on a workflow.
+> NRF24, LoRa and FM need compatible add-ons; check the connected board's capabilities.
 
 The 2.4 GHz NRF24 add-on and the longer-range radio tools. NRF24 is gated on `caps.nrf24`
 (an optional QWIIC add-on), LoRa on `caps.lora`, and FM on `caps.fm` - **FM is capability-
@@ -40,3 +38,8 @@ without a Si4713, such as the T-Embed CC1101.
 
 ---
 Back to [Features](Features.md).
+
+---
+
+[All tools](Features.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md) ·
+[Device test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md)

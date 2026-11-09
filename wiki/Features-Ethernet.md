@@ -1,8 +1,6 @@
 # Ethernet
 
-> Public reference: Requires supported Ethernet hardware and a lab network. Presence, successful replies and physical effects are
-> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
-> and [Tutorials](Tutorials.md) before relying on a workflow.
+> Requires a supported Ethernet add-on and a network you are authorized to test.
 
 Wired-network tools for the optional W5500 Ethernet add-on. Gated on `caps.eth`; **the
 W5500 is not fitted on the T-Embed CC1101**, so this page is hidden on that board.
@@ -29,3 +27,8 @@ short run. Authorized testing only.
 
 ---
 Back to [Features](Features.md).
+
+---
+
+[All tools](Features.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md) ·
+[Device test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md)

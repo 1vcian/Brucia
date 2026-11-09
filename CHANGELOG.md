@@ -7,6 +7,10 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Community documentation refresh: a shorter README with clear setup and contribution
+  paths, a task-oriented wiki home, linked feature guides, and practical issue/PR templates.
+  Removed explanations of the project's jokes and repeated introductory audit text;
+  hardware limits, media labels and detailed test evidence remain available.
 - Reproducible host processing benchmark and speed-comparison methodology: actual Kotlin
   WPA2/PMKID, FFT, DTMF and SSTV with synthetic fixtures, raw samples and source hashes.
   Mac results are explicitly separate from pending phone/device comparisons; corrected

@@ -1,8 +1,6 @@
 # Device and UX
 
-> Public reference: Keep the correct firmware/board pair; verify mode changes and recovery. Presence, successful replies and physical effects are
-> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
-> and [Tutorials](Tutorials.md) before relying on a workflow.
+> Use firmware for your exact board and keep files backed up before an update.
 
 Device management, in-app flashing, and the quality-of-life features that make the phone
 feel like the device's own screen.
@@ -69,3 +67,8 @@ standalone on the device. See [Features-BLE-and-IR](Features-BLE-and-IR.md).
 
 ---
 Back to [Features](Features.md).
+
+---
+
+[All tools](Features.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md) ·
+[Device test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md)

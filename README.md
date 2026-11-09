@@ -5,135 +5,104 @@
 
 *Let your phone burn, so your ESP32 doesn't.*
 
-[Get started](wiki/Getting-Started.md) · [Releases](https://github.com/1vcian/Brucia/releases/latest) ·
-[Public wiki](https://1vcian.me/Brucia/wiki/) · [Tutorials](wiki/Tutorials.md) · [Test evidence](TESTS.md)
+[Download](https://github.com/1vcian/Brucia/releases/latest) · [Get started](wiki/Getting-Started.md) ·
+[Wiki](https://1vcian.me/Brucia/wiki/) · [Tutorials](wiki/Tutorials.md) · [Contribute](CONTRIBUTING.md)
 </div>
 
-Brucia pairs Bruce-derived ESP32 firmware with a native Android app for device control,
-analysis, maps and storage. The reference board is the **LilyGO T-Embed CC1101**.
-The firmware also has a standalone menu. Brucia is free software under **AGPL-3.0**,
-with attribution to [Bruce](https://github.com/BruceDevices/firmware) and its contributors.
+Brucia turns an Android phone and an ESP32 into a shared workspace for radio,
+security research and hardware experiments. The device handles peripherals and timing;
+the phone brings the screen, processing, maps and storage.
 
-## Start here
+Built on [Bruce](https://github.com/BruceDevices/firmware), with a native Kotlin +
+Compose app. Start with a **LilyGO T-Embed CC1101**, an Android phone with USB host/OTG
+and a USB data cable. The firmware also works from its own menus.
 
-1. Download the APK and the firmware for your exact board from the same release.
-2. For the T-Embed CC1101, use the [web flasher](https://1vcian.me/Brucia/) in desktop Chrome or Edge
-   with a USB **data** cable. Check the release and board shown before flashing.
-3. Install the APK on Android. Connect the board to the phone with USB host/OTG support,
-   grant USB access and enter **Brucia** companion mode on the device.
-4. Check the reported firmware and capabilities before opening a tool. Start with device
-   information or a file listing; follow the [connection tutorial](wiki/Getting-Started.md).
+## One cable. Plenty to explore.
 
-The Android app also has a USB firmware updater. Browser flashing on Android is not the
-documented route. Installation, upgrades and recovery are covered in [Tutorials](wiki/Tutorials.md).
-
-## What you can explore
-
-| Workspace | App and device responsibilities | Important limit |
-|---|---|---|
-| Wi-Fi and BLE observations | Device radio; phone lists, maps, storage and exports | Observe your own lab; receiver behavior and active functions need separate checks. |
-| Sub-GHz and infrared | Device timing; phone waveforms, catalogs and saved items | Protocol support varies. A successful command is not proof of a receiver response. |
-| NFC | PN532 interaction plus phone presentation | Tag-specific support; no universal cloning or emulation claim. |
-| Audio | Device mic/speaker; phone DSP, spectrum and analysis | Physical audio paths require their own verification. |
-| Files and scripts | Phone file workflow; JavaScript runs on the device | Third-party scripts are executable code, not trusted by default. |
-| Remote and device tools | Screen mirror, navigation, settings, diagnostics and updates | Remote changes the link mode; stop operations before switching. |
-| Optional modules | NRF24, LoRa, FM, Ethernet and other interfaces | Requires compatible hardware, firmware support and runtime availability. |
-
-See the [feature guide](wiki/Features.md) for module details and [hardware capabilities](docs/HARDWARE_CAPABILITIES.md)
-for what the stock board includes. USB is the companion transport. The separate paired
-BLE console is a command interface, not a wireless replacement for the USB workspace.
-
-## Security tools included
-
-Brucia includes active research tools as well as observation and analysis. Their
-presence is separate from novelty or physical acceptance; use them within an authorized lab.
-
-| Tool | What Brucia provides |
+| Workspace | What's inside |
 |---|---|
-| **WPA/WPA2 dictionary attacks** | Phone-side verification of captured handshakes/PMKIDs, wordlist import/download, candidate rules, progress and hashcat-format exchange. |
-| **De Bruijn** | Phone-side sequence planning and a controlled Sub-GHz transmit workflow. Receiver compatibility is not guaranteed; this is not a new attack technique. |
-| **BLE spam** | Advertising tools for Apple, Android, Windows and Samsung, grouped in the app. Broadcast success does not guarantee an OS popup. |
-| **Wi-Fi beacon spam and deauth** | Device-side radio operations controlled from the Android workspace, alongside capture and analysis. |
-| **IR power spam / TV-B-Gone** | IR controls and a shared run accessible from the IR screen and Spam category. Physical receiver checks remain separate. |
-| **NFC dictionary checks** | Device-side MIFARE key checks with phone-side presentation and analysis, subject to reader/tag limits. |
-| **MITM, portals and HID tools** | Existing network/HID tools plus a phone-hosted HTTP/HTTPS inspection proxy; HTTPS inspection depends on client trust and compatibility. |
+| **Wi-Fi & BLE** | Scanners, phone GPS maps, saved observations, place comparisons and exports. |
+| **Sub-GHz** | Capture, waveforms, saved signals, replay, spectrum and De Bruijn planning. |
+| **Infrared & NFC** | Remote catalog, signal learning, TV-B-Gone, tag tools and NDEF. |
+| **Audio lab** | Spectrum, waterfall, oscilloscope, DTMF, SSTV and an RTTTL composer. |
+| **Files & automation** | Device file browser, JavaScript, saved macros and session reports. |
+| **Device desk** | Screen mirror, navigation, settings, diagnostics and USB updates. |
 
-## What Brucia adds
+There are dedicated controls for **WPA/WPA2 dictionary attacks**, **MIFARE dictionary
+checks**, **De Bruijn**, **BLE spam**, **Wi-Fi beacon spam/deauth** and **IR power spam**.
+Network tools include portals and a phone-hosted HTTP/HTTPS inspection proxy;
+HTTPS inspection requires a compatible client that trusts the configured CA.
+Use active tools on equipment you own or have permission to test.
 
-The strongest differences are the integrated Android workflows, not an exclusive
-claim to scanning, spam, replay, wordlists or remote control:
+[Explore all tools](wiki/Features.md) · [Check your hardware](docs/HARDWARE_CAPABILITIES.md)
 
-- **Audio/DSP workspace:** device PCM input/output with phone-side spectrum, waterfall,
-  scope, DTMF and SSTV processing.
-- **Persistent observation workspace:** phone GPS/maps, Wi-Fi/BLE history, comparisons
-  against saved place inventories and session reports.
-- **Phone-hosted processing:** WPA dictionary verification and HTTP/HTTPS proxy inspection
-  run on Android, alongside captures, files and results.
-- **One workflow across modules:** saved macros, exports and dedicated controls for
-  inherited radio tools, with visible progress and stopping behavior.
+## Get connected
 
-Bruce already includes WPA password recovery and radio spam. Flipper's official app
-already offers remote control, updates, IR remotes and phone-side key calculation.
-See the [source-backed comparison](docs/COMPARISON.md) for what is an addition, an
-integration advantage or an existing capability. No universal exclusivity or benchmark
-advantage is claimed.
+1. Download the Android APK and firmware for your exact board from the same
+   [release](https://github.com/1vcian/Brucia/releases/latest).
+2. Flash the T-Embed CC1101 with the [web flasher](https://1vcian.me/Brucia/) in desktop
+   Chrome or Edge, using a USB data cable.
+3. Install the APK, connect the board to your phone over USB and grant USB access.
+4. Enter **Brucia** on the device. Open device information or the file browser to
+   check the connection.
 
-## Verification status
+The app also includes a USB firmware updater. For installation, upgrades and recovery,
+follow [Getting Started](wiki/Getting-Started.md).
 
-Brucia is public and under active development. **Published does not mean every function
-has passed a physical test.** [TESTS.md](TESTS.md) records the tested revision, setup,
-results and limits. Historical hardware runs demonstrated parts of the USB path;
-they do not certify the latest app/firmware pair or every configured board.
+## Take a look
 
-Open physical checks include interrupted updates, mode changes and operation stopping,
-module-specific RF/IR/NFC/audio behavior, and the serial-link soak with actual radio events.
-Use [the functional checklist](docs/APP_CONTROLS_CHECKLIST.md) to report a repeatable result.
-Missing peripherals, blocked checks and tests not run are not passes.
+<img src="docs/img/public-ui.png" alt="Brucia dashboard, reports and IR controls rendered with preview data" width="100%">
 
-## Images and video guides
+*App preview renders with sample data.* Browse the [illustrated video guides](wiki/Tutorials.md)
+for first connection, files, updates, observations and audio.
 
-<img src="docs/img/public-ui.png" alt="Brucia Compose preview renders with fixture data; not phone captures" width="100%">
+## What the phone brings
 
-These are verified **Compose preview renders with fixture data**, not captures from a
-phone. The [illustrated videos and transcripts](wiki/Tutorials.md) explain setup and
-workflows; they are not recordings of hardware acceptance. Provenance is recorded in
-[the media manifest](docs/media/manifest.json). Earlier device captures remain in
-[historical hardware evidence](docs/HARDWARE_VERIFICATION.md).
+Analyze audio, keep a history of Wi-Fi/BLE observations, work with captures and wordlists,
+and carry your files, maps and reports in one place. Shared controls connect those tools
+to the device's radios and peripherals.
 
-## The phone/device split
+Bruce already offers dictionary recovery and radio tools; Flipper has its own mobile
+app and community ecosystem. Our [comparison](docs/COMPARISON.md) explains the differences
+and includes reproducible processing benchmarks, clearly labelled by hardware.
 
-The ESP32 owns physical interfaces and timing. Android handles analysis, GPS, databases,
-exports and the larger interface. Standalone compatibility is a maintenance goal,
-not a guarantee that every upstream Bruce function has been tested in this fork.
-Brucia is a separate project from Bruce and its official app.
+## Built together
 
-**Infinite battery / SERIAL-KILLER** is the project joke: USB may power the board from
-the phone; both batteries remain finite.
+You don't need a new feature to make Brucia better. Try a guide, reproduce a bug,
+improve a screen, document a peripheral or contribute a focused fix.
 
-## Build and contribute
+| Want to help? | Start here |
+|---|---|
+| Something broke | [Report a bug](https://github.com/1vcian/Brucia/issues/new?template=bug_report.md) with versions and steps. |
+| Have an idea | [Suggest a feature](https://github.com/1vcian/Brucia/issues/new?template=feature_request.md) and describe the workflow. |
+| Improve the project | [Contribution guide](CONTRIBUTING.md), [source map](wiki/Architecture.md) and [roadmap](ROADMAP.md). |
+| Try your hardware | [Functional checklist](docs/APP_CONTROLS_CHECKLIST.md) and [recorded results](TESTS.md). |
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for supported toolchains and checks,
-[Architecture](wiki/Architecture.md) for the source map, and
-[Protocol](proto/PROTOCOL.md) for the wire contract. Build results, simulated tests and
-physical acceptance must be reported separately. Keep source, firmware and app versions
-with any bug report; omit personal captures and credentials.
+Brucia is actively developed. Support varies by board, peripheral and operation;
+[TESTS.md](TESTS.md) tracks what has actually been checked. Optional modules such as
+LoRa, NRF24, FM and Ethernet need compatible hardware. BLE advertisements do not
+promise an OS popup, and command success alone does not confirm a receiver response.
 
-## License and use
+## Credits & license
 
-Use active functions only on equipment you own or are authorized to test.
-See [SECURITY.md](SECURITY.md). Firmware and app are AGPL-3.0: [LICENSE](LICENSE),
-[NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md) preserve the upstream credits.
-Source for a release is available at its matching tag in this repository.
+Brucia is a separate project built on the work of **Bruce's authors and contributors**.
+Firmware and app are **AGPL-3.0**; see [LICENSE](LICENSE), [NOTICE](NOTICE) and
+[third-party credits](THIRD_PARTY.md). Release source lives at the matching Git tag.
+For sensitive vulnerability reports, see [SECURITY.md](SECURITY.md).
 
-## Support
+## Keep the fire going
 
-Brucia is free. If it helps you, you can optionally sponsor it via
+Brucia is free software. Contributions, useful bug reports and shared test results
+all help. You can also support development through
 [GitHub Sponsors](https://github.com/sponsors/1vcian) or
 [buy me a coffee](https://buymeacoffee.com/1vcian).
 
-### Crypto
+<details>
+<summary>Support with Bitcoin or Monero</summary>
 
 | | Address |
 |---|---|
 | <img src="docs/img/btc-qr.png" alt="Bitcoin QR" width="110"> | **Bitcoin**<br>`bc1qee8a06x886ng8ce6qy84l6u6x54jnjsesgqym7` |
 | <img src="docs/img/xmr-qr.png" alt="Monero QR" width="110"> | **Monero**<br>`46qDyafRkn1at3E2GMwuESBeqzpt74xE8S2kjPe35EUyKiS57Ho7cLB1vD2zH4hPmjYcYzWWxSSLZAYB5Hp1yDFrKnPWkR7` |
+
+</details>

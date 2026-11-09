@@ -1,8 +1,6 @@
 # BLE and IR
 
-> Public reference: Advertising does not promise an OS popup; IR needs a compatible receiver. Presence, successful replies and physical effects are
-> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
-> and [Tutorials](Tutorials.md) before relying on a workflow.
+> BLE advertising depends on the receiving OS; IR needs a compatible receiver.
 
 Every BLE, IR and BadUSB tool. BLE is gated on `caps.ble`, IR on `caps.ir`; BadUSB has no
 hardware gate (it drives the keyboard-injection layer over BLE or standalone).
@@ -70,3 +68,8 @@ Floods IR to disrupt nearby receivers (`ir_jammer`). Authorized testing only.
 
 ---
 Back to [Features](Features.md).
+
+---
+
+[All tools](Features.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md) ·
+[Device test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md)

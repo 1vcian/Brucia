@@ -1,8 +1,6 @@
 # Sub-GHz
 
-> Public reference: CC1101 is not an IQ SDR; decoding and replay are protocol-specific. Presence, successful replies and physical effects are
-> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
-> and [Tutorials](Tutorials.md) before relying on a workflow.
+> Decoding and replay depend on the protocol. The CC1101 is not an IQ SDR.
 
 Every Sub-GHz (CC1101) tool. The device is the raw radio front end; the phone does the
 decoding, De Bruijn computation and storage. Gated on `caps.cc1101`.
@@ -51,3 +49,8 @@ capture or transmit.
 
 ---
 Back to [Features](Features.md).
+
+---
+
+[All tools](Features.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md) ·
+[Device test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md)

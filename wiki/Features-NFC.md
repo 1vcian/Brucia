@@ -1,8 +1,6 @@
 # NFC / RFID
 
-> Public reference: PN532 and tag-type limits; writing/erasing changes the tag. Presence, successful replies and physical effects are
-> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
-> and [Tutorials](Tutorials.md) before relying on a workflow.
+> Support depends on the tag type and PN532 operation. Writing and erasing change the tag.
 
 Every NFC/RFID tool, driven by the onboard PN532. Gated on `caps.nfc`.
 
@@ -44,3 +42,8 @@ on-board dictionary key-check above instead.
 
 ---
 Back to [Features](Features.md).
+
+---
+
+[All tools](Features.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md) ·
+[Device test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md)

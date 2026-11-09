@@ -7,12 +7,12 @@ FM, LoRa, NRF24, Ethernet, LF RFID and iButton require their own supported inter
 Check [hardware capabilities](https://github.com/1vcian/Brucia/blob/main/docs/HARDWARE_CAPABILITIES.md) rather than
 assuming a compiled menu proves a peripheral is installed.
 
-## Is the public release fully tested?
+## Where can I check support for my setup?
 
-No universal claim is made. Releases have build/test evidence, and earlier revisions
-have hardware results. Check [TESTS.md](https://github.com/1vcian/Brucia/blob/main/TESTS.md) for the exact pair
-and operation. Physical radio behavior, phone lifecycle and failure recovery still
-require individual checks. Preview screenshots and illustrated videos are not proof.
+Start with the feature page for your tool and check your board's reported capabilities.
+[TESTS.md](https://github.com/1vcian/Brucia/blob/main/TESTS.md) records the exact versions,
+setups and results checked so far. Some physical workflows still need testing; a release
+or preview image alone does not establish support for every peripheral.
 
 ## Is Brucia the official Bruce app?
 
@@ -51,6 +51,6 @@ keys, personal captures and device identifiers unrelated to the issue. Use activ
 tools only on systems you own or are authorized to test. For sensitive vulnerabilities,
 follow [SECURITY.md](https://github.com/1vcian/Brucia/blob/main/SECURITY.md).
 
-## What does infinite battery mean?
+---
 
-It is a joke. USB may draw power from the phone; both batteries are finite.
+[Wiki home](Home.md) · [Getting Started](Getting-Started.md) · [Contribute](Contributing.md)

@@ -1,8 +1,6 @@
 # Wi-Fi
 
-> Public reference: Radio and driver limits; test stop/reconnect and export behavior. Presence, successful replies and physical effects are
-> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
-> and [Tutorials](Tutorials.md) before relying on a workflow.
+> Use active functions on your own lab network or with the owner's permission.
 
 Every Wi-Fi tool. The device is the radio front-end; the phone does the mapping,
 cracking, analytics and storage. Each page is gated on `caps.wifi`.
@@ -98,3 +96,8 @@ routes through it (`arp_spoof`), pairing with the on-phone HTTPS intercept proxy
 
 ---
 Back to [Features](Features.md).
+
+---
+
+[All tools](Features.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md) ·
+[Device test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md)

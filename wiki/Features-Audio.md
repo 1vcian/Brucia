@@ -1,8 +1,6 @@
 # Audio
 
-> Public reference: DSP tests do not verify the physical microphone/speaker path. Presence, successful replies and physical effects are
-> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
-> and [Tutorials](Tutorials.md) before relying on a workflow.
+> Audio tools use the microphone/speaker reported by your board. Physical sound-path checks are listed in the test results.
 
 Every tool built on the onboard microphone and I2S speaker. Driven by two firmware
 streams: a continuous raw-PCM mic stream (`mic.pcm`, 16 kHz mono) and streamed PCM speaker
@@ -57,3 +55,8 @@ the SD card.
 
 ---
 Back to [Features](Features.md).
+
+---
+
+[All tools](Features.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md) ·
+[Device test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md)

@@ -1,28 +1,42 @@
-# Brucia
+# Welcome to Brucia
 
 **The phone is the brain. The ESP32 is the antenna.**
 
-Brucia is a public, AGPL-3.0 project pairing Bruce-derived firmware with an Android
-workspace. Start with the LilyGO T-Embed CC1101, a USB data cable and an Android phone
-with USB host/OTG support. The phone handles analysis and storage; the ESP32 handles
-peripherals and timing. Standalone device operation remains available.
+A radio workbench, an audio lab and a place for your captures, maps and experiments.
+Brucia pairs Bruce-derived ESP32 firmware with an Android app over USB. Start with
+an Android phone, a LilyGO T-Embed CC1101 and a data cable.
 
-- [Getting Started](Getting-Started.md): install the app and matching firmware, then connect over USB.
-- [Tutorials](Tutorials.md): illustrated video guides, transcripts and expected results.
-- [Features](Features.md): the tool families and their hardware limits.
-- [Architecture](Architecture.md) and [Protocol](Protocol.md): source and transport contracts.
-- [Building](Building.md) and [Contributing](Contributing.md): reproduce a build or contribute a change.
-- [FAQ](FAQ.md): compatibility, verification and recovery.
+## Pick your starting point
 
-## Public does not mean fully verified
+| I want to… | Open |
+|---|---|
+| Connect my board for the first time | [Getting Started](Getting-Started.md) |
+| Follow a short walkthrough | [Tutorials](Tutorials.md) |
+| Find a tool or check an add-on | [Feature guide](Features.md) |
+| Fix a connection or update problem | [FAQ](FAQ.md) |
+| Build from source | [Building](Building.md) |
+| Help improve Brucia | [Contributing](Contributing.md) |
 
-Use the [release notes](https://github.com/1vcian/Brucia/releases) for changes and
-[TESTS.md](https://github.com/1vcian/Brucia/blob/main/TESTS.md) for evidence tied to an app/firmware revision.
-Previous hardware captures establish only what was exercised at the time. Radio output,
-peripheral behavior and phone lifecycle checks still need individual acceptance.
+## Find your workspace
 
-## Credits
+- **Signals:** [Wi-Fi](Features-Wi-Fi.md), [Sub-GHz](Features-Sub-GHz.md),
+  [BLE and infrared](Features-BLE-and-IR.md), [NFC](Features-NFC.md).
+- **Sound:** [Audio](Features-Audio.md), from spectrum and DTMF to SSTV.
+- **Bench:** [Device and files](Features-Device.md), [tools and automation](Features-Tools.md).
+- **Add-ons:** [Optional radios](Features-Radio.md) and [Ethernet](Features-Ethernet.md).
 
-Brucia derives from [Bruce](https://github.com/BruceDevices/firmware); its authors and libraries remain credited in
-NOTICE and THIRD_PARTY.md. It is a separate project, not the official Bruce app.
-Both firmware and app are AGPL-3.0. Use equipment you own or are authorized to test.
+## Bring what you learn
+
+Found an unclear step? Tested a peripheral? Have a repeatable bug? Share it through
+[the issue tracker](https://github.com/1vcian/Brucia/issues). Small fixes and useful
+reports are welcome. The [contribution guide](Contributing.md) explains how to get involved.
+
+Use [release notes](https://github.com/1vcian/Brucia/releases) for changes and
+[recorded test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md) for the
+boards and workflows checked. Features vary by hardware; the guides call out those details.
+
+## Built on Bruce
+
+Brucia is a separate project derived from [Bruce](https://github.com/BruceDevices/firmware).
+Both firmware and app are AGPL-3.0, with upstream and library credits preserved in the
+repository. Use active tools on equipment you own or have permission to test.

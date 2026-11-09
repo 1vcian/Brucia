@@ -1,5 +1,13 @@
 # Work queue — single operational ledger
 
+Community presentation 2026-11-09: README, wiki home/navigation/feature guides,
+contribution paths, usage/FAQ, site copy and issue/PR templates refreshed. Repeated
+audit-style introductions condensed into useful hardware notes and evidence links;
+joke explanations removed, site punchline retained. Brand checks 11 PASS + 1 SKIP,
+site checks 17 PASS; 160 local links and 18 wiki routes checked (TESTS.md). Docs-only:
+no new feature, benchmark, hardware acceptance or media capture. Changes prepared
+for the requested publication; browser deployment not verified. Existing device gates remain open.
+
 Speed-comparison follow-up 2026-11-09: repeatable host-only benchmark added in
 tools/benchmark_android_logic.py with synthetic fixture checks; actual Kotlin WPA2,
 PMKID, FFT, DTMF and SSTV measured on M2 Pro, seven batches after warm-up. Results and

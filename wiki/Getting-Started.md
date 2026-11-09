@@ -1,6 +1,7 @@
 # Getting Started
 
-This guide covers the public releases and the USB companion workflow.
+From the release download to your first USB session. You will install the matching
+app and firmware, connect your board and check that they can talk.
 
 ## Prepare
 
@@ -15,7 +16,7 @@ This guide covers the public releases and the USB companion workflow.
 Open the [web flasher](https://1vcian.me/Brucia/) in **desktop Chrome or Edge**. Connect the board,
 close applications using its serial port, and select the exact board and release.
 Read the displayed verification status and erase options before starting. Keep the
-cable connected until the flasher confirms completion. A build result is not an upload result.
+cable connected until the flasher confirms completion.
 
 If the port does not appear, check the data cable, USB permission and the board's
 documented bootloader procedure. The fallback for developers is [Building](Building.md).
@@ -41,8 +42,8 @@ enabled by opening its screen. Stop competing operations before retrying a busy 
 
 ## 4. First session
 
-Use [Tutorials](Tutorials.md) for device information, files, observations and audio. Check a
-known lab device or a file you created; do not treat preview data as a capture.
+Try the file browser, inspect a lab device or explore the audio workspace.
+[Tutorials](Tutorials.md) has short walkthroughs and expected results for each.
 Record app version, firmware version, board and expected/observed behavior when reporting
 a problem. Never include private credentials or personal captures in a public issue.
 
@@ -56,7 +57,9 @@ An interrupted flash may require the board's bootloader and a computer to recove
 The separate **BLE console** requires enabling BLE API and pairing with its displayed PIN.
 It is not the USB companion protocol and does not replace the workspace connection.
 
-## What this guide establishes
+## Keep exploring
 
-These are instructions, not a record of a successful run on your device. Hardware
-acceptance for each release belongs in [TESTS.md](https://github.com/1vcian/Brucia/blob/main/TESTS.md).
+[Browse the tools](Features.md) · [Follow a tutorial](Tutorials.md) · [Troubleshooting](FAQ.md)
+
+If something differs on your setup, a report with the steps and versions helps us
+improve the guide. See [Contributing](Contributing.md).

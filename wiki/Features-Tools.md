@@ -1,8 +1,6 @@
 # Tools, Crack and MITM
 
-> Public reference: Device scripts and third-party downloads require review; stop and disconnect matter. Presence, successful replies and physical effects are
-> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
-> and [Tutorials](Tutorials.md) before relying on a workflow.
+> JavaScript runs on the device. Review third-party scripts before installing or running them.
 
 General-purpose device tools, the phone-side WPA/WPA2 cracking toolkit, the on-phone MITM
 proxy, and session offload/reporting.
@@ -140,3 +138,8 @@ highlights when you are near. Authorized use (your own gates/remotes).
 
 ---
 Back to [Features](Features.md).
+
+---
+
+[All tools](Features.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md) ·
+[Device test results](https://github.com/1vcian/Brucia/blob/main/TESTS.md)

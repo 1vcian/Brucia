@@ -4,6 +4,19 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Community documentation refresh — 2026-11-09
+
+README, wiki home/feature/contribution guides, FAQ, navigation, usage, site copy and
+issue/PR templates revised for public contributors. Explanations of the battery joke
+removed; the site punchline remains. Feature-specific hardware notes, preview labels,
+comparison/benchmark limits and detailed acceptance records retained.
+
+Checks: `python3 tools/test_brand.py` — 11 PASS, 1 SKIP; `node --test
+tools/test_site_release.cjs` — 17 PASS. 160 local Markdown/image targets and all 18 wiki
+routes inspected; `git diff --check` clean. No app/firmware changes, build, flash or
+new physical acceptance. No new images/videos generated. Website rendering/deployment
+not verified in a browser in this pass.
+
 ## Processing benchmark — 2026-11-09 (host only)
 
 Command: `python3 tools/benchmark_android_logic.py --output docs/benchmarks/2026-11-09-host.json`.

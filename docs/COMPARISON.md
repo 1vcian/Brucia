@@ -150,10 +150,6 @@ The repository is public. Publication does not close the physical acceptance che
 No maintainer token is embedded. Missing release assets must produce an error,
 not a silent download of unrelated or older firmware.
 
-The **infinite battery** line is a community joke: the device may draw USB power
-from the phone. Actual availability and charging depend on the phone, OTG, cable
-and power-management behavior, and runtime remains finite.
-
 ## Primary references
 
 Checked during this audit; operation support remains card/protocol-specific:

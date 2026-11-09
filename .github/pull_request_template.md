@@ -1,31 +1,23 @@
-#### Proposed Changes ####
+## What changes?
 
-<!-- Describe the big picture of your changes here to communicate to the maintainers why we should accept this pull request. -->
+<!-- Describe the problem and resulting behavior. Link a related issue if there is one. -->
 
-#### Types of Changes ####
+## How was it checked?
 
-<!-- What types of changes does your code introduce to Bruce? Bugfix, New Feature, Breaking Change, etc -->
+<!-- List relevant commands and results. For documentation, links and instructions count.
+     Distinguish automated tests/builds from physical checks. -->
 
-#### Verification ####
+## Device checks
 
-<!-- How can the changes be verified? Please provide whatever additional information necessary to help verify the proposed changes. -->
+<!-- If relevant: board, phone, app/firmware versions, expected and observed results.
+     Write "Not run" or "Not applicable" where appropriate. -->
 
-#### Testing ####
+## Notes for reviewers
 
-<!-- Is this change covered by testing? If not, consider adding a Unit or Integration test. -->
+<!-- Compatibility, protocol changes, screenshots, follow-up work or questions.
+     Label preview renders separately from device captures. -->
 
-#### Linked Issues ####
+## Release note
 
-<!-- Link any related issues, pull-requests, or commit hashes that are relevant to this pull request. If you are opening a PR without a corresponding issue please consider creating one first. -->
-
-#### User-Facing Change ####
-<!--
-Does this PR introduce a user-facing change? If no, just write "NONE" in the release-note block below.
-If the PR requires additional action from users switching to the new release, include the string "action required".
--->
-```release-note
-
-```
-
-#### Further Comments ####
-
+<!-- A short user-facing description, or "None" for an internal-only change.
+     Include any action users need to take when updating. -->

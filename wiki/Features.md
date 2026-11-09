@@ -1,23 +1,23 @@
 # Features
 
-This is an implementation guide, not a certification of every physical function.
-Check the connected board's capabilities and [test evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md).
-Use [Tutorials](Tutorials.md) for first workflows and expected results.
+Find a workspace, see what it offers and check the hardware it needs.
+New to Brucia? Start with [Getting Started](Getting-Started.md) or follow a
+[tutorial](Tutorials.md).
 
 ## Active research tools
 
 The catalog includes **De Bruijn**, **WPA/WPA2 dictionary attacks**, **MIFARE dictionary
 checks**, **BLE advertising spam**, **Wi-Fi beacon spam/deauth**, **IR power spam**,
 portals, MITM and HID tools. See the family pages below for behavior and limits.
-These are not all new inventions: Brucia's additions often lie in phone-side
-processing, storage and a unified workflow. Use them only in an authorized lab.
+Use active tools on equipment you own or have permission to test.
 
 The distinctive workspaces are Android audio/DSP (including SSTV), saved Wi-Fi/BLE
 history and place comparisons, phone-hosted proxy inspection, and combined capture,
-dictionary verification and reporting. See the repository's docs/COMPARISON.md for
-the primary-source comparison and its limits.
+dictionary verification and reporting. The
+[comparison](https://github.com/1vcian/Brucia/blob/main/docs/COMPARISON.md) covers
+Bruce, Flipper and Brucia, including the measured processing benchmarks.
 
-| Family | Workspace | Boundary |
+| Family | Workspace | Hardware and usage notes |
 |---|---|---|
 | [Wi-Fi](Features-Wi-Fi.md) | Observations, wardrive, maps, captures and analysis | Radio and driver limits; test stop/reconnect and export behavior. |
 | [Sub-GHz](Features-Sub-GHz.md) | Waveforms, saved captures, decoding and supported sends | CC1101 is not an IQ SDR; decoding and replay are protocol-specific. |
@@ -30,6 +30,10 @@ the primary-source comparison and its limits.
 | [Device and files](Features-Device.md) | Information, files, Remote, settings and updates | Keep the correct firmware/board pair; verify mode changes and recovery. |
 
 USB carries the companion workspace. The paired BLE console is a separate CLI path.
-The app retains state across some lifecycle changes; this does not guarantee a radio
-operation stopped. Inspect the reply, wait for completion and confirm recovery before
-starting another operation on that peripheral.
+Wait for an operation to finish before starting another one on the same peripheral.
+For board- and version-specific checks, see
+[recorded results](https://github.com/1vcian/Brucia/blob/main/TESTS.md).
+
+---
+
+[Wiki home](Home.md) · [Tutorials](Tutorials.md) · [Share a result](Contributing.md)

@@ -1,22 +1,22 @@
 ---
 name: Feature request
-about: Suggest an idea for this project
+about: Describe a workflow you would like to improve or a tool you would like to contribute.
 title: ''
 labels: ''
 assignees: ''
-
 ---
 
-**Is your feature request related to a problem? Please describe.**
-<!-- A clear and concise description of what the problem is. Ex. I'm always frustrated when [...] -->
+## What would you like to do?
+<!-- Describe the workflow and who would benefit. -->
 
-**Describe the solution you'd like**
-<!-- A clear and concise description of what you want to happen. -->
+## How would it work in Brucia?
+<!-- App, firmware, documentation or an add-on? Include required hardware if known. -->
 
-**Describe alternatives you've considered**
-<!-- A clear and concise description of any alternative solutions or features you've considered. -->
+## What do you use today?
+<!-- Existing tools, workarounds or related issues. -->
 
-**Additional context**
-<!-- Add any other context or screenshots about the feature request here. -->
+## How could we check that it works?
+<!-- An example result, a test setup or a small first milestone. It's fine if you're unsure. -->
 
-
+## Would you like to help?
+<!-- Design, documentation, implementation or testing are all useful. Optional. -->

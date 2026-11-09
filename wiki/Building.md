@@ -102,4 +102,9 @@ and `gen_mfcodes.py`.
 ## Continuous integration
 
 CI runs the firmware build, the Android unit and Paparazzi screenshot tests, and the
-protocol end-to-end test. Gate commits on a green build and tests.
+protocol end-to-end test. For a contribution, run the checks relevant to your change
+and include the results in your pull request.
+
+---
+
+[Wiki home](Home.md) · [Contributing](Contributing.md) · [Source map](Architecture.md)

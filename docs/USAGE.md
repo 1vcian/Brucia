@@ -1,18 +1,25 @@
 # Brucia usage
 
-Start with the [Getting Started guide](../wiki/Getting-Started.md) or the
-[public wiki](https://1vcian.me/Brucia/wiki/#/getting-started).
+Your quick route into the [Brucia wiki](https://1vcian.me/Brucia/wiki/).
+
+| Looking for… | Guide |
+|---|---|
+| First installation and USB connection | [Getting Started](../wiki/Getting-Started.md) |
+| Short walkthroughs | [Tutorials](../wiki/Tutorials.md) |
+| A specific tool or peripheral | [Features](../wiki/Features.md) |
+| Connection and update troubleshooting | [FAQ](../wiki/FAQ.md) |
+| Ways to contribute | [Contributing](../wiki/Contributing.md) |
 
 The [tutorials](../wiki/Tutorials.md) include illustrated videos, transcripts,
 expected results and recovery steps. They cover first flash, Android installation,
 USB connection, updates, files, observations and audio.
 
-## Evidence and hardware
+## Find the right setup
 
 Use [TESTS.md](../TESTS.md) for revision-specific results and
 [hardware capabilities](HARDWARE_CAPABILITIES.md) for optional peripherals.
-A successful command or build does not prove a physical effect. Historical captures
-are labelled separately from Compose previews and illustrated videos.
+Each feature guide describes its hardware requirements. Preview images use sample
+data; physical results are recorded separately with the versions and setup used.
 
 ## Standalone access
 
