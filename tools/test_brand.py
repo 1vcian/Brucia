@@ -23,6 +23,7 @@ ROOT = brand.ROOT
 ALLOWLIST = [
     ("brand.json", {"own", "upstream"}, "the central config itself"),
     ("docs/LAUNCH.md", {"own", "upstream"}, "documents the repository/site switch"),
+    ("docs/COMPARISON.md", {"upstream"}, "primary-source citations for the comparison with Bruce and its official apps"),
     ("CHANGELOG.md", {"own", "upstream"}, "historical release records and published tag links; upstream credit"),
     ("TESTS.md", {"own"}, "evidence log quoting what devices displayed at the time"),
     ("skills/brucia-maintenance/references/*.md", {"own"}, "task history and release evidence"),

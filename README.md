@@ -43,6 +43,41 @@ See the [feature guide](wiki/Features.md) for module details and [hardware capab
 for what the stock board includes. USB is the companion transport. The separate paired
 BLE console is a command interface, not a wireless replacement for the USB workspace.
 
+## Security tools included
+
+Brucia includes active research tools as well as observation and analysis. Their
+presence is separate from novelty or physical acceptance; use them within an authorized lab.
+
+| Tool | What Brucia provides |
+|---|---|
+| **WPA/WPA2 dictionary attacks** | Phone-side verification of captured handshakes/PMKIDs, wordlist import/download, candidate rules, progress and hashcat-format exchange. |
+| **De Bruijn** | Phone-side sequence planning and a controlled Sub-GHz transmit workflow. Receiver compatibility is not guaranteed; this is not a new attack technique. |
+| **BLE spam** | Advertising tools for Apple, Android, Windows and Samsung, grouped in the app. Broadcast success does not guarantee an OS popup. |
+| **Wi-Fi beacon spam and deauth** | Device-side radio operations controlled from the Android workspace, alongside capture and analysis. |
+| **IR power spam / TV-B-Gone** | IR controls and a shared run accessible from the IR screen and Spam category. Physical receiver checks remain separate. |
+| **NFC dictionary checks** | Device-side MIFARE key checks with phone-side presentation and analysis, subject to reader/tag limits. |
+| **MITM, portals and HID tools** | Existing network/HID tools plus a phone-hosted HTTP/HTTPS inspection proxy; HTTPS inspection depends on client trust and compatibility. |
+
+## What Brucia adds
+
+The strongest differences are the integrated Android workflows, not an exclusive
+claim to scanning, spam, replay, wordlists or remote control:
+
+- **Audio/DSP workspace:** device PCM input/output with phone-side spectrum, waterfall,
+  scope, DTMF and SSTV processing.
+- **Persistent observation workspace:** phone GPS/maps, Wi-Fi/BLE history, comparisons
+  against saved place inventories and session reports.
+- **Phone-hosted processing:** WPA dictionary verification and HTTP/HTTPS proxy inspection
+  run on Android, alongside captures, files and results.
+- **One workflow across modules:** saved macros, exports and dedicated controls for
+  inherited radio tools, with visible progress and stopping behavior.
+
+Bruce already includes WPA password recovery and radio spam. Flipper's official app
+already offers remote control, updates, IR remotes and phone-side key calculation.
+See the [source-backed comparison](docs/COMPARISON.md) for what is an addition, an
+integration advantage or an existing capability. No universal exclusivity or benchmark
+advantage is claimed.
+
 ## Verification status
 
 Brucia is public and under active development. **Published does not mean every function

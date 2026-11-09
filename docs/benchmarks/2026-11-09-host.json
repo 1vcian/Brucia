@@ -1,0 +1,146 @@
+{
+  "sink": 85349960,
+  "vm": "Java HotSpot(TM) 64-Bit Server VM",
+  "pbkdf2_provider": "SunJCE",
+  "measured_batches": 7,
+  "runtime": "23+37-2369",
+  "warmup_batches": 3,
+  "results": [
+    {
+      "operations_per_second": 963.3145727820284,
+      "unit": "candidates",
+      "name": "WPA2 PBKDF2 + PTK + MIC",
+      "min_ms": 205.3435,
+      "operations_per_sample": 200,
+      "samples_ms": [
+        212.363084,
+        210.015292,
+        207.6165,
+        211.028,
+        206.087458,
+        205.3435,
+        205.407792
+      ],
+      "median_ms": 207.6165,
+      "max_ms": 212.363084
+    },
+    {
+      "operations_per_second": 980.6992262896041,
+      "unit": "candidates",
+      "name": "PMKID PBKDF2 + HMAC",
+      "min_ms": 202.945542,
+      "operations_per_sample": 200,
+      "samples_ms": [
+        206.323834,
+        209.16275,
+        203.936125,
+        202.949667,
+        204.134709,
+        203.835625,
+        202.945542
+      ],
+      "median_ms": 203.936125,
+      "max_ms": 209.16275
+    },
+    {
+      "operations_per_second": 24709.839764596276,
+      "unit": "windows",
+      "name": "FFT magnitude 2048 samples / 16 kHz",
+      "min_ms": 39.777375,
+      "operations_per_sample": 1000,
+      "samples_ms": [
+        43.240125,
+        41.442708,
+        40.151042,
+        40.543791,
+        39.777375,
+        40.034875,
+        40.469708
+      ],
+      "median_ms": 40.469708,
+      "max_ms": 43.240125
+    },
+    {
+      "operations_per_second": 724.7370279011362,
+      "unit": "recordings",
+      "name": "DTMF decode 3.84 s / 16 kHz",
+      "min_ms": 137.241833,
+      "operations_per_sample": 100,
+      "samples_ms": [
+        137.981083,
+        137.745542,
+        137.389042,
+        137.241833,
+        138.060958,
+        138.039125,
+        142.832208
+      ],
+      "median_ms": 137.981083,
+      "max_ms": 142.832208
+    },
+    {
+      "operations_per_second": 172.31352445775087,
+      "unit": "images",
+      "audio_seconds": 36.91,
+      "name": "SSTV Robot36 encode 320x240",
+      "min_ms": 5.465833,
+      "operations_per_sample": 1,
+      "samples_ms": [
+        5.7955,
+        5.94425,
+        5.992375,
+        5.761375,
+        5.803375,
+        5.465833,
+        6.218458
+      ],
+      "median_ms": 5.803375,
+      "max_ms": 6.218458
+    },
+    {
+      "operations_per_second": 10.85910447680156,
+      "unit": "images",
+      "audio_seconds": 36.91,
+      "name": "SSTV Robot36 decode 320x240",
+      "min_ms": 91.286084,
+      "operations_per_sample": 1,
+      "samples_ms": [
+        94.168042,
+        95.299542,
+        92.040625,
+        92.088625,
+        92.440084,
+        91.345625,
+        91.286084
+      ],
+      "median_ms": 92.088625,
+      "max_ms": 95.299542
+    }
+  ],
+  "scope": "host JVM microbenchmark; NOT Android, firmware or end-to-end performance",
+  "utc": "2026-11-09T11:55:47.329079+00:00",
+  "host": "macOS-26.6-arm64-arm-64bit",
+  "revision": "4da92c8c3c73da6b53629c741262291d1c33ba6d",
+  "fixture": {
+    "password": "benchmark-secret",
+    "ssid": "BruciaBenchmark",
+    "ap": "020000000001",
+    "sta": "020000000002",
+    "anonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "snonce": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "eapol": "0203005f02010a00100000000000000000202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "pmk": "a217cda91186922547bc63fa5b92ddd549422ffd726bd853f1c7401ada8fa8d4",
+    "mic": "559e87366423c374fe0b387cfab63735",
+    "pmkid": "374ad429bb8f85ee12f59d2f8f903a18"
+  },
+  "source_sha256": {
+    "android/app/src/main/java/app/brucia/wifi/WpaCracker.kt": "1ef5e7f74818f13955d0f33b2eb934457137dfcd07a1d316d56fb8d337265abf",
+    "android/app/src/main/java/app/brucia/audio/Fft.kt": "d7b68a9574d6238033bd5491cdb8f7ba6f4edeba36703777823f642623232b2e",
+    "android/app/src/main/java/app/brucia/audio/Dtmf.kt": "5eaf56985d3b5c6eab0327f1c7dc67c9ac10187b6dc604765aeb9abfb23f12b9",
+    "android/app/src/main/java/app/brucia/audio/Goertzel.kt": "d0d7341ab8072be43b9daa0a1283d55b397368d5a1cc2a4efcbd523cda98f440",
+    "android/app/src/main/java/app/brucia/audio/Sstv.kt": "563b3ac026cf9aa386bd746ab63c81f603bdb1ab7f3f49dda8ef4c217c0a34a3",
+    "tools/benchmarks/LogicBenchmark.kt": "eb1aa58218dfd89fe99a49fbc4efa4451ec376465b95b7e50b6e0ac5a4b42dc2",
+    "tools/benchmark_android_logic.py": "51f42414bf2c491da92c51b175f4e12293aeaeaf76eba66fa7e24543c5b6f29a"
+  },
+  "cpu": "Apple M2 Pro"
+}

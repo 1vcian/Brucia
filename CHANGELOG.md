@@ -7,6 +7,13 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Reproducible host processing benchmark and speed-comparison methodology: actual Kotlin
+  WPA2/PMKID, FFT, DTMF and SSTV with synthetic fixtures, raw samples and source hashes.
+  Mac results are explicitly separate from pending phone/device comparisons; corrected
+  the WPA source comment that incorrectly claimed ESP devices cannot do dictionary recovery.
+- Public feature comparison: restored explicit De Bruijn, WPA/MIFARE dictionary and BLE/Wi-Fi/IR
+  spam listings; distinguish Android processing/integration from capabilities already offered
+  by Bruce, Flipper's official apps and community projects, with primary-source references.
 - Public documentation: rewritten README and core wiki guides, linked feature pages and
   setup/recovery tutorials, refreshed public-site copy, and six captioned illustrated videos.
   Media distinguishes Compose fixture previews and instructions from physical hardware evidence;

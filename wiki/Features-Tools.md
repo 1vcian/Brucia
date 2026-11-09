@@ -59,7 +59,8 @@ Base64 encode/decode, MAC vendor lookup and a Wi-Fi QR generator.
 A one-shot broadcast of a short message to nearby ESP32 devices (`espnow_send`).
 
 ## Crack (WPA/WPA2 on the phone)
-A real WPA/WPA2 toolkit running on the phone, impossible on Flipper or Bruce alone. The
+A WPA/WPA2 toolkit running on the phone. Bruce also has on-device password recovery;
+Brucia moves this workflow into Android with capture import, wordlists and results. The
 device captures a PMKID (`wifi_pmkid`) or a 4-way handshake (`wifi_handshake`); the phone
 does the rest:
 
@@ -86,13 +87,14 @@ everything captured during the session.
 
 ## Offload
 The crack toolkit, OOK/rolling-code decode, MITM proxy and report generation are all
-on-phone offload of work the ESP32 cannot do on its own.
+Android processing integrated with device captures. This is not a claim that an ESP32
+cannot implement any of those algorithms or that phone-side computation is unique to Brucia.
 
 ## Macros (automation)
 Chain device commands into a saved, one-tap sequence (each step is a command plus a pause).
 What it's for: run a repeatable workflow - for example join a Wi-Fi, start a capture, then a
-scan - without driving every step by hand. The phone does the sequencing the device's tiny
-on-board interpreter cannot. Macros persist across restarts; a run is cancellable and shows
+scan - without driving every step by hand. The phone provides a saved sequencing UI;
+device-side scripting is a separate existing option. Macros persist across restarts; a run is cancellable and shows
 per-step progress.
 
 ## 3D RF map

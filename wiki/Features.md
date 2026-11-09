@@ -4,6 +4,19 @@ This is an implementation guide, not a certification of every physical function.
 Check the connected board's capabilities and [test evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md).
 Use [Tutorials](Tutorials.md) for first workflows and expected results.
 
+## Active research tools
+
+The catalog includes **De Bruijn**, **WPA/WPA2 dictionary attacks**, **MIFARE dictionary
+checks**, **BLE advertising spam**, **Wi-Fi beacon spam/deauth**, **IR power spam**,
+portals, MITM and HID tools. See the family pages below for behavior and limits.
+These are not all new inventions: Brucia's additions often lie in phone-side
+processing, storage and a unified workflow. Use them only in an authorized lab.
+
+The distinctive workspaces are Android audio/DSP (including SSTV), saved Wi-Fi/BLE
+history and place comparisons, phone-hosted proxy inspection, and combined capture,
+dictionary verification and reporting. See the repository's docs/COMPARISON.md for
+the primary-source comparison and its limits.
+
 | Family | Workspace | Boundary |
 |---|---|---|
 | [Wi-Fi](Features-Wi-Fi.md) | Observations, wardrive, maps, captures and analysis | Radio and driver limits; test stop/reconnect and export behavior. |

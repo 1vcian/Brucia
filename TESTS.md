@@ -4,7 +4,36 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Processing benchmark — 2026-11-09 (host only)
+
+Command: `python3 tools/benchmark_android_logic.py --output docs/benchmarks/2026-11-09-host.json`.
+PASS: compiles and runs the production WPA2/PMKID, FFT, DTMF and SSTV Kotlin modules;
+independent Python hashlib/hmac fixture checks and audio output sanity checks pass.
+Three warm-up batches, seven recorded batches. Apple M2 Pro / macOS 26.6 / Java 23
+HotSpot / SunJCE. Median WPA2 963.31 candidates/s; PMKID 980.70 candidates/s;
+FFT 2048 0.04047 ms/window; 3.84 s DTMF 1.3798 ms; Robot36 encode 5.8034 ms,
+decode 92.0886 ms (generated audio 36.91 s). Raw samples, synthetic fixtures and
+production/harness source hashes are preserved in the JSON above. Source HEAD
+4da92c8c plus uncommitted documentation, benchmark tools and a WPA comment correction;
+no processing implementation changed. Initial exploratory run is ignored under
+.codex_tmp/benchmarks/20261109-host.json; the documented figures use the final run.
+
+ADB device list empty and no usbmodem/usbserial ports available. No phone/firmware
+benchmark, radio action, flash, APK installation or device acceptance performed.
+Bruce's 13–14 passwords/s is an upstream source comment, not an A/B measurement.
+The 91,400 keys/s screenshot fixture is invented preview data, not benchmark evidence.
+docs/COMPARISON.md records results, methodology, limits and remaining device comparisons.
+
 ## Public documentation and illustrated media — 2026-11-09
+
+Follow-up comparison review: restored named active tools in README/wiki/site and checked
+novelty against official Bruce firmware/Wi-Fi/companion documentation, Bruce password-recovery
+source, Flipper's official mobile guide and a primary community De Bruijn inventory.
+Sources and scope are recorded in docs/COMPARISON.md. Bruce already performs dictionary
+recovery; both platforms have official mobile workflows. Android DSP, persistent observation
+analysis and phone-hosted proxy are presented as differentiators inferred from the reviewed
+scope, not universal exclusives. No benchmark, new feature or physical acceptance is implied.
+Removed the stale "impossible on Bruce" and device-interpreter limitations from the tools wiki.
 
 Context: source HEAD `aa19f9b2`, VERSION 0.1.11, public identity from brand.json.
 Prepared locally: rewritten README and core wiki guides, refreshed feature references,

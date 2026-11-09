@@ -8,8 +8,9 @@ import javax.crypto.spec.SecretKeySpec
 
 /**
  * WPA/WPA2 handshake dictionary attack, run on the phone. The ESP only captures the
- * 4-way handshake; the heavy crypto (PBKDF2 4096 + PTK/MIC per candidate) runs here -
- * exactly the kind of work a Flipper/ESP cannot do. Authorized research only.
+ * 4-way handshake; the crypto (PBKDF2 4096 + PTK/MIC per candidate) runs here.
+ * Bruce also implements on-device recovery; any speed advantage needs measurements
+ * on the compared devices. Authorized research only.
  */
 data class Handshake(
     val ssid: String,

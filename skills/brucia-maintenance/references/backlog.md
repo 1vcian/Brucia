@@ -1,5 +1,21 @@
 # Work queue — single operational ledger
 
+Speed-comparison follow-up 2026-11-09: repeatable host-only benchmark added in
+tools/benchmark_android_logic.py with synthetic fixture checks; actual Kotlin WPA2,
+PMKID, FFT, DTMF and SSTV measured on M2 Pro, seven batches after warm-up. Results and
+source hashes: docs/benchmarks/2026-11-09-host.json; interpretation in docs/COMPARISON.md
+and TESTS.md. No Android or serial device available: phone-versus-Bruce/Flipper timing
+is NOT RUN. Bruce 13–14 passwords/s remains an attributed upstream source comment;
+no speed multiplier or RF throughput increase claimed. Next: identical workloads on
+Android/T-Embed, then matched USB/stop/analysis timings. Hardware gates unchanged.
+
+Public feature-positioning follow-up 2026-11-09: README, wiki and site explicitly list
+De Bruijn, WPA/MIFARE dictionaries and BLE/Wi-Fi/IR spam. docs/COMPARISON.md distinguishes
+new Brucia workflows from inherited/common functions using current primary sources and
+local implementation paths. Bruce dictionary recovery, official companion apps and Flipper
+community De Bruijn are acknowledged; Android processing is not claimed universally novel.
+No physical acceptance or speed benchmark added. Existing hardware gates remain open.
+
 Public-docs update 2026-11-09 (local HEAD `aa19f9b2`, VERSION 0.1.11): requested launch
 documentation regenerated locally. README, core wiki, feature-page boundaries, standard
 Markdown links, all 18 wiki routes, Tutorials, usage/site copy, contribution/security notes
