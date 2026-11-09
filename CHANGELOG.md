@@ -7,6 +7,10 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Public documentation: rewritten README and core wiki guides, linked feature pages and
+  setup/recovery tutorials, refreshed public-site copy, and six captioned illustrated videos.
+  Media distinguishes Compose fixture previews and instructions from physical hardware evidence;
+  source/output hashes and a repeatable renderer are included. No new hardware acceptance claimed.
 - App Store install (F35 follow-up): the downloaded script is written with storage sync errors
   checked and read back before it replaces the old one; if the old script cannot be put back it
   stays in `App Store.js.bak`, an error says so, and the next install attempt restores it.

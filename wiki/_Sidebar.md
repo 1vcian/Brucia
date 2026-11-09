@@ -1,22 +1,23 @@
 ## Brucia Wiki
 
-- [[Home]]
-- [[Getting Started]]
-- [[Features]]
-  - [[Features-Wi-Fi]]
-  - [[Features-Sub-GHz]]
-  - [[Features-NFC]]
-  - [[Features-BLE-and-IR]]
-  - [[Features-Radio]]
-  - [[Features-Audio]]
-  - [[Features-Ethernet]]
-  - [[Features-Tools]]
-  - [[Features-Device]]
-- [[Architecture]]
-- [[Protocol]]
-- [[Building]]
-- [[Contributing]]
-- [[FAQ]]
+- [Home](Home.md)
+- [Getting Started](Getting-Started.md)
+- [Tutorials](Tutorials.md)
+- [Features](Features.md)
+  - [Features-Wi-Fi](Features-Wi-Fi.md)
+  - [Features-Sub-GHz](Features-Sub-GHz.md)
+  - [Features-NFC](Features-NFC.md)
+  - [Features-BLE-and-IR](Features-BLE-and-IR.md)
+  - [Features-Radio](Features-Radio.md)
+  - [Features-Audio](Features-Audio.md)
+  - [Features-Ethernet](Features-Ethernet.md)
+  - [Features-Tools](Features-Tools.md)
+  - [Features-Device](Features-Device.md)
+- [Architecture](Architecture.md)
+- [Protocol](Protocol.md)
+- [Building](Building.md)
+- [Contributing](Contributing.md)
+- [FAQ](FAQ.md)
 
 ---
 

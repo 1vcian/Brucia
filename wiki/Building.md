@@ -1,8 +1,8 @@
 # Building
 
 How to build the firmware and the Android app, sign release builds, and run the
-host-side protocol tools. See [[Contributing]] for project rules and
-[[Architecture]] for where things live.
+host-side protocol tools. See [Contributing](Contributing.md) for project rules and
+[Architecture](Architecture.md) for where things live.
 
 ## Repository layout
 
@@ -31,8 +31,8 @@ The wrapper makes sure every library is installed before the build so the
 pre-build library patches apply on the first build.
 
 A merged, flashable image is produced at
-`.pio/build/lilygo-t-embed-cc1101/firmware.factory.bin` - this is what the browser
-flasher at https://1vcian.me/Brucia/ serves.
+`.pio/build/lilygo-t-embed-cc1101/firmware.factory.bin`. The public flasher resolves the
+matching published release asset; a local build is not automatically published.
 
 Notes:
 - The board is an ESP32-S3 with native USB CDC; no external USB-serial adapter is
@@ -50,7 +50,8 @@ locally and 21 in CI), plus the Android SDK with `platforms;android-37.0` and `b
 
 ```sh
 cd android
-./gradlew :app:testDebugUnitTest      # unit + Paparazzi screenshot tests
+./gradlew :app:testDebugUnitTest      # unit tests
+./gradlew :app:verifyPaparazziDebug    # compare UI preview baselines
 ./gradlew :app:assembleDebug          # debug APK
 ./gradlew :app:recordPaparazziDebug   # re-record UI snapshots after a UI change
 ```

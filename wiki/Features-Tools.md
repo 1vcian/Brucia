@@ -1,5 +1,9 @@
 # Tools, Crack and MITM
 
+> Public reference: Device scripts and third-party downloads require review; stop and disconnect matter. Presence, successful replies and physical effects are
+> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
+> and [Tutorials](Tutorials.md) before relying on a workflow.
+
 General-purpose device tools, the phone-side WPA/WPA2 cracking toolkit, the on-phone MITM
 proxy, and session offload/reporting.
 
@@ -41,11 +45,11 @@ device clock holds local time: "Sync from phone" sends the phone's local time.
 ## Speaker tools
 Plays a tone or an audio file on the onboard I2S speaker (`speaker_tone`,
 `speaker_play`). The live spectrum, waterfall, SSTV, tone and oscilloscope tools are in
-[[Features-Audio]].
+[Features-Audio](Features-Audio.md).
 
 ## Microphone recording
 Records to a WAV on SD (`mic_record`). The rest of the mic-driven tools are in
-[[Features-Audio]].
+[Features-Audio](Features-Audio.md).
 
 ## Utilities
 Phone-only, always available: password generator, hash calculator (MD5/SHA-1/SHA-256),
@@ -73,7 +77,7 @@ Authorized testing only.
 
 ## On-phone MITM proxy
 A **MITM HTTPS proxy that runs on the phone**, used together with the Wi-Fi ARP-MITM
-redirect (see [[Features-Wi-Fi]]) so intercepted traffic can be inspected on the device
+redirect (see [Features-Wi-Fi](Features-Wi-Fi.md)) so intercepted traffic can be inspected on the device
 you already own. Authorized testing only.
 
 ## Session report
@@ -133,4 +137,4 @@ ready on arrival, or any location-bound signal. Shows live distance to each pinn
 highlights when you are near. Authorized use (your own gates/remotes).
 
 ---
-Back to [[Features]].
+Back to [Features](Features.md).

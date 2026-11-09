@@ -1,5 +1,9 @@
 # Ethernet
 
+> Public reference: Requires supported Ethernet hardware and a lab network. Presence, successful replies and physical effects are
+> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
+> and [Tutorials](Tutorials.md) before relying on a workflow.
+
 Wired-network tools for the optional W5500 Ethernet add-on. Gated on `caps.eth`; **the
 W5500 is not fitted on the T-Embed CC1101**, so this page is hidden on that board.
 
@@ -24,4 +28,4 @@ Floods the switch's CAM table with bogus MAC addresses (`eth_mac_flood`), bounde
 short run. Authorized testing only.
 
 ---
-Back to [[Features]].
+Back to [Features](Features.md).

@@ -1,5 +1,9 @@
 # Sub-GHz
 
+> Public reference: CC1101 is not an IQ SDR; decoding and replay are protocol-specific. Presence, successful replies and physical effects are
+> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
+> and [Tutorials](Tutorials.md) before relying on a workflow.
+
 Every Sub-GHz (CC1101) tool. The device is the raw radio front end; the phone does the
 decoding, De Bruijn computation and storage. Gated on `caps.cc1101`.
 
@@ -21,15 +25,18 @@ Live CC1101 RSSI sweep (`subghz.spectrum` stream, optional sweep window) to see 
 across the band before capturing.
 
 ## Replay
-Replays a captured signal (`subghz_replay`) back out the CC1101.
+Replay is available only where the stored format and protocol can be represented by
+the transmit path. Unsupported saved items are refused; a successful send still needs
+an independent receiver check.
 
 ## Raw transmit
 Transmits a raw edge list (`subghz_tx_raw`) built or imported on the phone.
 
 ## De Bruijn brute force
-For fixed OOK codes, the phone computes the shortest De Bruijn sequence that covers every
-possible code and the device transmits it - far more efficient than brute-forcing each
-code individually. Authorized testing only.
+The phone plans a sequence and sends it as bounded bursts through the existing raw
+timing path. Bursts have gaps; combinatorial coverage does not prove compatibility
+with a receiver. Stop prevents subsequent work but cannot retract an in-flight burst.
+Physical behavior remains a separate acceptance check on authorized lab equipment.
 
 ## Jammer
 Bounded sub-GHz noise (`subghz_jammer`). Authorized testing only.
@@ -43,4 +50,4 @@ Sets RX/TX frequency, modulation, bandwidth and data rate (`subghz_config`) befo
 capture or transmit.
 
 ---
-Back to [[Features]].
+Back to [Features](Features.md).

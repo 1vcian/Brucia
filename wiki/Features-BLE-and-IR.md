@@ -1,5 +1,9 @@
 # BLE and IR
 
+> Public reference: Advertising does not promise an OS popup; IR needs a compatible receiver. Presence, successful replies and physical effects are
+> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
+> and [Tutorials](Tutorials.md) before relying on a workflow.
+
 Every BLE, IR and BadUSB tool. BLE is gated on `caps.ble`, IR on `caps.ir`; BadUSB has no
 hardware gate (it drives the keyboard-injection layer over BLE or standalone).
 
@@ -12,7 +16,7 @@ Scans nearby BLE devices (`ble.scan` stream); the phone lists, dedups and resolv
 vendors.
 
 ## GATT explorer
-Connects to a BLE device and enumerates every service and characteristic
+Connects to a BLE device and requests the services and characteristics exposed by the peer
 (`ble_gatt_connect`, `ble.gatt` stream), and reads a characteristic (`ble_gatt_read`).
 
 ## BadBLE
@@ -65,4 +69,4 @@ A headless power-off blast across the NA or EU region code set (`ir_tvbgone`).
 Floods IR to disrupt nearby receivers (`ir_jammer`). Authorized testing only.
 
 ---
-Back to [[Features]].
+Back to [Features](Features.md).

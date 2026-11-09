@@ -1,5 +1,9 @@
 # Device and UX
 
+> Public reference: Keep the correct firmware/board pair; verify mode changes and recovery. Presence, successful replies and physical effects are
+> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
+> and [Tutorials](Tutorials.md) before relying on a workflow.
+
 Device management, in-app flashing, and the quality-of-life features that make the phone
 feel like the device's own screen.
 
@@ -14,7 +18,8 @@ toggle and **screen brightness** control live alongside it.
 
 ## Console CLI
 A command palette covering every device CLI group (Wi-Fi, Sub-GHz, NFC/RFID, IR, BadUSB,
-Crypto, Storage, System); run any Bruce command and see its raw output.
+Crypto, Storage, System). Supported commands return their output; interactive or
+unavailable operations may be refused in companion mode.
 
 **Export log.** The Console tab has an **Export log** button that shares the last ~2000 lines of
 the app's rolling log file. Brucia writes everything to that file as well as to logcat - including
@@ -22,7 +27,8 @@ errors that would otherwise be silently swallowed (a WakeLock denied, a foregrou
 refused by the ROM, a transport write that failed). On the many different Android builds out there
 (LineageOS, GrapheneOS, vendor skins) this is what makes a report like "it stops logging APs after
 a few minutes with the screen off" diagnosable: attach the exported log to a GitHub issue and the
-cause is in it, no adb/logcat needed. A crash also folds its stack trace into the same log.
+log may help identify the cause without adb/logcat. A crash also folds its stack trace
+into the same log. Review and redact logs before attaching them to a public issue.
 
 ## File manager
 Pulls files from the device SD over USB (for example captured `.pcap` handshakes from
@@ -30,7 +36,7 @@ Pulls files from the device SD over USB (for example captured `.pcap` handshakes
 
 ## Remote control / remote mirror
 A D-pad sends `nav` input and the device screen is mirrored live (`display start`),
-reaching every standalone Bruce feature (Evil Portal, Karma, Reverse Shell, Scripts, and
+navigating the standalone device menus (Evil Portal, Karma, Reverse Shell, Scripts, and
 so on) without wrapping each one individually.
 
 ## Theme sync
@@ -59,7 +65,7 @@ Pages for hardware the board lacks are gated off automatically.
 
 ## BadUSB
 An unlimited **DuckyScript library** on the phone; execute scripts over BadBLE or
-standalone on the device. See [[Features-BLE-and-IR]].
+standalone on the device. See [Features-BLE-and-IR](Features-BLE-and-IR.md).
 
 ---
-Back to [[Features]].
+Back to [Features](Features.md).

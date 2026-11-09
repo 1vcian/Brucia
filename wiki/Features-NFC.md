@@ -1,5 +1,9 @@
 # NFC / RFID
 
+> Public reference: PN532 and tag-type limits; writing/erasing changes the tag. Presence, successful replies and physical effects are
+> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
+> and [Tutorials](Tutorials.md) before relying on a workflow.
+
 Every NFC/RFID tool, driven by the onboard PN532. Gated on `caps.nfc`.
 
 > For authorized security research and education only. The dictionary attack and
@@ -18,10 +22,12 @@ and a clone-risk assessment. Authorized testing only.
 ## NDEF
 An NDEF builder on the phone, plus **NDEF push**: emulate a URL/text/contact NDEF tag to
 another phone (`nfc_ndef_push`).
+**Write NDEF URL** writes a tag and requires confirmation; it is not a read operation.
+Erase also changes the tag. Use a disposable supported tag for acceptance checks.
 
 ## EMV read
-Reads a payment card's masked PAN, expiry and scheme (`nfc_emv_read`) without touching the
-actual card number.
+Reads supported EMV information (`nfc_emv_read`) and presents masked card details.
+Masking the output is not a claim that the reader never processes the underlying data.
 
 ## Magic-UID write
 Sets the UID on a magic / Gen1A MIFARE card (`nfc_write_uid`). Authorized testing only.
@@ -37,4 +43,4 @@ this honestly rather than pretending to crack keys the onboard PN532 cannot; use
 on-board dictionary key-check above instead.
 
 ---
-Back to [[Features]].
+Back to [Features](Features.md).

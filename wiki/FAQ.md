@@ -1,81 +1,56 @@
 # FAQ
 
-Practical questions and answers about Brucia.
+## Which board should I start with?
 
-## Which hardware do I need?
+The reference is LilyGO T-Embed CC1101. It includes CC1101, PN532 and IR hardware;
+FM, LoRa, NRF24, Ethernet, LF RFID and iButton require their own supported interfaces.
+Check [hardware capabilities](https://github.com/1vcian/Brucia/blob/main/docs/HARDWARE_CAPABILITIES.md) rather than
+assuming a compiled menu proves a peripheral is installed.
 
-A **LilyGo T-Embed CC1101 (ESP32-S3)** - the supported, hardware-verified board.
-Brucia runs end-to-end on it today. You also need an Android phone, a **data** USB-C
-cable for flashing, and a **USB-C OTG** cable to connect the phone to the device.
-Optional: a PN532 for NFC, and an NRF24 QWIIC add-on. Total device cost is roughly
-$30-50, plus a phone you already own.
+## Is the public release fully tested?
 
-## Is it legal? Who can use it?
+No universal claim is made. Releases have build/test evidence, and earlier revisions
+have hardware results. Check [TESTS.md](https://github.com/1vcian/Brucia/blob/main/TESTS.md) for the exact pair
+and operation. Physical radio behavior, phone lifecycle and failure recovery still
+require individual checks. Preview screenshots and illustrated videos are not proof.
 
-Brucia is **for authorized security research and education only**. You are responsible
-for complying with all applicable laws and for only testing systems you own or are
-explicitly permitted to test. Dual-use modules (deauth, BLE spam, De Bruijn brute
-force, WPA cracking) are provided for authorized testing. Anything whose only purpose
-is to attack systems you do not own is out of scope.
+## Is Brucia the official Bruce app?
 
-## Does FM radio or LoRa work?
+No. Brucia is a separate Bruce-derived firmware and Android workspace. Bruce authors
+remain credited. Standalone compatibility is maintained per feature, not guaranteed
+for every upstream function. See NOTICE and THIRD_PARTY.md in the repository.
 
-LoRa is **not present on the T-Embed CC1101**. FM broadcast (Si4713) is fully
-implemented in the firmware and app, but there is no Si4713 fitted on this board, so
-the device reports `fm:false` and the app keeps the FM page hidden (capability-gated);
-it lights up on a board that has the chip. **NRF24** is supported only as an optional
-QWIIC add-on. The board's actual radios are Wi-Fi, BLE, Sub-GHz (CC1101) and IR, plus
-NFC via an external PN532.
+## Does BLE replace the USB cable?
 
-## How is Brucia different from Bruce?
+The paired BLE console sends CLI commands. It does not carry the full USB companion
+workspace. A BLE advertisement also does not guarantee a popup on macOS or another OS.
 
-Bruce turns cheap ESP32 hardware into a Flipper-like multitool, but **all computation
-stays on the ESP32**: little RAM/CPU, a tiny screen, and an external GPS module is
-needed for wardriving. Brucia keeps the ESP32 as a radio/sensor front-end and **moves
-the heavy work to the phone** - fast CPU, gigabytes of RAM/storage, GPS, maps,
-internet, big datasets and a full-size touch GUI. This unlocks things a standalone
-device in this price class cannot do: rockyou-scale WPA cracking, GPS wardriving with
-offline maps, large IR/OUI catalogs and rich visualization.
+## Why does a tool say unavailable or busy?
 
-Brucia is a strict **superset** of Bruce. Every Bruce feature keeps working, and with
-no phone connected the device is still a full Bruce (standalone mode). Companion mode
-is purely additive.
+The firmware may not report the required module/operation, or another task owns it.
+Check the board, capabilities and returned reason. Stop the competing operation;
+do not interpret unavailable, blocked or not tested as successful.
 
-## How is it different from the official Bruce app?
+## How do I recover a failed connection or update?
 
-The [official Bruce app](https://github.com/BruceDevices/App) *controls* the device;
-Brucia *offloads computation* to the phone. They are complementary, not competitors.
-Brucia credits the original project and aims to upstream its firmware hooks to Bruce
-as an optional module. Brucia also offers a **Remote control** mode that drives the
-real device UI (D-pad navigation plus a live screen mirror), so every standalone
-Bruce feature stays reachable from the phone.
+Check the data cable, USB access, companion mode and port ownership. For a failed
+flash use the board's documented bootloader procedure and the correct board image.
+Keep app data and required device files backed up. See [Getting Started](Getting-Started.md) and [Tutorials](Tutorials.md).
 
-## Why Android only? What about iOS?
+## Is the community App Store part of Brucia?
 
-iOS is explicitly out of scope: there is no reliable USB serial path, and there is
-app-store friction with AGPL licensing. Brucia is Android only.
+It is a third-party Bruce community service. Its script downloads catalog/apps over
+plain HTTP. Those downloads are outside the bootstrap installer's checks. Review code
+before running it. This build also does not enforce TLS certificate validity dates;
+see the F35 evidence in TESTS.md for the exact limits.
 
-## Is it free?
+## What may I publish in a bug report?
 
-Yes. Both the firmware and the app are **AGPL-3.0**. No ads, no paid tiers, no
-telemetry. If Brucia helps you, donations are optional and welcome, but nothing is
-paywalled.
+Versions, board, steps, expected/observed behavior and redacted logs. Remove passwords,
+keys, personal captures and device identifiers unrelated to the issue. Use active
+tools only on systems you own or are authorized to test. For sensitive vulnerabilities,
+follow [SECURITY.md](https://github.com/1vcian/Brucia/blob/main/SECURITY.md).
 
-## How do the phone and device talk?
+## What does infinite battery mean?
 
-Over a single **companion protocol** (length-prefixed JSON frames) across an abstract
-transport. **USB-CDC** is implemented today; Wi-Fi (TCP/WebSocket) and BLE are planned
-behind the same interface. See [[Protocol]] and [[Architecture]].
-
-## Has it actually been tested on real hardware?
-
-Yes. Capability handshake, live Wi-Fi wardrive, live BLE scan and CLI command routing
-with output capture all work over USB-CDC against a real LilyGo T-Embed CC1101.
-Remote control (nav plus TFT mirror), the flame theme, live battery reporting and lite
-mode are also verified. See the repository's hardware verification document for the
-captured logs.
-
-## Where do I start?
-
-Read [[Getting Started]], then explore [[Features]]. To contribute, see
-[[Contributing]] and [[Building]].
+It is a joke. USB may draw power from the phone; both batteries are finite.

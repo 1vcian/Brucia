@@ -9,14 +9,24 @@
 
   // Repository links come from ../brand.js (generated from brand.json, see docs/LAUNCH.md).
   var RAW_BASE = window.BruciaBrand.raw_wiki_base;
-  var WIKI_BASE = window.BruciaBrand.github_wiki_url;
+  var SOURCE_BASE = window.BruciaBrand.repo_url + "/blob/main/wiki/";
 
   // route slug -> { title, file, wiki (github wiki page name) }
   // nav order follows wiki/_Sidebar.md
   var PAGES = [
     { slug: "home",            title: "Home",            file: "Home.md",            wiki: "Home" },
     { slug: "getting-started", title: "Getting Started", file: "Getting-Started.md", wiki: "Getting-Started" },
+    { slug: "tutorials",       title: "Tutorials",       file: "Tutorials.md",       wiki: "Tutorials" },
     { slug: "features",        title: "Features",        file: "Features.md",        wiki: "Features" },
+    { slug: "features-wi-fi", title: "Wi-Fi", file: "Features-Wi-Fi.md", wiki: "Features-Wi-Fi" },
+    { slug: "features-sub-ghz", title: "Sub-GHz", file: "Features-Sub-GHz.md", wiki: "Features-Sub-GHz" },
+    { slug: "features-nfc", title: "NFC", file: "Features-NFC.md", wiki: "Features-NFC" },
+    { slug: "features-ble-and-ir", title: "BLE and IR", file: "Features-BLE-and-IR.md", wiki: "Features-BLE-and-IR" },
+    { slug: "features-radio", title: "Optional radios", file: "Features-Radio.md", wiki: "Features-Radio" },
+    { slug: "features-audio", title: "Audio", file: "Features-Audio.md", wiki: "Features-Audio" },
+    { slug: "features-ethernet", title: "Ethernet", file: "Features-Ethernet.md", wiki: "Features-Ethernet" },
+    { slug: "features-tools", title: "Tools", file: "Features-Tools.md", wiki: "Features-Tools" },
+    { slug: "features-device", title: "Device and files", file: "Features-Device.md", wiki: "Features-Device" },
     { slug: "architecture",    title: "Architecture",    file: "Architecture.md",    wiki: "Architecture" },
     { slug: "protocol",        title: "Protocol",        file: "Protocol.md",        wiki: "Protocol" },
     { slug: "building",        title: "Building",        file: "Building.md",        wiki: "Building" },
@@ -169,8 +179,8 @@
       '<div class="wiki-error"><h2>Could not load this page</h2>' +
       "<p>The " + page.title + " page could not be fetched right now. " +
       "You can read it directly on GitHub instead.</p>" +
-      '<p><a href="' + WIKI_BASE + page.wiki + '" target="_blank" rel="noopener">' +
-      "Open " + page.title + " on the GitHub wiki</a></p></div>");
+      '<p><a href="' + SOURCE_BASE + page.file + '" target="_blank" rel="noopener">' +
+      "Open " + page.title + " in the repository</a></p></div>");
   }
 
   function render(content, page, md) {
@@ -186,8 +196,8 @@
 
     var src = document.createElement("p");
     src.className = "page-source";
-    src.innerHTML = 'Source: <a href="' + WIKI_BASE + page.wiki +
-      '" target="_blank" rel="noopener">wiki/' + page.file + "</a> (edit there)";
+    src.innerHTML = 'Source: <a href="' + SOURCE_BASE + page.file +
+      '" target="_blank" rel="noopener">wiki/' + page.file + "</a> (edit in the repository)";
     content.appendChild(src);
   }
 

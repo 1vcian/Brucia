@@ -4,6 +4,42 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Public documentation and illustrated media — 2026-11-09
+
+Context: source HEAD `aa19f9b2`, VERSION 0.1.11, public identity from brand.json.
+Prepared locally: rewritten README and core wiki guides, refreshed feature references,
+Tutorials/transcripts, public website/usage copy, and 18 working wiki routes including
+all feature families. Markdown page links work in repository views as well as the site.
+Wiki error/source links now target the actual wiki/*.md sources rather than a separate
+GitHub wiki that would need independent publication. Existing local LAUNCH.md edits preserved.
+
+Media: `python3 tools/render_public_media.py` (Pillow + ffmpeg) generated two public
+images and six silent illustrated guides, each H.264 / yuv420p, 1280x720, 40 seconds,
+four VTT cues, with a poster and complete transcript. Manifest lists source revision,
+preview and generator hashes, and output hashes. Dashboard/report/IR images are
+Compose preview fixtures, NOT phone screenshots; videos are text/diagram instructions,
+NOT hardware demonstrations. Historical captures remain historical.
+
+Checks performed:
+- `cd android && ./gradlew --offline :app:verifyPaparazziDebug --tests '*FlameUiScreenshotTest'`:
+  SUCCESS, **17 tests / 0 failures / 0 skips**. Build compilation reused cache;
+  preview verification ran. Approved cache access outside sandbox; no device involved.
+- `python3 tools/brand.py check`: PASS. `python3 -m unittest discover -s tools -p 'test_brand.py'`:
+  **11 PASS / 1 SKIP** (the rename test skips because brand.json already has the launch values).
+- `node --test tools/test_site_release.cjs`: **17/17 PASS**; `node --check docs/wiki/wiki.js`: PASS.
+- Independent router check `.codex_tmp/public-launch-20261109/check-wiki.cjs`: all
+  **18 routes**, legacy wiki-link normalization and source/error targets PASS.
+- Local Markdown target check: **96 targets exist**. Manifest hashes match source/assets;
+  ffprobe confirms six 40-second H.264 videos and caption files each have four cues.
+  Two frames per video decoded; representative contact sheet and both public images inspected.
+- `git diff --check`: PASS.
+
+Not performed: fresh signed APK/firmware build, phone/device capture, hardware acceptance,
+remote link availability checks, browser playback/accessibility testing, publication or push.
+Current app/device boot, Device Info and companion screenshots and physical workflow videos
+remain pending an accepted release pair as required by the maintenance skill. These materials
+do not close F23 or any peripheral/phone acceptance item.
+
 ## Tone, compiled JS, BLE console (upstream features, reworked) — 2026-11-07
 
 Tree: HEAD `c41bca36` (v0.1.9) plus uncommitted changes (this section and the two below).

@@ -53,6 +53,17 @@ without warranty of any kind, as stated in the license.
 
 ## Reporting a vulnerability
 
+When reporting a release issue, include app/firmware versions, board and redacted
+reproduction steps. Public guides and illustrated videos do not certify every
+physical operation. Consult [TESTS.md](TESTS.md) for the exact evidence and limits.
+
+The Bruce community App Store is a third-party service. Its later catalog/app
+downloads use plain HTTP; the bootstrap installer's checks do not authenticate
+those downloads. Scripts run on the device. Review them before execution.
+The current firmware TLS configuration checks the certificate chain and hostname
+but does not enforce certificate validity dates; host TLS tests are not evidence
+of date enforcement on the device.
+
 If you find a security issue in Brucia (firmware, app, or build tooling):
 
 - Preferably, open a [GitHub issue](https://github.com/1vcian/Brucia/issues) with

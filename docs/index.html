@@ -9,7 +9,7 @@
   <meta name="description" content="Flash the Brucia firmware to a LilyGo T-Embed CC1101 from your browser, then drive it with the native Android app. The phone is the brain, the ESP32 is the antenna." />
   <meta property="og:title" content="Brucia" />
   <meta property="og:description" content="The phone is the brain, the ESP32 is the antenna. Open-source platform for low-cost security research." />
-  <meta property="og:image" content="img/banner.png" />
+  <meta property="og:image" content="img/public-overview.png" />
   <meta name="theme-color" content="#0b0b0d" />
   <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
@@ -363,11 +363,67 @@
 
   <main class="wrap">
     <section id="demo">
-      <span class="eyebrow-sm reveal">In action</span>
+      <span class="eyebrow-sm reveal">The public workspace</span>
       <h2 class="reveal">Capture on the board. <span class="fire">Inspect on the phone.</span></h2>
       <p class="lead reveal">Brucia is a fork of Bruce. The ESP32 handles radio timing and capture; the Android app handles storage, analysis and the interface. The device also works on its own.</p>
-      <p class="lead reveal">Earlier development demo: Wi-Fi observations streamed over USB. New release recordings follow hardware acceptance.</p>
-      <div class="card shot-frame reveal"><img class="shot" src="img/demo.gif" alt="Brucia live Wi-Fi wardrive demo streaming from the device to the Android app" loading="lazy" /></div>
+      <p class="lead reveal">Start with the <a href="wiki/#/getting-started">connection guide</a>. The previews below use fixture data; they are not phone captures or evidence of a physical radio effect.</p>
+      <div class="card shot-frame reveal"><img class="shot" src="img/public-ui.png" alt="Compose preview renders: dashboard, report and IR catalog with fixture data" loading="lazy" /></div>
+    </section>
+
+    <section id="tutorials">
+      <span class="eyebrow-sm reveal">Illustrated guides</span>
+      <h2 class="reveal">Set up. Explore. <span class="fire">Check the result.</span></h2>
+      <p class="lead reveal">Six silent guides with captions and transcripts. These are instructions, not recordings of a device or proof of hardware acceptance.</p>
+      <div class="grid g2">
+        <article class="card reveal"><h3>Install and connect</h3>
+          <video controls preload="none" playsinline poster="media/first-connection.png" style="width:100%;border-radius:12px" aria-label="Install and connect: illustrated guide">
+            <source src="media/first-connection.mp4" type="video/mp4">
+            <track default kind="captions" src="media/first-connection.vtt" srclang="en" label="English">
+            <a href="media/first-connection.mp4">Download video</a>
+          </video>
+          <p><a href="wiki/#/tutorials">Read the complete transcript</a></p>
+        </article>
+        <article class="card reveal"><h3>Update and recover</h3>
+          <video controls preload="none" playsinline poster="media/updates.png" style="width:100%;border-radius:12px" aria-label="Update and recover: illustrated guide">
+            <source src="media/updates.mp4" type="video/mp4">
+            <track default kind="captions" src="media/updates.vtt" srclang="en" label="English">
+            <a href="media/updates.mp4">Download video</a>
+          </video>
+          <p><a href="wiki/#/tutorials">Read the complete transcript</a></p>
+        </article>
+        <article class="card reveal"><h3>Files and scripts</h3>
+          <video controls preload="none" playsinline poster="media/files-scripts.png" style="width:100%;border-radius:12px" aria-label="Files and scripts: illustrated guide">
+            <source src="media/files-scripts.mp4" type="video/mp4">
+            <track default kind="captions" src="media/files-scripts.vtt" srclang="en" label="English">
+            <a href="media/files-scripts.mp4">Download video</a>
+          </video>
+          <p><a href="wiki/#/tutorials">Read the complete transcript</a></p>
+        </article>
+        <article class="card reveal"><h3>Wi-Fi and BLE observations</h3>
+          <video controls preload="none" playsinline poster="media/observations.png" style="width:100%;border-radius:12px" aria-label="Wi-Fi and BLE observations: illustrated guide">
+            <source src="media/observations.mp4" type="video/mp4">
+            <track default kind="captions" src="media/observations.vtt" srclang="en" label="English">
+            <a href="media/observations.mp4">Download video</a>
+          </video>
+          <p><a href="wiki/#/tutorials">Read the complete transcript</a></p>
+        </article>
+        <article class="card reveal"><h3>Radio, NFC and IR checks</h3>
+          <video controls preload="none" playsinline poster="media/peripherals.png" style="width:100%;border-radius:12px" aria-label="Radio, NFC and IR checks: illustrated guide">
+            <source src="media/peripherals.mp4" type="video/mp4">
+            <track default kind="captions" src="media/peripherals.vtt" srclang="en" label="English">
+            <a href="media/peripherals.mp4">Download video</a>
+          </video>
+          <p><a href="wiki/#/tutorials">Read the complete transcript</a></p>
+        </article>
+        <article class="card reveal"><h3>Audio and Remote</h3>
+          <video controls preload="none" playsinline poster="media/audio-remote.png" style="width:100%;border-radius:12px" aria-label="Audio and Remote: illustrated guide">
+            <source src="media/audio-remote.mp4" type="video/mp4">
+            <track default kind="captions" src="media/audio-remote.vtt" srclang="en" label="English">
+            <a href="media/audio-remote.mp4">Download video</a>
+          </video>
+          <p><a href="wiki/#/tutorials">Read the complete transcript</a></p>
+        </article>
+      </div>
     </section>
 
     <section id="compare">
@@ -403,7 +459,7 @@
       <span class="eyebrow-sm reveal">Getting started</span>
       <h2 class="reveal">Flash in <span class="fire">three steps</span></h2>
       <p class="lead reveal">Use desktop Chrome or Edge with a USB data cable. Install choices come from the published release.</p>
-      <p class="cmp-note reveal">Hosted images are historical builds, not the current development validation artifacts. The bundled T-Embed manifest reports 0.6.3; development targets 0.1.1. New images will be published after acceptance. GitHub assets remain unavailable anonymously while the repository is private.</p>
+      <p class="cmp-note reveal">Downloads are resolved from the public release. Check the selected board, version and verification status; unavailable assets keep installation disabled. Historical bundled files are not a fallback. A published build does not certify every physical function.</p>
       <div class="grid g2">
         <div class="card reveal">
           <h3>1 &middot; Flash the firmware</h3>

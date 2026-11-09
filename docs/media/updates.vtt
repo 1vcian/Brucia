@@ -1,0 +1,17 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:10.000
+Prepare the pair
+Read the release notes. Preserve required files. Stop tools and use stable power. APK installation and firmware flashing are separate.
+
+00:00:10.000 --> 00:00:20.000
+Use Updates
+Select the correct board and release. Review verification status. Keep USB connected while the app writes and verifies firmware.
+
+00:00:20.000 --> 00:00:30.000
+Reconnect and confirm
+After completion, reconnect to companion mode. Check the reported firmware version and a benign device-info reply.
+
+00:00:30.000 --> 00:00:40.000
+If flashing fails
+Keep the error and version details. Follow the board bootloader procedure and recover with the matching image. Never treat an incomplete upload as success.

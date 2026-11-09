@@ -1,0 +1,17 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:10.000
+Choose a matching release
+Download the APK and firmware for your exact board. Read the release notes and back up files you need.
+
+00:00:10.000 --> 00:00:20.000
+Flash from a computer
+Use the public web flasher in desktop Chrome or Edge with a USB data cable. Confirm board and version before starting.
+
+00:00:20.000 --> 00:00:30.000
+Connect the Android app
+Install the APK. Connect via USB host / OTG, grant USB access and enter Brucia companion mode on the device.
+
+00:00:30.000 --> 00:00:40.000
+Check the first reply
+Confirm device and firmware information. List files or request device info. No reply? Check cable, permission, mode and serial-port ownership.

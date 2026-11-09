@@ -1,5 +1,9 @@
 # Wi-Fi
 
+> Public reference: Radio and driver limits; test stop/reconnect and export behavior. Presence, successful replies and physical effects are
+> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
+> and [Tutorials](Tutorials.md) before relying on a workflow.
+
 Every Wi-Fi tool. The device is the radio front-end; the phone does the mapping,
 cracking, analytics and storage. Each page is gated on `caps.wifi`.
 
@@ -17,7 +21,7 @@ GPS and map that Bruce needs an external module and a tiny screen for both come 
 phone.
 
 ## Crack (WPA/WPA2)
-See the dedicated [[Features-Tools]] note - the handshake/PMKID capture lives here, the
+See the dedicated [Features-Tools](Features-Tools.md) note - the handshake/PMKID capture lives here, the
 cracking runs on the phone.
 
 - **PMKID capture** (`wifi_pmkid`) and **4-way handshake capture** (`wifi_handshake`) on
@@ -90,7 +94,7 @@ the device standalone.
 ## ARP MITM / NetCut
 The device joins a Wi-Fi network and ARP-poisons a target and gateway so their traffic
 routes through it (`arp_spoof`), pairing with the on-phone HTTPS intercept proxy (see
-[[Features-Tools]]).
+[Features-Tools](Features-Tools.md)).
 
 ---
-Back to [[Features]].
+Back to [Features](Features.md).

@@ -1,102 +1,62 @@
 # Getting Started
 
-This guide takes you from a blank device to a connected Brucia setup.
+This guide covers the public releases and the USB companion workflow.
 
-> For authorized security research and education only. You are responsible for
-> complying with all applicable laws and for only testing systems you own or are
-> explicitly permitted to test.
+## Prepare
 
-## What you need
+- Reference hardware: LilyGO T-Embed CC1101. Its PN532 is built in; optional modules
+  such as NRF24, FM or LoRa need their own compatible hardware.
+- USB data cable for a computer; USB host/OTG connection for the Android phone.
+- APK and board-specific firmware from the same [release](https://github.com/1vcian/Brucia/releases/latest).
+  Read that release's notes and preserve files/settings you need before flashing.
 
-- A **LilyGo T-Embed CC1101 (ESP32-S3)** - the supported, hardware-verified board.
-- A **data** USB-C cable (not a charge-only cable).
-- An **Android phone** and a **USB-C OTG** cable to connect it to the device.
-- Optional: a PN532 module for NFC, an NRF24 QWIIC add-on.
+## 1. Install firmware
 
-## 1. Flash the firmware
+Open the [web flasher](https://1vcian.me/Brucia/) in **desktop Chrome or Edge**. Connect the board,
+close applications using its serial port, and select the exact board and release.
+Read the displayed verification status and erase options before starting. Keep the
+cable connected until the flasher confirms completion. A build result is not an upload result.
 
-Pick one method.
+If the port does not appear, check the data cable, USB permission and the board's
+documented bootloader procedure. The fallback for developers is [Building](Building.md).
+For Android flashing, use the app's USB updater, not the browser route.
 
-### Browser flasher (easiest)
+## 2. Install the Android app
 
-1. Open **https://1vcian.me/Brucia/** in Chrome or Edge (desktop, or Chrome on
-   Android via USB-OTG).
-2. Plug in the T-Embed CC1101 with a **data** USB-C cable.
-3. Click **Connect & Flash**.
+Install the APK from the same release. Android may ask you to permit installation
+from the application that opened it. Keep the original signing identity when updating;
+a debug build may not replace a signed release. Do not uninstall as a first troubleshooting
+step: that can remove local app data. APK installation and firmware flashing are separate.
 
-This uses Web Serial / ESP Web Tools and flashes the merged, ready-to-use image.
-Once Brucia is installed, later firmware updates can also be flashed over USB from the
-app's **Updates** screen.
+## 3. Connect over USB
 
-### PlatformIO
+1. Disconnect the computer and connect the T-Embed to the phone with USB host/OTG.
+2. Open Brucia and grant access to the USB device when Android asks.
+3. Enter **Brucia** companion mode on the device if it has not entered automatically.
+4. Wait for the app to report its connection and the firmware/device information.
+5. Open device information or list files. Confirm a successful reply before proceeding.
 
-```sh
-python3 tools/build_firmware.py -e lilygo-t-embed-cc1101   # first build
-pio run -e lilygo-t-embed-cc1101 -t upload
-```
+Capabilities describe what the connected firmware reports. An absent module is not
+enabled by opening its screen. Stop competing operations before retrying a busy module.
 
-See [[Building]] for the full toolchain setup.
+## 4. First session
 
-## 2. Install the app
+Use [Tutorials](Tutorials.md) for device information, files, observations and audio. Check a
+known lab device or a file you created; do not treat preview data as a capture.
+Record app version, firmware version, board and expected/observed behavior when reporting
+a problem. Never include private credentials or personal captures in a public issue.
 
-- Download the APK from the project
-  [Releases](https://github.com/1vcian/Brucia/releases) and install it (allow
-  installation from unknown sources), **or**
-- Build it yourself:
+## 5. Updates and recovery
 
-  ```sh
-  cd android && ./gradlew :app:assembleDebug
-  ```
+The **Updates** screen handles APK downloads and supported USB firmware updates.
+Check board and version, stop active tools, preserve required files and keep power stable.
+After completion, reconnect and confirm the reported version and a benign command.
+An interrupted flash may require the board's bootloader and a computer to recover.
 
-  Requires JDK 21-25 (Paparazzi 2.0 needs 21+; verified with 23 locally and 21 in CI) and Android SDK platform 37.
-  See [[Building]].
+The separate **BLE console** requires enabling BLE API and pairing with its displayed PIN.
+It is not the USB companion protocol and does not replace the workspace connection.
 
-## 3. Connect
+## What this guide establishes
 
-Brucia offers two ways to use the device from the phone.
-
-### Companion mode (offload)
-
-1. On the device, tap **Brucia** on the home screen. It shows a QR code to get the
-   app, then "waiting for app".
-2. Plug the device into the phone with a **USB-C OTG** cable.
-3. Open the Brucia app and tap **Connect over USB**.
-4. The status pill turns green and the device **dashboard** card shows board, chip,
-   modules and live battery percentage.
-
-In companion mode the device becomes a radio/sensor front-end and the phone does the
-heavy work. This is where the native offload screens (Wardrive, Crack, and the rest)
-operate. The app opens on a **dashboard** with a **bottom navigation bar**, and every
-page is **capability-gated**: when the device reports its `caps{}` object, the app shows
-only the modules the attached board actually has (so NFC, NRF24, mic, speaker and FM
-pages appear only when that hardware is present).
-
-### Remote control mode
-
-If you want to drive the real device UI from the phone instead:
-
-1. Leave the device on its **normal menu** (do not enter Brucia/companion mode).
-2. Open the **Remote** tab in the app and tap **Start**.
-3. A D-pad drives the real device UI and the device screen is mirrored live in the
-   app.
-
-This reaches every standalone Bruce feature (Evil Portal, Karma, Beacon spam,
-Sniffer, Reverse Shell, Scripts, and so on) from the phone.
-
-## 4. First steps
-
-- From the **dashboard**, confirm the device card (info, free memory, uptime, battery).
-- Try **Wardrive**: toggle the Wi-Fi AP stream and watch live access points appear,
-  GPS-tagged and mapped on the phone; export to WiGLE CSV, KML or GPX.
-- Open the **Console** command palette to run any Bruce CLI command and see its output.
-- Explore the capability-gated pages: **Crack** (download a wordlist, then crack a
-  captured PMKID/handshake), **Monitor** (full 802.11 capture to pcap for Wireshark),
-  **MITM** (ARP redirect plus the on-phone HTTPS proxy), the **Spam hub** (Apple /
-  Android / Windows / Samsung), Sub-GHz, NFC, IR, BLE and the Tools.
-- Generate a **session Report** with OSINT and insights when you are done.
-- Check the **Updates** screen to update the app (OTA) and flash the device firmware
-  over USB from inside the app.
-- Explore the rest in [[Features]].
-
-The device stays a full Bruce when no phone is attached: companion mode is additive,
-so nothing standalone is lost.
+These are instructions, not a record of a successful run on your device. Hardware
+acceptance for each release belongs in [TESTS.md](https://github.com/1vcian/Brucia/blob/main/TESTS.md).

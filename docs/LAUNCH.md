@@ -9,7 +9,7 @@ apps built before the rename still find new releases.
 ## The central config
 
 `brand.json` at the repository root is the only place where Brucia's repository, site and
-upstream credit links are written. The `launch` block in it holds the future values.
+upstream credit links are written. The `launch` block now matches the public values.
 
 | Consumer | How it reads `brand.json` |
 | --- | --- |
@@ -37,9 +37,7 @@ it is used.
 
 ### Left from the rename
 
-- Firmware flashed before the rename shows QR codes and NFC defaults pointing at the old site
-  path. GitHub Pages does not redirect project paths on a rename; a redirect page under the old
-  path in the repository that serves `1vcian.me` would keep them working (not done).
+- No redirect from the old site path: before the launch only the owner ran Brucia builds.
 - The CC1101 wiring QR codes in `src/core/settings.cpp` point at images in the upstream Bruce
   repository (`media/connections/`); repoint them to `BRUCIA_REPO_URL` once both images are in
   Brucia's repository.
@@ -78,7 +76,37 @@ Not yet verified on a device. Record results in `TESTS.md`.
 
 ## Documentation regeneration
 
-Still to do after the launch, describing only what is verified at that point (see `TESTS.md`).
+Public documentation refreshed 2026-11-09 against the 0.1.11 source context. These
+materials are prepared locally; this regeneration does not publish the site or wiki.
+README, the nine core wiki pages (including Tutorials), feature-page verification
+notes, sidebar/routes, usage guide and website copy now describe the public project.
+Toolchain detail remains in CONTRIBUTING.md and wiki/Building.md; wire details remain
+in proto/PROTOCOL.md rather than a second outdated command table.
+
+Media: `tools/render_public_media.py` produces two public images and six silent,
+40-second illustrated MP4 guides (install/connect, updates/recovery, files/scripts,
+observations, peripherals, audio/Remote), with posters, VTT captions and a complete
+transcript in wiki/Tutorials.md. `docs/media/manifest.json` records source revision,
+fixture hashes and output hashes. UI images are Compose previews with fixture data,
+verified with Paparazzi; the videos are instructions, not device recordings.
+
+Regenerate after verifying the preview sources:
+
+```sh
+cd android
+./gradlew :app:verifyPaparazziDebug --tests '*FlameUiScreenshotTest'
+cd ..
+python3 tools/render_public_media.py  # Pillow, ffmpeg, Arial or DejaVu Sans
+python3 tools/brand.py write
+python3 tools/brand.py check
+```
+
+Still pending: new physical app/device recordings (boot, Device Info, companion,
+installation and actual peripheral effects) from an accepted release pair. Existing
+device photos, recordings and wiring images retain their historical/upstream provenance;
+they were not relabelled as current. Hardware checks above remain NOT RUN.
+
+The launch scope and its coverage:
 
 - `README.md`: project description, install paths, links, status of hardware verification.
 - Wiki pages (`wiki/*.md`, rendered by `docs/wiki/`): Home, Getting Started, Features,
@@ -89,6 +117,6 @@ Still to do after the launch, describing only what is verified at that point (se
   relationship to Bruce and its official app, licence and source offer.
 - Screenshots and images: app screens, device screens (boot, Device Info, companion), website
   hero and comparison images in `docs/img/` and `media/`.
-- Videos: install and first connection, one per main workflow; none exist yet.
+- Videos: six illustrated guides now exist; actual phone/device recordings remain pending acceptance.
 - Website copy in `docs/index.html` and `docs/USAGE.md`, `SECURITY.md` and `CONTRIBUTING.md`
   wherever they describe the private phase.

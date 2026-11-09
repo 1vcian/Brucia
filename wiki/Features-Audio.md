@@ -1,5 +1,9 @@
 # Audio
 
+> Public reference: DSP tests do not verify the physical microphone/speaker path. Presence, successful replies and physical effects are
+> separate claims. Check [revision-specific evidence](https://github.com/1vcian/Brucia/blob/main/TESTS.md)
+> and [Tutorials](Tutorials.md) before relying on a workflow.
+
 Every tool built on the onboard microphone and I2S speaker. Driven by two firmware
 streams: a continuous raw-PCM mic stream (`mic.pcm`, 16 kHz mono) and streamed PCM speaker
 playback (`spkr_pcm_begin` / `spkr_pcm_data` / `spkr_pcm_stop`). All the DSP runs on the
@@ -52,4 +56,4 @@ review, and the Tools page's microphone recorder (`mic_record`) saves a WAV stra
 the SD card.
 
 ---
-Back to [[Features]].
+Back to [Features](Features.md).
