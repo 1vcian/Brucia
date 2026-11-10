@@ -27,7 +27,10 @@ class MifareDictionaryTest {
 
     @Test fun sourcesAreAdditiveHttpsAndDistinct() {
         assertEquals(setOf("flipper", "proxmark3"), MifareDictionary.sources.map { it.id }.toSet())
-        assertTrue(MifareDictionary.sources.all { it.url.startsWith("https://raw.githubusercontent.com/") })
+        assertEquals(listOf(
+            "${BrandLinks.DOWNLOAD_PREFIX}wordlists/flipper-mf-classic.nfc",
+            "${BrandLinks.DOWNLOAD_PREFIX}wordlists/proxmark3-mfc-default-keys.dic",
+        ), MifareDictionary.sources.map { it.url })
         assertTrue(WordlistCatalog.all.any { it.name == "rockyou.txt" })
         assertTrue(WordlistCatalog.all.any { it.name == "top-100k.txt" })
         assertEquals(2, WordlistCatalog.all.count { it.name.startsWith("probable-wpa-") })

@@ -1,0 +1,90 @@
+{
+  "snapshot_date": "2026-11-10",
+  "modifications": "None; byte-identical source files with release asset filenames.",
+  "files": [
+    {
+      "name": "probable-wpa-4800.txt",
+      "upstream_repository": "berzerk0/Probable-Wordlists",
+      "upstream_revision": "2df55facf06c7742f2038a8f6607ea9071596128",
+      "upstream_path": "Real-Passwords/WPA-Length/Top4800-WPA-probable-v2.txt",
+      "source_url": "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/2df55facf06c7742f2038a8f6607ea9071596128/Real-Passwords/WPA-Length/Top4800-WPA-probable-v2.txt",
+      "bytes": 45276,
+      "sha256": "5dc33214cad9a11eb926de00f5ded20b1a5fc12ba3332319e054713265a35c51",
+      "license_file": "probable-LICENSE.txt",
+      "attribution": "berzerk0 and contributors",
+      "license": "CC-BY-SA-4.0"
+    },
+    {
+      "name": "probable-wpa-204k.txt",
+      "upstream_repository": "berzerk0/Probable-Wordlists",
+      "upstream_revision": "2df55facf06c7742f2038a8f6607ea9071596128",
+      "upstream_path": "Real-Passwords/WPA-Length/Top204Thousand-WPA-probable-v2.txt",
+      "source_url": "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/2df55facf06c7742f2038a8f6607ea9071596128/Real-Passwords/WPA-Length/Top204Thousand-WPA-probable-v2.txt",
+      "bytes": 2121750,
+      "sha256": "e416890a4742481971ba6d85039e0072111c92cb46c8cb7f3f8f22b865f48bf4",
+      "license_file": "probable-LICENSE.txt",
+      "attribution": "berzerk0 and contributors",
+      "license": "CC-BY-SA-4.0"
+    },
+    {
+      "name": "flipper-mf-classic.nfc",
+      "upstream_repository": "flipperdevices/flipperzero-firmware",
+      "upstream_revision": "3060cee9bac71d332dc7629191ae1aeb1edaac33",
+      "upstream_path": "applications/main/nfc/resources/nfc/assets/mf_classic_dict.nfc",
+      "source_url": "https://raw.githubusercontent.com/flipperdevices/flipperzero-firmware/3060cee9bac71d332dc7629191ae1aeb1edaac33/applications/main/nfc/resources/nfc/assets/mf_classic_dict.nfc",
+      "bytes": 38847,
+      "sha256": "e973b28d0e2d0049131bfa5a14a015125f53acdc79504996e3d1b4cb87ff1696",
+      "license_file": "flipper-LICENSE.txt",
+      "attribution": "Flipper firmware contributors; dictionary header credits RfidResearchGroup / Proxmark3",
+      "license": "GPL-3.0 (repository license; original headers retained)"
+    },
+    {
+      "name": "proxmark3-mfc-default-keys.dic",
+      "upstream_repository": "RfidResearchGroup/proxmark3",
+      "upstream_revision": "adf7b4f45619ea98ba97b8fcd674fd9f6e838b6d",
+      "upstream_path": "client/dictionaries/mfc_default_keys.dic",
+      "source_url": "https://raw.githubusercontent.com/RfidResearchGroup/proxmark3/adf7b4f45619ea98ba97b8fcd674fd9f6e838b6d/client/dictionaries/mfc_default_keys.dic",
+      "bytes": 46037,
+      "sha256": "9e32e7ac46e7cd278a3a5e291d1adea5a4367da6b55352eecc8bea5e62679066",
+      "license_file": "proxmark3-LICENSE.txt",
+      "attribution": "RfidResearchGroup / Iceman and community contributors",
+      "license": "GPL-3.0 (repository license; original headers retained)"
+    },
+    {
+      "name": "probable-LICENSE.txt",
+      "upstream_repository": "berzerk0/Probable-Wordlists",
+      "upstream_revision": "2df55facf06c7742f2038a8f6607ea9071596128",
+      "upstream_path": "License.txt",
+      "source_url": "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/2df55facf06c7742f2038a8f6607ea9071596128/License.txt",
+      "bytes": 20146,
+      "sha256": "fee9065c98956a1b3a60e7566d55ec0d2491ceac480e9835a30330f9602be26d",
+      "license_file": "probable-LICENSE.txt",
+      "attribution": "berzerk0 and contributors",
+      "license": "CC-BY-SA-4.0"
+    },
+    {
+      "name": "flipper-LICENSE.txt",
+      "upstream_repository": "flipperdevices/flipperzero-firmware",
+      "upstream_revision": "3060cee9bac71d332dc7629191ae1aeb1edaac33",
+      "upstream_path": "LICENSE",
+      "source_url": "https://raw.githubusercontent.com/flipperdevices/flipperzero-firmware/3060cee9bac71d332dc7629191ae1aeb1edaac33/LICENSE",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "license_file": "flipper-LICENSE.txt",
+      "attribution": "Flipper firmware contributors; dictionary header credits RfidResearchGroup / Proxmark3",
+      "license": "GPL-3.0 (repository license; original headers retained)"
+    },
+    {
+      "name": "proxmark3-LICENSE.txt",
+      "upstream_repository": "RfidResearchGroup/proxmark3",
+      "upstream_revision": "adf7b4f45619ea98ba97b8fcd674fd9f6e838b6d",
+      "upstream_path": "LICENSE.txt",
+      "source_url": "https://raw.githubusercontent.com/RfidResearchGroup/proxmark3/adf7b4f45619ea98ba97b8fcd674fd9f6e838b6d/LICENSE.txt",
+      "bytes": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "license_file": "proxmark3-LICENSE.txt",
+      "attribution": "RfidResearchGroup / Iceman and community contributors",
+      "license": "GPL-3.0 (repository license; original headers retained)"
+    }
+  ]
+}

@@ -64,8 +64,8 @@ does the rest:
 
 - **Download real wordlists** in-app (rockyou, SecLists top-1M / 100k / 10k), plus a
   built-in offline quick list and import of any `.txt`.
-- **Probable WPA top 4,800 / 204k** are additional downloads from berzerk0's
-  Probable-Wordlists. Entries are ordered by popularity and filtered to 8–40 characters;
+- **Probable WPA top 4,800 / 204k** are Brucia-hosted snapshots of berzerk0's
+  Probable-Wordlists (the original 0.1.12 APK still downloads upstream). Entries are ordered by popularity and filtered to 8–40 characters;
   they are general-password collections, not captured Wi-Fi credentials. The larger
   file includes the smaller one. RockYou and SecLists remain available.
 - Several built-in dictionaries: common WPA, numeric/dates, keyboard walks, Italian,

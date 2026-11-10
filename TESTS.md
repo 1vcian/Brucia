@@ -4,6 +4,28 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Brucia-hosted dictionary snapshots — 2026-11-10
+
+Four unchanged dictionaries uploaded as assets to the existing `wordlists` release:
+`probable-wpa-4800.txt` (45,276 B / 4,800 entries), `probable-wpa-204k.txt`
+(2,121,750 B / 203,806 entries), `flipper-mf-classic.nfc` (38,847 B / 2,038 unique
+keys), `proxmark3-mfc-default-keys.dic` (46,037 B / 2,511 unique keys).
+`docs/dictionary-sources.json` records pinned upstream revisions, source URLs,
+SHA-256, sizes, attribution and licenses; the same JSON plus `dictionary-licenses.zip`
+are release assets. The ZIP includes all three full license texts and notices.
+
+All six published assets downloaded again from Brucia and compared byte-for-byte
+with the prepared copies: PASS. License archive integrity and enclosed texts checked.
+WPA entries are all 8–40 characters; NFC counts use normalized 12-hex unique keys.
+Existing RockYou/SecLists assets were not changed.
+
+App source now uses BrandLinks.DOWNLOAD_PREFIX + wordlists for every catalog
+entry, including NFC; there is no upstream fallback. Focused Android tests:
+BrandLinksTest 3, MifareDictionaryTest 5, DictionaryDownloadTest 4 — 12 PASS,
+0 failures/errors. This compiled production/test Kotlin; it did not assemble or
+publish a new APK. The previously published 0.1.12 APK still has its upstream URLs.
+No firmware change, device flash or physical tag test.
+
 ## App recordings and dictionary release links — 2026-11-10
 
 Actual signed release APK 0.1.12 (digest below) installed on a temporary read-only

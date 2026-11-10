@@ -14,20 +14,30 @@ header pointing back to this document.
 
 ## Optional dictionary downloads
 
-The Android app offers these external data sources on demand; their contents are
-not bundled into the APK by this integration. Upstream branches may change.
+Brucia hosts byte-identical snapshots of these data sources as assets in the
+wordlists release (see [dictionary downloads](wiki/Tutorials.md#add-the-nfc-dictionaries)).
+The app catalog uses Brucia-hosted downloads; dictionaries are not bundled in the APK.
+The already-published 0.1.12 APK still uses upstream URLs for the four new lists;
+the catalog change takes effect in the next app build.
+
+[Snapshot metadata](docs/dictionary-sources.json) records pinned upstream revisions,
+paths, sizes and SHA-256 digests. Release asset `dictionary-licenses.zip` includes
+all three complete license texts, attribution notices and the same metadata.
+Original dictionary contents and headers are unchanged; only asset filenames differ.
 
 - [Probable-Wordlists](https://github.com/berzerk0/Probable-Wordlists), by berzerk0
   and contributors: WPA-Length top 4,800 and top 204k, CC BY-SA 4.0. These are
   popularity-ordered general passwords filtered by length, not Wi-Fi-specific captures.
 - [Flipper firmware Classic dictionary](https://github.com/flipperdevices/flipperzero-firmware/blob/dev/applications/main/nfc/resources/nfc/assets/mf_classic_dict.nfc):
   Flipper firmware contributors; its header attributes the dictionary to Proxmark3.
+  Repository license: GNU GPL v3; full text in the license archive.
 - [Proxmark3 Classic dictionary](https://github.com/RfidResearchGroup/proxmark3/blob/master/client/dictionaries/mfc_default_keys.dic):
   RfidResearchGroup / Iceman and community contributors.
+  Repository license: GNU GPL v3; full text in the license archive.
 
 MIFARE dictionaries are data for the existing key-check operation; downloading one
-does not port the upstream project's recovery algorithms. Refer to each upstream
-repository for its license and notices before redistributing downloaded data.
+does not port the upstream project's recovery algorithms. The mirrored plain-text
+files are the unmodified source data and retain their authors' licenses.
 
 ## Sub-GHz protocols / KeeLoq
 

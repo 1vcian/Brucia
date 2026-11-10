@@ -31,7 +31,7 @@ object WordlistCatalog {
         DownloadableWordlist(
             name = "probable-wpa-4800.txt",
             title = "Probable WPA top 4,800",
-            url = "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/master/Real-Passwords/WPA-Length/Top4800-WPA-probable-v2.txt",
+            url = "${BrandLinks.DOWNLOAD_PREFIX}wordlists/probable-wpa-4800.txt",
             approxBytes = 45_276L,
             entries = "4.8k",
             description = "berzerk0 / Probable-Wordlists (CC BY-SA 4.0). Popularity-ordered, 8-40 characters; general passwords filtered by length, not Wi-Fi captures.",
@@ -39,7 +39,7 @@ object WordlistCatalog {
         DownloadableWordlist(
             name = "probable-wpa-204k.txt",
             title = "Probable WPA top 204k",
-            url = "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/master/Real-Passwords/WPA-Length/Top204Thousand-WPA-probable-v2.txt",
+            url = "${BrandLinks.DOWNLOAD_PREFIX}wordlists/probable-wpa-204k.txt",
             approxBytes = 2_121_750L,
             entries = "204k",
             description = "berzerk0 / Probable-Wordlists (CC BY-SA 4.0). Includes the smaller list; no need to run both. Not a guarantee of recovery.",

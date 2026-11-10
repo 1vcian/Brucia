@@ -41,8 +41,10 @@ importing does not start a tag operation. They apply to MIFARE Classic, not
 NTAG, Ultralight or DESFire. See [NFC](Features-NFC.md) for the hardware workflow.
 
 The [wordlists release](https://github.com/1vcian/Brucia/releases/tag/wordlists)
-links both NFC sources and the Probable WPA lists, alongside its existing
-RockYou and SecLists assets.
+hosts both NFC dictionaries and the Probable WPA lists as downloadable assets,
+alongside RockYou and SecLists, with source hashes and licenses. This recording
+uses the original 0.1.12 APK, whose four new download URLs still point upstream;
+the app catalog now points at the Brucia-hosted copies for the next build.
 
 ## Connect hardware next
 

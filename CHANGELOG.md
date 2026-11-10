@@ -7,6 +7,10 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Dictionary downloads now use Brucia-hosted copies of Probable WPA and
+  Flipper/Proxmark3 Classic lists in the wordlists release. Pinned source revisions,
+  hashes and complete license texts accompany the four unchanged data files.
+
 - Public tutorials now show actual app screen recordings: navigation, the built-in
   synthetic WPA demo and NFC dictionary imports. Replaced six text-slide videos;
   emulator provenance and captions are included. The wordlists release now links

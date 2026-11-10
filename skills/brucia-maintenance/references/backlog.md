@@ -1,10 +1,19 @@
 # Work queue — single operational ledger
 
+Dictionary hosting 2026-11-10: four new dictionaries mirrored as unchanged assets
+in Brucia's wordlists release, with pinned revisions/SHA-256 manifest and full
+license archive. All six new assets downloaded back and compared byte-for-byte.
+App Wi-Fi/NFC catalogs use Brucia download URLs; 12 focused JVM tests pass.
+Already-published 0.1.12 APK retains old upstream URLs: new APK publication is
+still needed to deliver the catalog switch. Manual download/import is available now.
+No firmware or physical acceptance changes. Details: TESTS.md / THIRD_PARTY.md.
+
 App media correction 2026-11-10: six slide videos replaced with actual released-APK
 0.1.12 emulator recordings (navigation, synthetic demo, live NFC dictionary import).
 NFC import yields 2,038 + 473 = 2,511 unique keys. No board/tag or physical acceptance.
 Site/Tutorials use recordings, provenance hashes preserved; still renderer cannot
-regenerate slides. `wordlists` release notes now link all four new upstream sources.
+regenerate slides. The initial release links were subsequently replaced by hosted
+dictionary assets (see the hosting update above).
 Open copy issue observed in released Crack screen: remove overbroad Flipper claim
 and clarify that synthetic input is selected by Demo, not every Run. TESTS.md records
 capture context; physical media and device gates remain open.

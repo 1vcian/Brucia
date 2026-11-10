@@ -18,8 +18,9 @@ phone-side dictionary of 65+ known default keys plus Crypto-1 / Ultralight / NTA
 and a clone-risk assessment. Authorized testing only.
 
 Use **Add Flipper Classic dictionary** or **Add Proxmark3 Classic dictionary** to
-download extra known keys over HTTPS. These lists overlap; duplicates are removed
-when added to the current session. The bundled keys remain available. Downloading
+download extra known keys over HTTPS from Brucia’s `wordlists` release. These lists overlap; duplicates are removed
+when added to the current session. The bundled keys remain available. The original 0.1.12 APK uses upstream download
+URLs; newer builds use the Brucia-hosted snapshots. Downloading
 does not run a check or write a tag: start the existing key check separately.
 
 **Import keys** accepts plain text (`.txt`, `.dic` or `.nfc`): one 12-hex key per line,

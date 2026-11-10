@@ -1,5 +1,6 @@
 package app.brucia.nfc
 
+import app.brucia.BrandLinks
 import app.brucia.update.DownloadIO
 import app.brucia.wordlist.DictionaryDownload
 import java.io.ByteArrayOutputStream
@@ -14,10 +15,10 @@ object MifareDictionary {
     const val MAX_KEYS = 50_000
     val sources = listOf(
         MifareDictionarySource("flipper", "Flipper Classic dictionary",
-            "https://raw.githubusercontent.com/flipperdevices/flipperzero-firmware/dev/applications/main/nfc/resources/nfc/assets/mf_classic_dict.nfc",
+            "${BrandLinks.DOWNLOAD_PREFIX}wordlists/flipper-mf-classic.nfc",
             "Flipper firmware community dictionary, derived from Proxmark3. Overlaps the other list."),
         MifareDictionarySource("proxmark3", "Proxmark3 Classic dictionary",
-            "https://raw.githubusercontent.com/RfidResearchGroup/proxmark3/master/client/dictionaries/mfc_default_keys.dic",
+            "${BrandLinks.DOWNLOAD_PREFIX}wordlists/proxmark3-mfc-default-keys.dic",
             "RfidResearchGroup / Iceman public default-key dictionary. MIFARE Classic only."),
     )
 

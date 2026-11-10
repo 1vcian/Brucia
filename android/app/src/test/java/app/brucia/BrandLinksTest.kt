@@ -9,7 +9,7 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Project-hosted downloads follow brand.json; explicitly listed community sources retain their origin. */
+/** App dictionary downloads are hosted by Brucia and follow brand.json. */
 class BrandLinksTest {
     private val brand: JSONObject by lazy {
         var dir: File? = File(System.getProperty("user.dir")).absoluteFile
@@ -33,14 +33,8 @@ class BrandLinksTest {
     @Test fun updaterAndWordlistsUseTheCentralConfig() {
         assertEquals(BrandLinks.RELEASES_API, AppUpdater.RELEASES_API)
         assertTrue(WordlistCatalog.all.isNotEmpty())
-        val community = mapOf(
-            "probable-wpa-4800.txt" to "Top4800-WPA-probable-v2.txt",
-            "probable-wpa-204k.txt" to "Top204Thousand-WPA-probable-v2.txt",
-        )
         for (entry in WordlistCatalog.all) {
-            val upstream = community[entry.name]
-            if (upstream == null) assertTrue(entry.url, entry.url.startsWith(BrandLinks.DOWNLOAD_PREFIX))
-            else assertEquals("https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/master/Real-Passwords/WPA-Length/$upstream", entry.url)
+            assertEquals("${BrandLinks.DOWNLOAD_PREFIX}wordlists/${entry.name}", entry.url)
         }
     }
 
