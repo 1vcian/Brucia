@@ -66,7 +66,7 @@ class DictionaryTextCheck(private val maxLineBytes: Int = MAX_LINE_BYTES) {
         val b = head.toByteArray()
         val zip = b.size >= 4 && b[0] == 0x50.toByte() && b[1] == 0x4b.toByte() && b[2] == 3.toByte() && b[3] == 4.toByte()
         val gzip = b.size >= 2 && b[0] == 0x1f.toByte() && b[1] == 0x8b.toByte()
-        val text = b.toString(Charsets.UTF_8).trimStart('﻿', ' ', '\n', '\r', '\t')
+        val text = b.toString(Charsets.UTF_8).trimStart('\uFEFF', ' ', '\n', '\r', '\t')
         if (zip || gzip || text.startsWith("version https://git-lfs") ||
             WEB.any { text.startsWith(it, ignoreCase = true) })
             throw DictionaryFormatException("Expected a plain-text dictionary, not a web page or archive")

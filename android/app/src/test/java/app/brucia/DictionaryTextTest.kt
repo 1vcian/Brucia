@@ -39,7 +39,7 @@ class DictionaryTextTest {
     }
 
     @Test fun webPagesArchivesAndLfsPointersAreRejectedEvenWhenShort() {
-        for (bad in listOf("﻿  <!DOCTYPE html>", "<html>", "version https://git-lfs.github.com/spec/v1"))
+        for (bad in listOf("\uFEFF  <!DOCTYPE html>", "<html>", "version https://git-lfs.github.com/spec/v1"))
             assertThrows(DictionaryFormatException::class.java) { DictionaryTextCheck.check(bad.toByteArray()) }
         assertThrows(DictionaryFormatException::class.java) { DictionaryTextCheck.check(byteArrayOf(0x50, 0x4b, 3, 4, 0x41)) }
         assertThrows(DictionaryFormatException::class.java) { DictionaryTextCheck.check(byteArrayOf(0x1f, 0x8b.toByte(), 0x41)) }
