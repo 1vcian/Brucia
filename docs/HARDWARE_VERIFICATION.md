@@ -181,11 +181,53 @@ run, 2048 B/h from about 2 hours on. A leak smaller than the limit is not ruled 
 Ctrl-C (or a lost link) ends the soak, sends OFF for an active stream and aborts or removes the
 scratch upload, then writes the JSON, Markdown and CSV reports marked interrupted (exit 130).
 
+#### Radio coverage (`--require-events`, the F23 radio-traffic gate)
+
+The soak result above is a link verdict: it PASSes even when every stream saw 0 events (an
+RF-quiet room, or a receiver that never delivered). That is a valid link check but not evidence
+that the link holds UNDER radio traffic. To use a soak for that gate, state which streams must
+carry traffic:
+
+```sh
+python3 tools/hw_acceptance.py --port /dev/cu.usbmodemXXXX --soak 40 \
+    --streams wifi.probe,wifi.sta,subghz.raw \
+    --require-events wifi.probe:20,wifi.sta:5,subghz.raw:1 --out hw-acceptance-reports
+```
+
+`--require-events STREAM[:MIN]` (repeatable or comma list, receive-only streams only, MIN
+default 1) requires at least MIN events of that stream across the soak's stream cycles; a
+required stream missing from `--streams` is added. The run must also cover its full `--soak`
+minutes: the effective duration is the elapsed time of the last completed `diag` sample, and a
+Ctrl-C, a lost link, an unexpected reboot or a `diag` that stops answering make it short. The
+option adds no command: the same allowlisted SUB ON/OFF cycles are counted, nothing transmits.
+
+The report carries the radio coverage as a separate verdict (JSON `radio_coverage` and
+`summary.coverage`/`summary.gate`; Markdown "Radio coverage" line and section, with a
+per-stream table):
+
+- per stream: `SUFFICIENT` (events >= MIN), `INSUFFICIENT` (started, fewer events), `NOT RUN`
+  (not in CAPS, e.g. `subghz.raw` without `caps.cc1101`; SUB ON never ACKed ok; or the soak never
+  ran);
+- duration: `SUFFICIENT` or `INSUFFICIENT` (interrupted, stopped, or effective < planned);
+- overall: `SUFFICIENT` when every required stream and the duration are, `NOT RUN` when no
+  required stream ran, otherwise `INSUFFICIENT`; `NOT REQUIRED` without `--require-events`
+  (the report then says radio coverage was not run as a gate and the run is not evidence under
+  radio traffic).
+
+The radio gate (`summary.gate`) is `MET` only with link result PASS and coverage SUFFICIENT,
+`NOT MET` otherwise, `NOT REQUIRED` without a requirement. Exit codes: 0 no FAIL and the gate
+MET or not required; 1 a FAIL; 2 link/usage error; 3 no FAIL but the gate NOT MET (zero or too
+few events, a stream absent or never started, a short run); 130 Ctrl-C (coverage INSUFFICIENT).
+A soak cited for F23 must show exit 0 with `gate: MET`.
+
 What a soak PASS proves: over that time, on that board and firmware, the companion link
 carried the passive mix with exact frame accounting, no rejects or device noise, no reboot, no
 heap decline above the stated limit, scratch files cleaned up and streams silent after OFF. It
-does not prove radio receive quality (the streams may see 0 events), app-side behaviour, USB
+does not prove radio receive quality (the streams may see 0 events unless `--require-events`
+made coverage part of the gate), app-side behaviour, USB
 unplug/replug, battery/thermal behaviour, long sessions with transmitting features, or that a
 leak below the detection limit is absent. `tools/test_hw_acceptance.py` runs seconds-long soaks
-against `tools/mock_device.py` (heap leak, reboot, noise, idle exit, Ctrl-C); those prove the
-runner, not the device.
+against `tools/mock_device.py` (heap leak, reboot, noise, idle exit, Ctrl-C, and the radio
+coverage verdicts: zero/few/enough events, early Ctrl-C, stream absent or never started, no
+requirement); those prove the runner, not the device. A coverage SUFFICIENT from the mock's
+synthetic events is not radio evidence.

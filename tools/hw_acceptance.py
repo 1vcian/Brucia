@@ -18,6 +18,20 @@ mode after 60 s without a host frame), and records heap, link counters, latency,
 and the timing of every operation per interval; the report adds a soak summary and a CSV time
 series. See Runner.check_soak() and docs/HARDWARE_VERIFICATION.md.
 
+Radio coverage (F43): a soak's link verdict (PASS/FAIL, the `result`) says nothing about radio
+traffic; a soak that saw zero stream events still PASSes as a link check. To use a soak as
+evidence UNDER radio traffic (the F23 gate), state the requirement with
+`--require-events STREAM[:MIN]` (repeatable or comma list; MIN events, default 1, during the
+soak's stream cycles; the stream is added to --streams if missing; receive-only streams only).
+The report then carries a separate radio coverage verdict per stream and overall: SUFFICIENT,
+INSUFFICIENT (too few events, or the run ended before --soak minutes: Ctrl-C, link loss, reboot)
+or NOT RUN (stream not in CAPS, SUB ON never ACKed, or the soak never ran). Without a requirement
+the coverage is NOT REQUIRED: the soak stays a valid link check and the report says radio coverage
+was not run as a gate. The radio gate is MET only with link PASS and coverage SUFFICIENT.
+
+    python3 tools/hw_acceptance.py --port /dev/cu.usbmodem1101 --soak 40 \
+        --require-events wifi.probe:20,wifi.sta:5,subghz.raw:1
+
 Hard safety: every frame goes through `check_allowed()` (an explicit allowlist). No jam,
 deauth, beacon, BLE advertising/spam, IR/RF/Sub-GHz TX, replay, speaker or other emitting
 command can be sent: anything outside the allowlist raises AllowlistViolation before a byte is
@@ -36,7 +50,9 @@ the reader resyncs after device text in the framed stream (a 4-byte length in ra
 by '{"v":'), recording the skipped bytes as warnings instead of failing (proto/PROTOCOL.md).
 
 Simulated runs (tools/test_hw_acceptance.py against tools/mock_device.py) prove the runner,
-not the device. Exit code: 0 no FAIL, 1 at least one FAIL, 2 link/usage error, 130 Ctrl-C.
+not the device. Exit code: 0 no FAIL (and, with --require-events, the radio gate MET), 1 at least
+one FAIL, 2 link/usage error, 3 no FAIL but a --require-events coverage requirement not met
+(radio gate NOT MET), 130 Ctrl-C (the coverage is then INSUFFICIENT too).
 """
 import argparse
 import base64
@@ -85,6 +101,7 @@ class AllowlistViolation(AssertionError):
 # sniffers (no scan, no association); subghz.raw keeps the CC1101 in RX.
 RECEIVE_ONLY_STREAMS = {"wifi.probe": "wifi.probe", "wifi.sta": "wifi.sta", "subghz.raw": "subghz.raw"}
 SCRATCH_PREFIX = "/brucia-acceptance-"
+EXIT_COVERAGE = 3  # link checks passed, but a --require-events radio coverage requirement was not met
 SCRATCH_RE = re.compile(r"^/brucia-acceptance-\d{8}T\d{6}Z-[0-9a-f]{6}\.txt$")
 _TOKEN = r"[0-9a-f]{32}"
 _B64 = r"[A-Za-z0-9+/]+={0,2}"
@@ -1195,7 +1212,8 @@ class Runner:
         self.active_subs.add(stream)
         on = self.link.reply(mid, self.o.sub_timeout, collect)
         info["on_reply"] = on.get("d") if on else None
-        if on is None or on.get("t") != ACK or (on.get("d") or {}).get("ok") is not True:
+        info["on_ok"] = on is not None and on.get("t") == ACK and (on.get("d") or {}).get("ok") is True
+        if not info["on_ok"]:
             problems.append(f"{stream}: SUB on not ACKed ok ({info['on_reply']})")
         else:
             self.stream_listen(stream, collect)
@@ -1379,12 +1397,14 @@ class Runner:
             "read": {"chosen": False, "path": None, "listed": None, "crc32": None, "size": None},
             "uploads_on": True, "uploads": 0, "scratch_paths": [],
             "stream_cycles": {st: 0 for st in streams}, "stream_events": {st: 0 for st in streams},
+            "stream_started": {st: 0 for st in streams},
+            "streams_unsupported": [st for st in o.streams if st not in streams],
             "config": {"minutes": o.soak, "interval_s": o.soak_interval, "keepalive_s": o.soak_keepalive,
                        "pings_per_interval": o.soak_pings, "burst_per_interval": o.soak_burst,
                        "streams_requested": o.streams, "streams": streams, "stream_secs": o.stream_secs,
                        "quiet_secs": o.quiet_secs, "max_leak_bph": o.soak_max_leak,
                        "heap_tolerance_bytes": o.heap_tolerance, "max_p99_ms": o.max_p99_ms,
-                       "warmup_intervals": max(1, len(streams))},
+                       "warmup_intervals": max(1, len(streams)), "require_events": o.require_events},
         }
         self.soak = s
         try:
@@ -1565,6 +1585,7 @@ class Runner:
         problems = self.stream_cycle(stream, info)
         s["row"]["stream"], s["row"]["stream_events"] = stream, info["events"]
         s["stream_cycles"][stream] += 1
+        s["stream_started"][stream] += 1 if info.get("on_ok") else 0
         s["stream_events"][stream] += info["events"]
         return not problems, "; ".join(problems)
 
@@ -1692,11 +1713,16 @@ class Runner:
             "heap_largest_trend": largest, "latency": lat, "ops": op_stats, "counters_total": totals,
             "uploads": s["uploads"], "fs_read": {k: v for k, v in s["read"].items() if k != "chosen"},
             "stream_cycles": s["stream_cycles"], "stream_events": s["stream_events"],
+            "stream_started": s["stream_started"], "streams_unsupported": s["streams_unsupported"],
+            # Time covered by the last completed diag sample (0 without one), vs planned_min.
+            "effective_min": round((rows[-1]["elapsed_s"] if rows else 0) / 60, 2),
         }
+        coverage = radio_coverage(o.require_events, o.soak, summary)
         series = [{k: v for k, v in x.items() if not k.startswith("_")} for x in s["rows"]]
         self.soak_report = {"config": s["config"], "summary": summary, "warnings": s["warnings"],
-                            "findings": s["findings"], "series": series, "ops": s["ops"]}
-        r.evidence = {"config": s["config"], "summary": summary, "findings": s["findings"][:50]}
+                            "findings": s["findings"], "series": series, "ops": s["ops"], "coverage": coverage}
+        r.evidence = {"config": s["config"], "summary": summary, "findings": s["findings"][:50],
+                      "coverage": coverage}
         r.warnings += s["warnings"]
         head = (f"interrupted after {elapsed / 60:.1f} of {o.soak} min; " if s["interrupted"] else "") + \
                (f"stopped: {s['stop']}; " if s["stop"] else "")
@@ -1710,6 +1736,8 @@ class Runner:
             r.reason = head + (f"{elapsed / 60:.1f} min, {s['k']} intervals: {slope}; link counters exact, no "
                                f"rejects, no noise; PING p50 {lat.get('p50_ms')} ms p99 {lat.get('p99_ms')} ms; "
                                f"no reboot (uptime {totals['uptime_s'] if totals else None})")
+        r.reason += f"; link verdict only, radio coverage {coverage['overall']}" + \
+            (f" ({'; '.join(coverage['reasons'])})" if coverage["overall"] not in ("SUFFICIENT", "NOT REQUIRED") else "")
 
     def check_heap(self, r):
         if not self.diag_ok:
@@ -1797,6 +1825,74 @@ class Runner:
 # --------------------------------------------------------------------------------------------
 
 
+def radio_coverage(require, planned_min, summary):
+    """Radio coverage of a soak, separate from its link verdict (F43). `require` maps each
+    stream that must carry traffic to its minimum event count (--require-events); `summary` is
+    the soak summary (None when the soak never ran). Per stream: NOT RUN (absent from CAPS, SUB
+    ON never ACKed ok, or no soak), INSUFFICIENT (fewer events than required) or SUFFICIENT. The
+    duration is SUFFICIENT only when the run was neither interrupted nor stopped and its last diag
+    sample covers the planned minutes. Overall: NOT REQUIRED without a requirement, NOT RUN when
+    no required stream ran, SUFFICIENT when every stream and the duration are, else INSUFFICIENT."""
+    if not require:
+        return {"required": {}, "overall": "NOT REQUIRED", "streams": {}, "duration": None,
+                "reasons": ["no --require-events: link-only soak, radio coverage NOT RUN (not required); "
+                            "this run is not evidence under radio traffic"]}
+    streams, reasons = {}, []
+    for st, need in require.items():
+        e = {"min_events": need, "events": 0, "cycles": 0, "started": 0}
+        if summary is None:
+            v, why = "NOT RUN", "the soak did not run"
+        else:
+            e.update(events=summary["stream_events"].get(st, 0), cycles=summary["stream_cycles"].get(st, 0),
+                     started=summary["stream_started"].get(st, 0))
+            if st in summary["streams_unsupported"]:
+                v, why = "NOT RUN", f"not supported by CAPS (caps.{stream_module(st)} not true)"
+            elif not e["started"]:
+                v, why = "NOT RUN", f"never started ({e['cycles']} cycle(s), SUB ON never ACKed ok)"
+            elif e["events"] < need:
+                v, why = "INSUFFICIENT", f"{e['events']} event(s) < required {need} in {e['started']} cycle(s)"
+            else:
+                v, why = "SUFFICIENT", f"{e['events']} event(s) >= required {need}"
+        e.update(verdict=v, reason=why)
+        streams[st] = e
+        if v != "SUFFICIENT":
+            reasons.append(f"{st}: {why}")
+    planned_s = planned_min * 60 if planned_min else 0
+    if summary is None:
+        dur = {"verdict": "NOT RUN", "planned_min": planned_min, "effective_min": 0, "reason": "the soak did not run"}
+    else:
+        eff = summary["effective_min"]
+        short = summary["interrupted"] or summary["stopped"] or eff * 60 < planned_s - 1e-6
+        why = ("interrupted" if summary["interrupted"] else f"stopped: {summary['stopped']}" if summary["stopped"]
+               else f"{eff} of {planned_min} min covered" if short else f"{eff} >= {planned_min} min")
+        dur = {"verdict": "INSUFFICIENT" if short else "SUFFICIENT", "planned_min": planned_min,
+               "effective_min": eff, "reason": why}
+        if short:
+            reasons.append(f"duration: {why} (effective {eff} of {planned_min} min)")
+    verdicts = [e["verdict"] for e in streams.values()]
+    if summary is None or all(v == "NOT RUN" for v in verdicts):
+        overall = "NOT RUN"
+    elif all(v == "SUFFICIENT" for v in verdicts) and dur["verdict"] == "SUFFICIENT":
+        overall = "SUFFICIENT"
+    else:
+        overall = "INSUFFICIENT"
+    return {"required": dict(require), "overall": overall, "streams": streams, "duration": dur, "reasons": reasons}
+
+
+def coverage_markdown(cov, gate):
+    lines = ["## Radio coverage", "",
+             f"- Overall: **{cov['overall']}**; radio gate (link PASS and coverage SUFFICIENT): **{gate}**"]
+    if not cov["required"]:
+        return lines + [f"- {cov['reasons'][0]}", ""]
+    d = cov["duration"]
+    lines += [f"- Duration: {d['verdict']} ({d['reason']})", "",
+              "| Stream | Verdict | Events | Required | Cycles | Started | Reason |", "|---|---|---|---|---|---|---|"]
+    for st, e in cov["streams"].items():
+        lines.append(f"| {st} | {e['verdict']} | {e['events']} | {e['min_events']} | {e['cycles']} | {e['started']} | "
+                     f"{_md_escape(e['reason'])} |")
+    return lines + [""]
+
+
 def dry_run_plan(opts):
     """Frames each selected check would send (placeholders for values read from the device)."""
     tok = "0" * 32
@@ -1857,6 +1953,9 @@ def dry_run_plan(opts):
                  ("soak", PING, {}), ("soak", None, f"... keepalive PING when {opts.soak_keepalive} s passed "
                                                      "since the last frame"),
                  ("soak", CMD, {"cmd": "diag"})]
+        req = ", ".join(f"{st} >= {n}" for st, n in opts.require_events.items())
+        plan.append(("soak", None, f"radio coverage required: {req} event(s), {opts.soak} min effective"
+                                   if req else "radio coverage not required (link-only soak)"))
     if "heap" in sel:
         plan += [("heap", CMD, {"cmd": "diag"}), ("heap", None, f"... {opts.diag_repeats} diag calls in total")]
     if "diag_counters" in sel:
@@ -1895,6 +1994,8 @@ def write_reports(report, out_dir):
         "# Brucia hardware acceptance report", "",
         f"- Result: **{s['result']}** ({s['PASS']} pass, {s['FAIL']} fail, {s['SKIP']} skip)"
         + (" - INTERRUPTED" if report.get("interrupted") else ""),
+        f"- Radio coverage: **{s['coverage']}**, radio gate **{s['gate']}** (link result and radio coverage "
+        "are separate verdicts; see Radio coverage)",
         f"- Started {report['started_utc']}, finished {report['finished_utc']} ({report['duration_s']} s)",
         f"- Port `{report['port']}`, runner v{report['runner_version']}, host {report['host']['platform']}, "
         f"Python {report['host']['python']}, pyserial {report['host']['pyserial']}",
@@ -1927,6 +2028,7 @@ def write_reports(report, out_dir):
         if len(ev) > 4000:
             ev = ev[:4000] + "\n... (truncated; full evidence in the JSON report)"
         lines += ["", "```json", ev, "```", ""]
+    lines += coverage_markdown(report["radio_coverage"], s["gate"])
     if report.get("soak"):
         lines += soak_markdown(report["soak"], cp.name)
     if report.get("cleanup"):
@@ -1960,8 +2062,9 @@ def soak_markdown(soak, csv_name):
              f"- Reset {tot.get('reset')}, uptime {tot.get('uptime_s')} s",
              f"- PING latency: n {lat['n']}, p50 {lat.get('p50_ms')} ms, p95 {lat.get('p95_ms')} ms, p99 "
              f"{lat.get('p99_ms')} ms, max {lat.get('max_ms')} ms",
-             f"- Uploads {sm['uploads']}; fs_read {sm['fs_read'].get('path')}; stream cycles {sm['stream_cycles']}, "
-             f"events {sm['stream_events']}",
+             f"- Uploads {sm['uploads']}; fs_read {sm['fs_read'].get('path')}; stream cycles {sm['stream_cycles']} "
+             f"(started {sm.get('stream_started')}), events {sm['stream_events']}; effective "
+             f"{sm.get('effective_min')} min",
              f"- Time series: `{csv_name}` (one row per diag sample)", ""]
     for w in soak["warnings"]:
         lines.append(f"- warning: {_md_escape(w)}")
@@ -1990,6 +2093,9 @@ def build_report(runner, opts, started, fatal=None, cleanup=None):
     checks = [runner.results[c].as_dict() for c in CHECK_IDS if c in runner.results]
     counts = {k: sum(1 for c in checks if c["status"] == k) for k in ("PASS", "FAIL", "SKIP")}
     result = "FAIL" if counts["FAIL"] or fatal else ("INTERRUPTED" if runner.interrupted else "PASS")
+    cov = (runner.soak_report or {}).get("coverage") or radio_coverage(opts.require_events, opts.soak, None)
+    gate = ("NOT REQUIRED" if cov["overall"] == "NOT REQUIRED"
+            else "MET" if cov["overall"] == "SUFFICIENT" and result == "PASS" else "NOT MET")
     try:
         import serial
         pyserial = getattr(serial, "__version__", "?")
@@ -2005,7 +2111,8 @@ def build_report(runner, opts, started, fatal=None, cleanup=None):
         "options": {k: v for k, v in vars(opts).items() if not k.startswith("_")},
         "device": {"board": caps.get("board"), "chip": caps.get("chip"), "fw": caps.get("fw"),
                    "proto": caps.get("proto"), "build": caps.get("build"), "caps": caps},
-        "summary": {**counts, "result": result},
+        "summary": {**counts, "result": result, "coverage": cov["overall"], "gate": gate},
+        "radio_coverage": cov,
         "checks": checks,
         "frames": {"sent": runner.link.sent, "received": runner.link.received,
                    "sent_by_kind": runner.link.sent_by_kind, "recv_by_kind": runner.link.recv_by_kind},
@@ -2017,6 +2124,27 @@ def build_report(runner, opts, started, fatal=None, cleanup=None):
         "cleanup": cleanup or [],
         "coverage": COVERAGE_NOTE,
     }
+
+
+def parse_require_events(ap, values):
+    """--require-events values -> {stream: min events}; receive-only streams only, MIN >= 1."""
+    req = {}
+    for item in (x.strip() for v in values for x in v.split(",")):
+        if not item:
+            continue
+        stream, sep, n = item.partition(":")
+        stream = stream.strip()
+        if stream not in RECEIVE_ONLY_STREAMS:
+            ap.error(f"--require-events: not a receive-only stream: {stream!r} "
+                     f"(allowed: {', '.join(RECEIVE_ONLY_STREAMS)})")
+        try:
+            need = int(n) if sep else 1
+        except ValueError:
+            need = 0
+        if need < 1:
+            ap.error(f"--require-events {item}: MIN must be an integer >= 1")
+        req[stream] = need
+    return req
 
 
 def parse_args(argv):
@@ -2061,6 +2189,10 @@ def parse_args(argv):
     soak.add_argument("--soak-max-leak", type=float, default=SOAK_MAX_LEAK_BPH,
                       help="heap.free loss in bytes per hour that fails the soak (also bounded by "
                            "--heap-tolerance over the run, see heap_trend)")
+    soak.add_argument("--require-events", action="append", default=[], metavar="STREAM[:MIN]",
+                      help="radio coverage requirement: STREAM must deliver at least MIN events (default 1) "
+                           "during the soak, which must also run its full --soak minutes; repeatable or comma "
+                           "list; the stream is added to --streams. Not met: exit 3 (radio gate NOT MET)")
     o = ap.parse_args(argv)
     soak_on = o.soak is not None
     if o.only is None:
@@ -2088,6 +2220,10 @@ def parse_args(argv):
     bad = [s for s in o.streams if s not in RECEIVE_ONLY_STREAMS]
     if bad:
         ap.error(f"not a receive-only stream: {bad} (allowed: {', '.join(RECEIVE_ONLY_STREAMS)})")
+    o.require_events = parse_require_events(ap, o.require_events)
+    if o.require_events and not soak_on:
+        ap.error("--require-events needs --soak MINUTES (radio coverage is measured over a soak)")
+    o.streams += [st for st in o.require_events if st not in o.streams]
     if not 1 <= o.busy_secs <= 30:
         ap.error("--busy-secs must be 1..30")
     if not (0.2 <= o.script_stop_after <= 10 and 0.1 <= o.script_stop_bound <= 15):
@@ -2139,6 +2275,8 @@ def run(argv, port_factory=None, log=print):
     run.last_report, run.last_paths = report, paths
     s = report["summary"]
     log(f"result {s['result']}: {s['PASS']} pass, {s['FAIL']} fail, {s['SKIP']} skip")
+    log(f"radio coverage {s['coverage']}, radio gate {s['gate']}"
+        + (": " + "; ".join(report["radio_coverage"]["reasons"]) if s["gate"] == "NOT MET" else ""))
     log("reports: " + " ".join(str(p) for p in paths))
     if runner.interrupted:
         code = 130
@@ -2146,6 +2284,8 @@ def run(argv, port_factory=None, log=print):
         code = 2
     elif s["FAIL"]:
         code = 1
+    elif s["gate"] == "NOT MET":
+        code = EXIT_COVERAGE
     return code
 
 
