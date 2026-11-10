@@ -4,6 +4,62 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Project audit — 2026-11-10
+
+Base `78ef13dc`, clean tree at audit start. Scope: all 52 catalog descriptors/IDs/tabs
+inventoried (no duplicates); targeted review of app input/ownership/cancellation,
+BLE console, companion framing/stop, store installer, release/CI and evidence records.
+This is not end-to-end acceptance of all 52 tools. This audit changes only this file
+and the existing backlog (F36–F47); no production fix, firmware build, flash, live
+radio/tag action, release or physical phone test was performed.
+
+Fresh checks:
+- `cd android && ./gradlew --offline :app:testDebugUnitTest :app:lintDebug`:
+  1,137 tests, 0 failures/errors/skips; lint no errors, one OldTargetApi diagnostic.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: 330 tests, 2 skipped, OK.
+- `python3 tools/test_firmware_frame_lock.py`: 20/20.
+- `python3 tools/test_radio_guards.py`: 37/37.
+- `python3 tools/test_companion_dispatch_stops.py`: 13/13.
+
+Independent counterexamples (all isolated, no real publication or radio):
+1. **Wordlist loss, F37:** compiled unchanged `WordlistStore.kt` with minimal Android
+   context/resolver stubs. A provider returned 4 bytes then threw IOException.
+   Import threw, but the old final file had already become `bad\n`.
+2. **Target ownership and size, F36/F38:** extracted unchanged `importPcap` method into
+   a coroutine harness with provider/parser fixtures. A blocked import A, then B,
+   completed as target B then A: older completion wins. A synthetic 33 MiB stream
+   was read completely before the parser was called. This demonstrates missing input
+   bounds; no phone OOM was induced. The parser was a fixture, not a real PCAP decode.
+3. **Cancellation/validation, F41/F42:** compiled actual DictionaryDownload,
+   MifareDictionaryService, MifareDictionary and update IO helpers with fake HTTP
+   connections. Cancel left one blocking reader active while busy=false; restart
+   raised active readers to two. Releasing the fixture allowed cleanup. A NUL after
+   3,000 bytes was accepted/promoted by the file-download path.
+4. **Release recovery, F40:** existing release harness plus injected git-push or gh
+   failure (exit 7). Commit/tag calls had occurred, VERSION remained advanced to
+   0.1.1, and no temporary release bundle remained. All git/gh/Gradle/PIO were shims;
+   nothing was actually committed, pushed or published by this probe. The ordinary
+   Gradle output APK can still exist; total artifact loss is not claimed.
+5. **Soak coverage, F43:** actual runner with MockDevice emission disabled:
+   exit 0, PASS, zero findings, `stream_events={"wifi.probe": 0}`. Link PASS alone
+   is not evidence of F23 stability under radio traffic.
+
+Source-only findings: F39 BLE callback/session ownership (not exercised on Android
+Bluetooth); F44 missing explicit screenshot/instrumented CI gates (installed Paparazzi
+bytecode defaults verification false without `paparazzi.test.verify`); F45/F46 stale
+release/status/UI claims. Local S3 SDK configs still omit HAVE_TIME_DATE while defining
+HAVE_TIME: F35 device certificate-date enforcement remains unverified/unimplemented,
+not established by host ssl tests. Existing physical gates stay OPEN.
+
+Reproduction scripts, raw outputs and source hashes are under
+`.codex_tmp/audit-20261110/` (ignored): `probe_imports.py`, `probe_downloads.py`,
+`probe_release.py`, `probe_soak.py`, `imports-result.txt`, `download-result.txt`,
+`release-result.json`, `zero-events-soak.json`, `android-result.json`,
+`feature-inventory.json`, `reviewed-source-hashes.json`, and host/frame/radio/dispatch
+logs. These are local evidence, not shipped application assets or additional status docs.
+The ordered tasks and acceptance criteria live only in
+[the maintenance backlog](skills/brucia-maintenance/references/backlog.md).
+
 ## Brucia-hosted dictionary snapshots — 2026-11-10
 
 Four unchanged dictionaries uploaded as assets to the existing `wordlists` release:

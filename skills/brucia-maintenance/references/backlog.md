@@ -1,5 +1,166 @@
 # Work queue — single operational ledger
 
+## Audit operativo — 2026-11-10, base `78ef13dc`
+
+Questa è la coda corrente; i batch e le tabelle più sotto conservano la storia e non
+costituiscono una nuova accettazione. Audit locale di codice, contratti, pipeline e
+copertura: **52 descrittori funzionali, 52 ID e tab distinti**. Non è una certificazione
+end-to-end di tutti gli strumenti. Nessuna modifica applicativa/firmware, flash,
+trasmissione, lettura di tag o nuova release durante questo audit.
+
+Verifica fresca: Android **1.137/1.137**, lint senza errori (un OldTargetApi);
+host discovery **330, 2 skipped**; frame writer **20/20**, radio guards **37/37**,
+dispatch/stop **13/13**. Le suite passano anche in presenza dei difetti riprodotti
+qui sotto: i nuovi casi devono diventare regressioni. Prove e limiti in
+[TESTS.md](../../../TESTS.md#project-audit--2026-11-10).
+
+### Nuovi task, in ordine di esecuzione
+
+Tutti OPEN. `RIPRODOTTO` significa harness sul codice reale con dipendenze simulate,
+non telefono; `SORGENTE` indica un percorso verificato nel codice senza prova fisica.
+Prima F36–F39 e il residuo F35, poi F40/F43/F44; gli altri sono interventi circoscritti
+che non devono riaprire refactor generali. F47 resta una consegna esplicita, non una
+release autorizzata automaticamente dall'audit.
+
+| ID | Priorità | Task | Evidenza |
+|---|---|---|---|
+| F36 | P1 | Limitare importazioni PCAP/IR e lunghezza delle righe | RIPRODOTTO/SORGENTE: 33 MiB letti integralmente prima del parser PCAP; import IR sincrono sul thread UI. |
+| F37 | P1 | Rendere transazionale l'importazione manuale di wordlist | RIPRODOTTO: errore del provider dopo 4 byte lascia `bad` al posto del dizionario precedente. |
+| F38 | P1 | Unificare proprietà e stato del target importato | RIPRODOTTO: richiesta A lenta, B successiva completata, poi A sovrascrive B. |
+| F39 | P1 | Isolare callback e attese di ogni connessione BLE console | SORGENTE: notifiche/ACK GATT non verificano il collegamento; subscribe riprende senza ricontrollo dopo await. |
+| F40 | P1 | Riprendere la stessa release dopo errori di push/pubblicazione | RIPRODOTTO: commit/tag già eseguiti, versione avanzata, bundle temporaneo eliminato anche quando push/gh falliscono. |
+| F41 | P2 | Fare terminare l'I/O NFC dopo Cancel/Clear | RIPRODOTTO: UI non busy, lettura A ancora attiva; riavvio B porta a due letture concorrenti. |
+| F42 | P2 | Validare tutto il dizionario e applicare l'integrità dei mirror | RIPRODOTTO: NUL oltre i primi 2.048 byte promosso come file valido; manifest SHA non consumato dall'app. |
+| F43 | P1 | Rendere esplicita e verificabile la copertura del soak | RIPRODOTTO: mock con zero eventi restituisce PASS/exit 0. Non basta per chiudere F23 sotto traffico. |
+| F44 | P2 | Aggiungere gate CI per screenshot e test Android strumentati | SORGENTE: build.yml/release.sh non invocano verifyPaparazziDebug o connectedDebugAndroidTest. |
+| F45 | P2 | Riallineare changelog, backlog e prove alle release effettive | SORGENTE: Unreleased contiene già pubblicato; mancano sezioni 0.1.6–0.1.12; stati storici contraddittori. |
+| F46 | P3 | Correggere le indicazioni della schermata Crack | SORGENTE/UI: “Run uses a demo handshake” è falso; il target sintetico è solo di Demo; confronto Flipper troppo assoluto. |
+| F47 | P2 | Consegnare gli URL Brucia nel prossimo APK verificato | Mirror pubblicati, codice su main; l'APK 0.1.12 contiene ancora i quattro URL upstream. |
+
+**F36 — input e memoria.** Percorsi: `WardriveViewModel.importPcap` (riga 3371),
+`MainActivity.kt` import launcher IR (circa 3400), `WordlistStore.info` (riga 51).
+`readBytes()`/`readText()` caricano tutto; il parser PCAP non può proteggere l'allocazione
+che avviene prima. IR legge/parsa nel callback UI. `useLines()` non limita una singola
+riga: un file enorme senza newline può allocare una stringa enorme anche dentro il
+limite di download. OOM/ANR su telefono non provocati durante l'audit.
+Accettazione: limiti espliciti per byte, record/riga e tempo; lettura/parsing fuori UI;
+Stop/cancellazione e messaggio visibile; file oltre limite, riga unica grande e provider
+lento non bloccano né cambiano il risultato precedente. Riutilizzare i reader bounded
+esistenti dove compatibili, con regressioni sul percorso d'importazione reale.
+
+**F37 — conservazione del dizionario.** `WordlistStore.importFrom` apre direttamente
+`dest.outputStream()`; `WardriveViewModel.importWordlist` registra l'errore solo nel log
+poi aggiorna la lista dal file parziale. I download HTTPS hanno staging, l'import SAF no.
+Accettazione: staging unico, scritture/chiusura/validazione controllate, promozione solo
+alla fine, errore e annullamento visibili. Test interruzione/full-storage/stesso nome,
+import vs download concorrente e list refresh: vecchi byte intatti su ogni fallimento,
+nessun `.part` mostrato come installato. Non dichiarare una garanzia power-loss non provata.
+
+**F38 — target unico.** `importPcap`, `importPmkid`, completamento `pullFile` e capture
+workflow scrivono `loadedHandshake`, `loadedPmkid`, `_handshakeInfo` separatamente.
+L'import PCAP non ha generazione/cancellazione comune; errori o input non valido possono
+lasciare il vecchio target attivo mentre la scritta mostra l'errore.
+Accettazione: servizio/stato immutabile unico, ultimo import richiesto proprietario;
+politica esplicita “mantieni il target precedente” oppure “nessun target”, coerente con
+Run/export. Regressioni A lenta → B, PCAP vs PMKID vs pull/capture, errore, cancellazione
+e cambio schermata. Nessun risultato vecchio deve rietichettare o sostituire il target nuovo.
+
+**F39 — BLE console.** `ble/BleConsole.kt:193–276`: connection/MTU/discovery controllano
+`g == gatt` all'ingresso; characteristic output/write e descriptor write non lo fanno.
+`pendingWrite`/`pendingDescriptor` sono globali. `onServicesDiscovered` può riprendere
+`subscribe()` dopo disconnect e chiamare `fail()`/Ready/startWriter sul nuovo stato.
+Il writer prosegue con i chunk successivi dopo timeout/fallimento di un chunk.
+Accettazione: token/GATT e characteristic associati a ogni attesa/callback, ricontrollo
+dopo ogni sospensione; cancellazione di tutti i job della vecchia sessione; al fallimento
+di un chunk non inviare la coda della stessa riga come se fosse completa. Test callback A
+in ritardo su B, disconnect durante CCCD, doppio connect, timeout/write failure e retry.
+Poi PIN/connessione/`info` su telefono+device propri; questa parte fisica resta separata.
+
+**F40 — release riprendibile.** `release.sh:64–84,124–132`: il rollback si applica solo
+prima del commit, ma il trap elimina sempre la cartella del bundle. Push atomico protegge
+le refs, non la successiva creazione/upload della release GitHub. Il file APK può ancora
+esistere nell'output Gradle: l'audit non sostiene che tutti gli artefatti vadano persi.
+Accettazione: bundle/versione/hash conservati su fallimento; preflight dei tag remoti;
+ripresa idempotente dello stesso tag senza bump o clobber non verificato, gestione di
+release già creata con upload parziale. Harness isolato per tag/push/create/upload falliti
+prima/dopo una pubblicazione parziale; conservare report test prima di `:app:clean`.
+
+**F41 — Cancel reale.** `MifareDictionaryService.load/cancel` invalida correttamente lo
+stato con generation, ma `withContext(IO) { read() }` non interrompe il blocco I/O;
+`MifareDictionary.download` usa `DictionaryDownload.read` con cancelled predefinito false.
+Accettazione: propagare ownership/cancellazione alla lettura e chiudere la connessione,
+limite totale per download oltre al timeout per singola read, nessun accumulo di worker
+con Cancel/retry ripetuti. Test provider/HTTP lento e trickle, non solo risultati tardivi.
+Conservare le protezioni generation già presenti e le chiavi precedenti su errore.
+
+**F42 — dati del mirror.** `DictionaryDownload.store/checkText` valida soltanto il prefisso;
+il probe ha promosso un NUL dopo 3.000 byte. I digest in `docs/dictionary-sources.json`
+sono prove della pubblicazione, non una verifica eseguita oggi dall'app.
+Accettazione: validazione incrementale coerente con F36, rifiuto di input binario anche
+oltre il prefisso, e policy di integrità/versione per le liste del catalogo (size+SHA
+attesi distribuiti con il catalogo o manifest autenticato). File alterato ma della stessa
+lunghezza: errore e vecchia lista intatta. L'import personale resta un flusso distinto,
+senza richiedere che un file dell'utente esista nel catalogo.
+
+**F43 — copertura misurata, collegato a F23.** `_soak_finish` in `tools/hw_acceptance.py`
+assegna PASS con zero findings senza richiedere eventi. È valido per un controllo del link,
+non per quello radio sotto carico. Accettazione: profili/asserzioni espliciti per stream
+richiesti, conteggio minimo e durata effettiva; report separa link PASS da copertura
+INSUFFICIENT/NOT RUN. Con profilo radio richiesto, zero eventi non deve chiudere il gate.
+Regressioni zero/pochi/eventi sufficienti, interruzione anticipata, stream assente. Non
+cambiare allowlist né aggiungere trasmissioni come scorciatoia per far passare il test.
+
+**F44 — CI UI.** Il bytecode Paparazzi 2.0.0-alpha05.1 imposta isVerifying=false in assenza
+di `paparazzi.test.verify`; il semplice task unit non equivale al confronto baseline.
+Accettazione: verifica screenshot esplicita con una baseline volutamente alterata che
+fa fallire CI; test strumentati esistenti (migrazioni Room, receiver, foreground service,
+righe MITM) su emulatore CI con log/report. Aggiungere almeno un percorso reale di navigazione
++ reconnect/Stop usando il trasporto simulato. Una preview Compose non certifica il wiring
+MainActivity/ViewModel, e l'emulatore non sostituisce periferiche reali.
+
+**F45 — tracciabilità.** Ricostruire le sezioni changelog 0.1.6–0.1.12 da tag/commit/note;
+lasciare in Unreleased solo ciò che manca dagli APK/binari pubblicati. Aggiornare F03/F21/F22,
+F35, A3/A5, DT07 ed E01–E03 evitando di trasformare un vecchio “build pending” in “hardware
+PASS”. Molti fix sono già nel codice: per esempio gli export usano ora ExportFiles, quindi
+il vecchio DT07 non basta a dichiararli tutti ancora non protetti. Accettazione: ogni stato
+ha revisione e tipo di prova, nessun worker storico descritto come attualmente attivo;
+nessuna doppia riga/decisione contraddittoria. Il riepilogo operativo presente avvia il
+riallineamento, non ricostruisce ancora tutta la storia di oltre mille righe.
+
+**F46 — testo verificabile.** Aggiornare MainActivity/preview/catalogo solo dove il testo
+contraddice l'implementazione: Run senza target mostra la mancanza di un target, Demo è
+esplicitamente sintetica, confronto capacità rimanda alla descrizione circoscritta.
+Accettazione: controllare stati nessun target, target reale importato, Demo e errore;
+nessun risultato demo descritto come cattura o benchmark su telefono. Rigenerare soltanto
+gli screenshot/video resi obsoleti dal cambiamento, senza slide sostitutive.
+
+**F47 — consegna cataloghi.** Dipende dai controlli pertinenti e dalla decisione di release,
+non dalla creazione di un altro mirror. Accettazione: nuovo APK firmato/versionato, install
+sopra 0.1.12, quattro download che raggiungono solo gli asset Brucia/CDN HTTPS, import e
+Cancel provati, digesti confrontati e note oneste. Non sovrascrivere l'APK sotto il tag
+0.1.12. Mirror e licenze sono già disponibili per import manuale.
+
+### Task esistenti da completare, senza duplicarli
+
+- **F35, P1 — fiducia installer:** sync/read-back/rollback risultano già implementati e
+  coperti dai test; non rifare quei fix. Restano date dei certificati (SDK locale S3 senza
+  HAVE_TIME_DATE), policy di tempo affidabile a freddo e timeout complessivo dello scaricamento
+  (`HttpBody.read` limita una read, non l'intera operazione). Separare la prova mbedtls dalla
+  prova Python ssl. Il catalogo/script store successivo usa ancora HTTP: decidere e verificare
+  una distribuzione autenticata prima di dichiarare sicuro il percorso completo. Non eseguito.
+- **F23/F24/F32/F34 e checklist cross-feature:** telefono+T-Embed, eventi radio realmente
+  presenti, Stop/leave/Remote/reconnect e comando innocuo successivo; log con app/firmware
+  esatti. Nessuno dei test freschi di questo audit chiude questi gate fisici.
+- **F05–F08 BLE:** verificare advertising benigno con ricevitore indipendente e ownership
+  scan/HID; separare pacchetti osservati da popup del sistema operativo. Nessuna promessa
+  che la voce Mac produca un popup e nessun nuovo payload/rate come parte del fix.
+- **F09–F20, H1–H19, DT03/DT04/DT08 e B17 hardware:** gruppi per periferica (IR, NFC, RF,
+  LoRa/NRF24, FM/audio, Ethernet/iButton) con PASS/FAIL/BLOCKED/NOT RUN distinti; include
+  installazione store su SD/LittleFS e interruzione Wi-Fi. I 52 tool non sono 52 PASS.
+- **E01–E03, P2:** rivalutare lo stato dei pilot già conclusi e proseguire estrazioni
+  mirate dai due file UI/VM (8.914 + 4.057 righe), partendo dal servizio import/target.
+  Non avviare una riscrittura generale o un SDK/plugin prima di chiudere i contratti.
+
 Dictionary hosting 2026-11-10: four new dictionaries mirrored as unchanged assets
 in Brucia's wordlists release, with pinned revisions/SHA-256 manifest and full
 license archive. All six new assets downloaded back and compared byte-for-byte.
@@ -83,7 +244,10 @@ Status vocabulary: OPEN, IN_PROGRESS, BLOCKED, DONE; worker packets also use PRE
 record unavailable devices, missing schemas and environment restrictions explicitly.
 When a task is finished, update its row and next action here, not a new status file.
 
-## Current user priority
+## Historical worker orchestration — 2026-11-04/05
+
+Historical record; current priorities are the 2026-11-10 audit above. No worker was
+started or inspected as active by this audit.
 
 **2026-11-04: the user explicitly authorized Claude worker launch and orchestration
 for the remaining software tasks.** Independent scoped packets may run together;
@@ -92,7 +256,7 @@ This supersedes the earlier one-packet-per-user-message restriction for this bat
 Explicitly permitted execution verified host Claude authentication and Docker 27.5.1.
 The user then explicitly requested the installed Mac Claude Code directly, without
 Linux/Docker, overriding the packet OS/network isolation prerequisite for this batch.
-Four local workers are running: S08a, S09, S11a, S06-S10a. Packet/source hashes match;
+Four local workers were recorded as running then: S08a, S09, S11a, S06-S10a. Packet/source hashes match;
 CLI tools are scoped, customizations disabled, no permission-bypass flags used.
 This is not OS isolation. Results require coordinator review before integration.
 S02 packets remain blocked by their missing prerequisites; S07 is done (2026-11-05).
@@ -143,7 +307,9 @@ firmware build/flash, production edit, commit or release in this review.
 
 Concrete regression/phone cases: [integration acceptance checklist](../../../docs/APP_CONTROLS_CHECKLIST.md#cross-feature-integration-acceptance--2026-11-06).
 
-### Remaining work — ordered (2026-11-06 integration review)
+### Historical integration review — 2026-11-06
+
+For current execution order and reconciled remaining tasks, use the 2026-11-10 audit above.
 
 Reviewed against code; split by what blocks each. A feature is NOT closed on test counts alone.
 
