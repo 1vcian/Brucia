@@ -43,6 +43,15 @@ firmware: the 0.1.12 APK still downloads the four new dictionaries from their up
 - Soak tooling (F43): `tools/hw_acceptance.py --require-events STREAM[:MIN]` reports radio
   coverage (sufficient / insufficient / not run) separately from the link verdict; a soak that
   saw no stream events can no longer be cited as radio-traffic evidence. Host tests only.
+- Release (F40): `release.sh` keeps a verified bundle in `.release-staging/v<version>/` and, if
+  tagging, pushing, creating, uploading or publishing fails after the release commit,
+  `./release.sh resume` publishes the same version without a new bump or rebuild. Existing
+  tags and assets are verified and never overwritten; the release stays a draft until every
+  asset matches. Tested with a local harness only (no real GitHub run).
+- CI (F44): screenshot baselines are now compared (`verifyPaparazziDebug`) in CI and in
+  `release.sh`, and a new emulator job runs the instrumented tests, including a navigation,
+  reconnect and Stop flow over a simulated device link. The stale phone home-grid baseline
+  was re-recorded. The GitHub job has not run yet (no push).
 
 ## [0.1.12] - 2026-11-10
 

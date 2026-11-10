@@ -33,7 +33,8 @@ it is used.
 2. `python3 tools/brand.py write`, then `python3 tools/brand.py check` and the test suites
    (`python3 -m unittest discover -s tools -p 'test_*.py'`, `node --test tools/test_site_release.cjs`,
    `cd android && ./gradlew :app:testDebugUnitTest :app:lintDebug`).
-3. Commit and run `./release.sh`.
+3. Commit and run `./release.sh`. If publication fails after the release commit, fix the cause
+   and run `./release.sh resume`: it republishes the same version from `.release-staging/`.
 
 ### Left from the rename
 

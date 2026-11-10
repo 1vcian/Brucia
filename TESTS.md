@@ -60,6 +60,56 @@ logs. These are local evidence, not shipped application assets or additional sta
 The ordered tasks and acceptance criteria live only in
 [the maintenance backlog](skills/brucia-maintenance/references/backlog.md).
 
+## Audit fixes F35–F47 — 2026-11-10 (integrated `main` 36f4c6b2, local only)
+
+Worker branches `audit/*` from base `326ad1ad`, reviewed and merged by the coordinator;
+task status and commits are in the backlog. Every result below was rerun on the integrated
+tree, not taken from a worker worktree. No phone, board or tag connected (`adb devices`
+empty, no USB serial device): no physical check of any task was performed.
+
+Integrated checks (macOS host, no Docker):
+- `./gradlew --offline :app:testDebugUnitTest --rerun`: **1,182 tests**, 166 suites,
+  0 failures/errors/skips (1,137 audit baseline + 45 new).
+- `:app:verifyPaparazziDebug` with `--no-build-cache` after `cleanTestDebugUnitTest`: PASS,
+  27 screenshot tests. A first run had taken the test task FROM-CACHE (shared Gradle cache)
+  and was discarded as evidence. Gate check on this tree: painting one baseline
+  (`homeGridPhone`) makes it exit 1 (`homeGridPhone FAILED`); the file was restored from HEAD.
+- `:app:lintDebug`: 0 errors, 1 warning (existing OldTargetApi).
+- `:app:connectedDebugAndroidTest` on a temporary API 36 arm64 emulator: **15/15** (Room
+  migrations, USB receiver, ConnectionService, MITM rows, new `CompanionLinkFlowTest` over a
+  simulated transport). Emulator and simulated link are not USB/radio/phone acceptance.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **357 tests, 2 skipped**, OK.
+  `test_firmware_frame_lock` 20/20, `test_radio_guards` 37/37,
+  `test_companion_dispatch_stops` 13/13, `test_hw_acceptance.py` script 126/126.
+- `pio run -e lilygo-t-embed-cc1101` (firmware changed by F35): SUCCESS, RAM 47.6 %,
+  flash 26.0 %, firmware.bin 4,361,632 B, build ID `0.1.12+lilygo-t-embed-cc1101.36f4c6b22440`.
+  Cardputer built only in the F35 branch (`f371fb98`), not rebuilt on the integrated tree.
+
+Fail-before evidence (each on base or a faithful pre-fix variant; details in the commits):
+F37/F36 13 of 15 import tests fail and one hangs on base; F39 11/13 on the extracted base
+logic; F41/F42 5 failures restricted to base APIs (two readers after Cancel/restart, NUL
+after 3,000 B promoted); F43 zero-event soak exits 0/PASS on base; F40 17 failures of the
+release harness against the old `release.sh`; F35 compile/interface failures on base plus
+11/11 behaviour mutations caught; the import Cancel-releases-blocked-read integration test
+fails on the merge without `a90b2d4d`.
+
+F47 candidate (not published, not tagged): signed `assembleRelease` from `36f4c6b2` with
+VERSION set to 0.1.13 in a temporary worktree only (main keeps 0.1.12, so `release.sh patch`
+produces 0.1.13). SHA-256 `3708bf45…9c39`, kept in `.codex_tmp/releases/0.1.13-candidate/`.
+versionCode 1000113 > 1000112; signer certificate identical to the published 0.1.12 APK
+(`deac265d…c84b`); published 0.1.12 re-downloaded and matched `5f59691d…d083`. Dex contains no
+`raw.githubusercontent.com` dictionary URL (0.1.12 had berzerk0/flipperdevices/
+RfidResearchGroup), contains all four asset names and the pinned digests. Host GET of the four
+`…/releases/download/wordlists/<name>` URLs: HTTPS only, one redirect to
+`release-assets.githubusercontent.com`, size and SHA-256 equal to the pins. On the emulator,
+0.1.12 installed and launched, then `install -r` of the candidate kept `firstInstallTime`;
+the candidate cold-started (1.1 s) to the disconnected home screen, empty crash buffer.
+NOT RUN: in-app download, import and Cancel of the four dictionaries on emulator or phone.
+`release.sh` rebuilds its own APK: the candidate is evidence, not the asset to upload.
+
+Blocked in this session: F38 (crack-target ownership) and F46 (Crack screen copy) were stopped
+by model safety filters; no code or media was changed for them.
+
 ## Brucia-hosted dictionary snapshots — 2026-11-10
 
 Four unchanged dictionaries uploaded as assets to the existing `wordlists` release:

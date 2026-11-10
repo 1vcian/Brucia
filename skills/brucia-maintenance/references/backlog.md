@@ -14,9 +14,34 @@ dispatch/stop **13/13**. Le suite passano anche in presenza dei difetti riprodot
 qui sotto: i nuovi casi devono diventare regressioni. Prove e limiti in
 [TESTS.md](../../../TESTS.md#project-audit--2026-11-10).
 
+### Esito della sessione di correzione — 2026-11-10 (commit locali, non pubblicati)
+
+Coordinatore + worker Claude in worktree/branch separati (`audit/*`) dalla base verificata
+`326ad1ad` (seam condiviso `DictionaryTextCheck` + parametro integrity, proprietà del
+coordinatore). Ogni consegna è stata rivista e integrata su `main` con merge `--no-ff`; le
+verifiche finali sono state rieseguite sulla combinazione integrata (TESTS.md). Nessun push,
+tag o release. Nessun telefono, board o tag collegato: **tutti i criteri fisici restano OPEN**.
+
+| ID | Stato software | Commit | Evidenza / limite |
+|---|---|---|---|
+| F35 residuo | DONE (host+build) | `88ed73f7`, `f371fb98` | Budget totale 60 s, date di ogni certificato presentato con floor = tempo sorgente del firmware e notBefore solo con NTP; 11 mutazioni rilevate; build T-Embed/Cardputer. Device cold-boot e mbedTLS reale NOT RUN; store HTTP successivo ancora OPEN. |
+| F36 | DONE (JVM) | `cf237e70`, `a90b2d4d` | IR off-UI 4 MiB, PCAP 32 MiB, conteggio righe bounded, import con limite 30 min e chiusura dello stream su Cancel. Telefono NOT RUN. |
+| F37 | DONE (JVM) | `3f307297`, `a90b2d4d` | Staging `.part`, validazione completa, promozione finale, esclusione import/download stesso nome; 13 fail-before. Nessuna garanzia power-loss. |
+| F38 | **BLOCKED** | — | Il worker è stato interrotto dai safeguard cyber del modello; decisione dell'utente: lasciare BLOCKED. Riprendere con accesso Cyber Verification Program o altro modello. Nessuna modifica eseguita. |
+| F39 | DONE (JVM) | `2859a3c1`, `2f500af2` | `NusConsoleCore` + token di sessione; 13 test, 11 falliti sulla logica base. PIN/connect/`info` fisico NOT RUN. |
+| F40 | DONE (harness) | `fbe42f21`, `1752c918` | Bundle `.release-staging/`, `./release.sh resume`, preflight tag/release, draft fino a verifica asset; 16 test con git reale + remote bare + gh finto. Nessun run GitHub reale. |
+| F41 | DONE (JVM) | `10a72366`, `087361c7` | TransferWatch chiude la connessione su Cancel/deadline; un solo reader dopo Cancel/retry. Telefono NOT RUN. |
+| F42 | DONE (JVM) | `10a72366`, `362275db` | Validazione di ogni byte; quattro snapshot ospitati con size+SHA pinnati e test catalogo↔manifest. rockyou/top-* restano non pinnati (nessun digest registrato). |
+| F43 | DONE (host) | `2f20f1c9`, `318f2fa4` | `--require-events`; copertura separata dal verdetto link; zero eventi = gate NOT MET (exit 3). F23 resta OPEN. |
+| F44 | DONE (locale) | `f5b12eb0`, `0a4e5cf0` | `verifyPaparazziDebug` in CI e release.sh (baseline alterata → exit 1, provato sul tree finale); job emulatore `connectedDebugAndroidTest`; nuovo `CompanionLinkFlowTest`. Job GitHub non eseguito (nessun push). |
+| F45 | DONE (doc) | `091e4018`, `dc8ba5ea` | CHANGELOG diviso in 0.1.6–0.1.12; stati F03/F21/F22/F35/A3/A5/DT07/E01–E03 con revisione e tipo di prova. |
+| F46 | **BLOCKED** | — | Revisione del testo della schermata Crack interrotta dal classificatore di sicurezza durante questa sessione; non ritentata. Copy, preview e media invariati. |
+| F47 | READY (non pubblicato) | HEAD `main` | APK candidato 0.1.13 firmato verificato (TESTS.md): versionCode 1000113, stesso certificato di 0.1.12, nessun URL upstream, quattro asset Brucia con SHA conforme. Pubblicazione: `./release.sh patch` da `main` pulito. Download/import/Cancel su telefono NOT RUN. |
+
 ### Nuovi task, in ordine di esecuzione
 
-Tutti OPEN. `RIPRODOTTO` significa harness sul codice reale con dipendenze simulate,
+Tabella originale dell'audit (stato iniziale, prima della sessione di correzione qui sopra).
+`RIPRODOTTO` significa harness sul codice reale con dipendenze simulate,
 non telefono; `SORGENTE` indica un percorso verificato nel codice senza prova fisica.
 Prima F36–F39 e il residuo F35, poi F40/F43/F44; gli altri sono interventi circoscritti
 che non devono riaprire refactor generali. F47 resta una consegna esplicita, non una
