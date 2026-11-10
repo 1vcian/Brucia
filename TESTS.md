@@ -134,6 +134,29 @@ phone, board or tag connected.
 - Not rerun (unaffected by these two changes): `connectedDebugAndroidTest`, the host `tools`
   suites and the firmware build. Phone checks of the Crack screen still NOT RUN.
 
+F47 candidate rebuilt on this tree (supersedes the `36f4c6b2` / `3708bf45…9c39` candidate,
+which predated F38/F46). Signed `assembleRelease` from `aba66024` with VERSION set to 0.1.13 in
+a throwaway worktree only (main keeps 0.1.12, so `release.sh patch` produces 0.1.13); not
+published, not tagged, not pushed. Kept in `.codex_tmp/releases/0.1.13-candidate/`.
+- SHA-256 `b8386d20…89fb`, 19,081,547 B. versionCode 1000113 > 1000112; versionName 0.1.13;
+  signer certificate SHA-256 `deac265d…c84b`, identical to the published 0.1.12 APK (upgrade
+  compatible). The published 0.1.12 release APK was not touched.
+- Dex (4 classes): no `raw.githubusercontent.com` dictionary URL; all four pinned digests
+  present; the corrected F46 copy present and the old false strings ("Run uses a demo handshake",
+  "what Flipper cannot do") absent, so the fixes are in the shipped binary. `berzerk0` and
+  `RfidResearchGroup` remain only as the required attribution/licence text, not as download URLs
+  (the catalog builds every URL from `BrandLinks.DOWNLOAD_PREFIX`, i.e. the brand repo).
+- Host GET of the four Brucia-hosted assets
+  (`github.com/1vcian/Brucia/releases/download/wordlists/<name>`): all HTTPS, one redirect to
+  `release-assets.githubusercontent.com`, size and SHA-256 equal to the pins (probable-wpa-4800
+  45,276 / `5dc33214…`, probable-wpa-204k 2,121,750 / `e416890a…`, flipper-mf-classic 38,847 /
+  `e973b28d…`, proxmark3 46,037 / `9e32e7ac…`).
+- NOT RUN: install-over-0.1.12 and cold start were verified on the prior candidate; this rebuild
+  changes only F38/F46 app logic (same packaging and signer), so the upgrade path is unchanged
+  but was not re-exercised. In-app download, import and Cancel of the dictionaries on an emulator
+  or phone: still NOT RUN. `release.sh` rebuilds its own APK; this candidate is evidence, not the
+  asset to upload.
+
 ## Brucia-hosted dictionary snapshots — 2026-11-10
 
 Four unchanged dictionaries uploaded as assets to the existing `wordlists` release:
