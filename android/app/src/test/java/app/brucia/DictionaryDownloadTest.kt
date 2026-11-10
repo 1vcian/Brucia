@@ -1,6 +1,9 @@
 package app.brucia
 
+import app.brucia.update.AssetIntegrity
+import app.brucia.update.IntegrityException
 import app.brucia.wordlist.DictionaryDownload
+import app.brucia.wordlist.DictionaryFormatException
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -81,5 +84,54 @@ class DictionaryDownloadTest {
             }
             assertTrue(conn.closed)
         }
+    }
+
+    private fun withDir(body: (File) -> Unit) {
+        val dir = Files.createTempDirectory("dictionary-test").toFile()
+        try { body(dir) } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun wholeFileIsValidatedNotOnlyThePrefix() = withDir { dir ->
+        val dest = File(dir, "list.txt")
+        val text = "valid-password\n".repeat(200).toByteArray() // 3,000 bytes, past the old 2,048 prefix
+        for (body in listOf(text + byteArrayOf(0) + "bad\n".toByteArray(),
+                            text + ByteArray(5000) { 'a'.code.toByte() } + "\n".toByteArray())) {
+            dest.writeText("previous-password")
+            val conn = Connection(body)
+            assertThrows(DictionaryFormatException::class.java) {
+                DictionaryDownload.store(dest, "https://example.com/list", 100_000, { false }, { _, _ -> }, { conn })
+            }
+            assertEquals("previous-password", dest.readText())
+            assertEquals(listOf("list.txt"), dir.listFiles()!!.map { it.name })
+            assertTrue(conn.closed)
+            assertThrows(DictionaryFormatException::class.java) {
+                DictionaryDownload.read("https://example.com/list", 100_000, connect = { Connection(body) })
+            }
+        }
+    }
+
+    @Test fun pinnedDownloadRejectsSameLengthAlterationAndKeepsPreviousList() = withDir { dir ->
+        val good = "password1\npassword2\n".toByteArray()
+        val bad = "password1\npassword3\n".toByteArray()
+        val pin = AssetIntegrity(good.size.toLong(), AssetIntegrity.hex(AssetIntegrity.sha256Of(good)))
+        val dest = File(dir, "list.txt").apply { writeText("previous-password") }
+        for (conn in listOf(Connection(bad), Connection(good + "x\n".toByteArray()),
+                            Connection(good.copyOf(good.size - 1), expected = -1))) {
+            assertThrows(IntegrityException::class.java) {
+                DictionaryDownload.store(dest, "https://example.com/list", 100, { false }, { _, _ -> }, { conn },
+                    integrity = pin)
+            }
+            assertEquals("previous-password", dest.readText())
+            assertEquals(listOf("list.txt"), dir.listFiles()!!.map { it.name })
+            assertTrue(conn.closed)
+        }
+        assertThrows(IntegrityException::class.java) {
+            DictionaryDownload.read("https://example.com/list", 100, connect = { Connection(bad) }, integrity = pin)
+        }
+        DictionaryDownload.store(dest, "https://example.com/list", 100, { false }, { _, _ -> }, { Connection(good) },
+            integrity = pin)
+        assertArrayEquals(good, dest.readBytes())
+        assertArrayEquals(good, DictionaryDownload.read("https://example.com/list", 100,
+            connect = { Connection(good) }, integrity = pin))
     }
 }
