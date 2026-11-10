@@ -3374,11 +3374,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     fun importPcap(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val bytes = getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+                val bytes = getApplication<Application>().contentResolver.openInputStream(uri)!!
+                    .use { app.brucia.BoundedImport.read(it, app.brucia.wifi.PcapDissector.MAX_CAPTURE_BYTES.toLong()) }
                 val hs = HandshakeParser.parse(bytes)
                 loadedHandshake = hs
                 if (hs != null) loadedPmkid = null
                 _handshakeInfo.value = hs?.let { "${it.ssid} (WPA${it.keyVersion})" } ?: "no handshake found in file"
+            } catch (e: app.brucia.ImportTooLargeException) {
+                _handshakeInfo.value = "file too large (max 32 MiB)"
             } catch (e: Exception) {
                 _handshakeInfo.value = "read error"
             }
