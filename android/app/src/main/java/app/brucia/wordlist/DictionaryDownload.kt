@@ -1,5 +1,6 @@
 package app.brucia.wordlist
 
+import app.brucia.update.AssetIntegrity
 import app.brucia.update.DownloadIO
 import app.brucia.update.UpdateHttp
 import java.io.ByteArrayOutputStream
@@ -29,8 +30,10 @@ object DictionaryDownload {
         } finally { conn.disconnect() }
     }
 
+    /** [integrity]: expected size/SHA-256 from the catalog, or null for unpinned sources (F42 seam). */
     fun store(destination: File, url: String, limit: Long, cancelled: () -> Boolean,
-              progress: (Long, Long) -> Unit, connect: (URL) -> HttpURLConnection = ::open) {
+              progress: (Long, Long) -> Unit, connect: (URL) -> HttpURLConnection = ::open,
+              integrity: AssetIntegrity? = null) {
         val part = File.createTempFile("dictionary-", ".part", destination.parentFile)
         try {
             val conn = UpdateHttp.follow(URL(url), connect)

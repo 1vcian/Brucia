@@ -3,6 +3,7 @@ package app.brucia.wordlist
 import android.content.Context
 import android.annotation.SuppressLint
 import android.net.Uri
+import app.brucia.update.AssetIntegrity
 import java.io.File
 
 data class WordlistInfo(val name: String, val lines: Int, val sizeBytes: Long)
@@ -40,9 +41,10 @@ object WordlistStore {
         name: String,
         onProgress: (downloaded: Long, total: Long) -> Unit,
         isCancelled: () -> Boolean,
+        integrity: AssetIntegrity? = null,
     ): WordlistInfo {
         val dest = File(dir(ctx), sanitize(name))
-        DictionaryDownload.store(dest, url, 512L * 1024 * 1024, isCancelled, onProgress)
+        DictionaryDownload.store(dest, url, 512L * 1024 * 1024, isCancelled, onProgress, integrity = integrity)
         return info(dest)
     }
 

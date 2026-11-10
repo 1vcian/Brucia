@@ -1,13 +1,16 @@
 package app.brucia.nfc
 
 import app.brucia.BrandLinks
+import app.brucia.update.AssetIntegrity
 import app.brucia.update.DownloadIO
 import app.brucia.wordlist.DictionaryDownload
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.Locale
 
-data class MifareDictionarySource(val id: String, val title: String, val url: String, val description: String)
+data class MifareDictionarySource(val id: String, val title: String, val url: String, val description: String,
+                                  /** Expected size/SHA-256 of the hosted asset; null = not pinned (F42 seam). */
+                                  val integrity: AssetIntegrity? = null)
 
 /** MIFARE Classic's 6-byte keys, not Wi-Fi passwords or keys for every NFC technology. */
 object MifareDictionary {

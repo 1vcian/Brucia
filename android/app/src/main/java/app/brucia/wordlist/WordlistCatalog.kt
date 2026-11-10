@@ -1,6 +1,7 @@
 package app.brucia.wordlist
 
 import app.brucia.BrandLinks
+import app.brucia.update.AssetIntegrity
 
 /**
  * Real wordlists the app can download to phone storage on demand - rockyou and the
@@ -24,6 +25,8 @@ data class DownloadableWordlist(
     val approxBytes: Long, // for display + a sanity bar; the real size wins
     val entries: String,   // human-readable count
     val description: String,
+    /** Expected size/SHA-256 of the Brucia-hosted asset; null = not pinned (F42 seam). */
+    val integrity: AssetIntegrity? = null,
 )
 
 object WordlistCatalog {

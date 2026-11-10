@@ -3160,6 +3160,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun downloadWordlist(name: String, url: String) {
         if (downloadJobs[name]?.isActive == true) return
+        val integrity = WordlistCatalog.all.firstOrNull { it.name == name && it.url == url }?.integrity
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             val owner = coroutineContext[Job]!!
             _downloads.update { it + (name to DownloadProgress(name, 0, 0, true)) }
@@ -3171,6 +3172,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                             _downloads.update { if (owner.isActive) it + (name to DownloadProgress(name, done, total, true)) else it }
                         },
                         isCancelled = { !owner.isActive },
+                        integrity = integrity,
                     )
                     WordlistStore.list(getApplication())
                 }
