@@ -24,7 +24,7 @@ std::string recovery(const std::string &what, const std::string &dest) {
 }
 } // namespace
 
-std::string install(Body &body, Files &fs, const std::string &dest) {
+std::string install(Body &body, Files &fs, const std::string &dest, Clock &clock, uint32_t budgetMs) {
     const std::string staging = dest + ".part";
     const std::string backup = dest + ".bak";
 
@@ -47,6 +47,8 @@ std::string install(Body &body, Files &fs, const std::string &dest) {
         return why;
     };
 
+    // The budget starts here: after the checks above, before the first body byte.
+    const uint32_t start = clock.nowMs();
     long total = 0;
     bool sawContent = false;
     uint64_t sent = FNV_OFFSET;
@@ -54,8 +56,10 @@ std::string install(Body &body, Files &fs, const std::string &dest) {
     while (total < len) {
         size_t want = sizeof(buf);
         if (static_cast<long>(want) > len - total) want = static_cast<size_t>(len - total);
-        const long n = body.read(buf, want);
-        if (n <= 0) return fail(true, "download interrupted");
+        const uint32_t elapsed = clock.nowMs() - start; // unsigned: correct across millis() wrap
+        if (elapsed >= budgetMs) return fail(true, TOO_SLOW);
+        const long n = body.read(buf, want, budgetMs - elapsed);
+        if (n <= 0) return fail(true, clock.nowMs() - start >= budgetMs ? TOO_SLOW : "download interrupted");
         if (n > static_cast<long>(want)) return fail(true, "download read overflow");
         for (long i = 0; i < n && !sawContent; i++) {
             const uint8_t c = buf[i];

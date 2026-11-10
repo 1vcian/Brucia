@@ -12,13 +12,28 @@ namespace app_store {
 /** Upper bound for the store bootstrap script (about 11 KB today). */
 constexpr long MAX_SCRIPT_BYTES = 64L * 1024L;
 
+/**
+ * Total time the body download may take. Each read is also idle-bounded by the adapter, but a
+ * server trickling a byte at a time would otherwise keep the UI blocked for a very long time.
+ */
+constexpr uint32_t DOWNLOAD_BUDGET_MS = 60000;
+
+/** Monotonic milliseconds (millis() on the device, a fake in the host tests). */
+struct Clock {
+    virtual ~Clock() = default;
+    virtual uint32_t nowMs() = 0;
+};
+
 /** The HTTP response body. */
 struct Body {
     virtual ~Body() = default;
     /** Content-Length, or <0 when the server did not send one. */
     virtual long length() = 0;
-    /** >0 bytes read, 0 at end of stream, <0 on error or timeout. */
-    virtual long read(uint8_t *buf, size_t cap) = 0;
+    /**
+     * >0 bytes read, 0 at end of stream, <0 on error or timeout. Must not wait longer than
+     * [maxWaitMs] (the rest of the download budget) for data to arrive.
+     */
+    virtual long read(uint8_t *buf, size_t cap, uint32_t maxWaitMs) = 0;
 };
 
 /** The storage the script is installed to (one open write at a time). */
@@ -79,8 +94,11 @@ private:
 /** Prefix of the message when the previous install could not be put back at [dest]. */
 constexpr const char *RECOVERY_REQUIRED = "RECOVERY REQUIRED: ";
 
+/** Reason returned when the download did not finish within its budget. */
+constexpr const char *TOO_SLOW = "download took too long";
+
 /**
- * Download [body] to `<dest>.part`, verify it is complete (exactly Content-Length bytes, all
+ * Download [body] to `<dest>.part` within [budgetMs] of [clock] (else [TOO_SLOW]), verify it is complete (exactly Content-Length bytes, all
  * written, flushed and synced, size re-read, and the bytes read back equal to the download), then
  * replace [dest] keeping the previous file in `<dest>.bak` until the new one is in place.
  * Returns "" on success, else the reason; on failure the staging file is removed and an existing
@@ -89,6 +107,8 @@ constexpr const char *RECOVERY_REQUIRED = "RECOVERY REQUIRED: ";
  * `<dest>.bak` and the reason starts with [RECOVERY_REQUIRED] (the next install attempt restores
  * it first).
  */
-std::string install(Body &body, Files &fs, const std::string &dest);
+std::string install(
+    Body &body, Files &fs, const std::string &dest, Clock &clock, uint32_t budgetMs = DOWNLOAD_BUDGET_MS
+);
 
 } // namespace app_store
