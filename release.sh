@@ -293,7 +293,9 @@ tag="v$new"
 if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
   die "Tag $tag already exists."
 fi
-if [ -n "$(remote_tag_commit "$tag")" ]; then
+# Assigned first: a failed ls-remote inside `[ ... ]` would not stop the script under set -e.
+remote_now="$(remote_tag_commit "$tag")"
+if [ -n "$remote_now" ]; then
   die "Tag $tag already exists on remote '$REMOTE'."
 fi
 if release_exists "$tag"; then
