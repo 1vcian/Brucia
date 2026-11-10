@@ -60,7 +60,7 @@ class WordlistImportTest {
     private fun import(open: () -> InputStream, limit: Long = WordlistStore.MAX_BYTES,
                        isCancelled: () -> Boolean = { false },
                        sink: (File) -> OutputStream = { FileOutputStream(it) }) =
-        WordlistStore.importInto(dir, "list.txt", isCancelled, limit, sink, open)
+        WordlistStore.importInto(dir, "list.txt", isCancelled, limit, sink, open = open)
 
     @Test fun providerErrorAfterFewBytesKeepsPreviousList() {
         seed()
@@ -147,6 +147,56 @@ class WordlistImportTest {
         }
         assertThrows(InterruptedException::class.java) { import({ slow }, isCancelled = { cancelled.get() }) }
         assertEquals(3, reads)
+        assertPreviousIntact()
+    }
+
+    /** Provider whose read blocks until the stream is closed (a stalled cloud document). */
+    private class Blocking : InputStream() {
+        val entered = CountDownLatch(1)
+        private val released = CountDownLatch(1)
+        override fun read(): Int = throw UnsupportedOperationException()
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            entered.countDown()
+            released.await()
+            throw IOException("stream closed")
+        }
+        override fun close() { released.countDown() }
+    }
+
+    @Test(timeout = 5_000) fun cancelReleasesAReadBlockedInsideTheProvider() {
+        seed()
+        val cancelled = AtomicBoolean(false)
+        val src = Blocking()
+        var error: Throwable? = null
+        val worker = Thread { error = runCatching { import({ src }, isCancelled = { cancelled.get() }) }.exceptionOrNull() }
+        worker.start()
+        assertTrue(src.entered.await(2, TimeUnit.SECONDS))
+        cancelled.set(true)
+        worker.join(2_000)
+        assertFalse("blocked read was not released by Cancel", worker.isAlive)
+        assertTrue(error is InterruptedException)
+        assertPreviousIntact()
+        // The destination is free again: a new import of the same name is accepted.
+        import({ "new\n".byteInputStream() })
+        assertArrayEquals("new\n".toByteArray(), File(dir, "list.txt").readBytes())
+    }
+
+    @Test(timeout = 5_000) fun totalDeadlineStopsAStalledProvider() {
+        seed()
+        val now = java.util.concurrent.atomic.AtomicLong(0)
+        val src = Blocking()
+        var error: Throwable? = null
+        val worker = Thread {
+            error = runCatching {
+                WordlistStore.importInto(dir, "list.txt", { false }, totalMillis = 1_000, clock = { now.get() }, open = { src })
+            }.exceptionOrNull()
+        }
+        worker.start()
+        assertTrue(src.entered.await(2, TimeUnit.SECONDS))
+        now.set(TimeUnit.SECONDS.toNanos(2))
+        worker.join(2_000)
+        assertFalse("stalled provider outlived the deadline", worker.isAlive)
+        assertTrue(error is app.brucia.wordlist.TransferTimeoutException)
         assertPreviousIntact()
     }
 

@@ -20,6 +20,9 @@ object WordlistStore {
     /** Largest wordlist accepted from a download or a manual import. */
     const val MAX_BYTES = 512L * 1024 * 1024
 
+    /** Total time for one manual import (a slow cloud provider; 512 MiB at ~2.4 Mbit/s). */
+    const val IMPORT_TOTAL_MS = 30L * 60 * 1000
+
     private fun dir(ctx: Context): File = File(ctx.filesDir, "wordlists").apply { mkdirs() }
 
     fun file(ctx: Context, name: String): File = File(dir(ctx), name)
@@ -85,6 +88,8 @@ object WordlistStore {
         isCancelled: () -> Boolean,
         limit: Long = MAX_BYTES,
         sink: (File) -> OutputStream = { FileOutputStream(it) },
+        totalMillis: Long = IMPORT_TOTAL_MS,
+        clock: () -> Long = System::nanoTime,
         open: () -> InputStream,
     ): WordlistInfo {
         if (!dir.isDirectory && !dir.mkdirs()) throw IOException("Cannot create the wordlist folder")
@@ -92,19 +97,24 @@ object WordlistStore {
         return exclusive(dest) {
             val part = File.createTempFile("import-", ".part", dir)
             try {
-                val check = DictionaryTextCheck()
-                open().use { input ->
-                    DictionaryTextOutputStream(sink(part), check).use { out ->
-                        copyBounded(input, out, limit, isCancelled)
-                        out.flush()
+                // Cancel or the deadline closes the provider stream, so a read blocked inside the
+                // provider returns instead of holding the import (and its destination) open.
+                TransferWatch.guard(isCancelled, totalMillis, clock) { watch ->
+                    val check = DictionaryTextCheck()
+                    open().use { input ->
+                        watch.onAbort { input.close() }
+                        DictionaryTextOutputStream(sink(part), check).use { out ->
+                            copyBounded(input, out, limit, watch::stopped)
+                            out.flush()
+                        }
                     }
+                    val lines = check.finish()
+                    if (check.bytes == 0L) throw IOException("The selected file is empty")
+                    if (part.length() != check.bytes) throw IOException("Short write while importing ${dest.name}")
+                    watch.ensureRunning()
+                    DownloadIO.promote(part, dest)
+                    WordlistInfo(dest.name, lines.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), dest.length())
                 }
-                val lines = check.finish()
-                if (check.bytes == 0L) throw IOException("The selected file is empty")
-                if (part.length() != check.bytes) throw IOException("Short write while importing ${dest.name}")
-                if (isCancelled()) throw InterruptedException("Import cancelled")
-                DownloadIO.promote(part, dest)
-                WordlistInfo(dest.name, lines.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), dest.length())
             } finally {
                 part.delete()
             }
