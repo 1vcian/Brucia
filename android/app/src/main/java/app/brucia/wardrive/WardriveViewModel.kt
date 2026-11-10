@@ -1977,16 +1977,16 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // --- MIFARE key-dictionary attack (bundled defaults + optional user keys) ---
     /** Import extra MIFARE keys from a text file (one 12-hex key per line). */
     fun importMifareKeys(uri: Uri) {
-        mifareDictionaries.load("Imported file") {
+        mifareDictionaries.load("Imported file") { cancelled ->
             val stream = getApplication<Application>().contentResolver.openInputStream(uri)
                 ?: throw IOException("Cannot open key dictionary")
-            MifareDictionary.read(stream)
+            MifareDictionary.read(stream, cancelled)
         }
     }
 
     fun downloadMifareKeys(id: String) {
         val source = mifareDictionarySources.firstOrNull { it.id == id } ?: return
-        mifareDictionaries.load(source.title) { MifareDictionary.download(source) }
+        mifareDictionaries.load(source.title) { cancelled -> MifareDictionary.download(source, cancelled) }
     }
     fun cancelMifareDictionaryLoad() = mifareDictionaries.cancel()
     fun clearMifareUserKeys() = mifareDictionaries.clear()
