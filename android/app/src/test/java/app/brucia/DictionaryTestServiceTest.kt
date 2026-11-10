@@ -32,6 +32,21 @@ class DictionaryTestServiceTest {
         } finally { scope.cancel() }
     }
 
+    // F46: the Crack screen used to read "none loaded (Run uses a demo handshake)". It does not:
+    // a run with no target opens no dictionary, produces no result and leaves no running/finished
+    // state. Only the explicit Demo button (demoCrack) uses a synthetic handshake.
+    @Test(timeout = 5000) fun runWithoutTargetNeverFabricatesADemoHandshake() {
+        val scope = CoroutineScope(Job() + Dispatchers.Default)
+        try {
+            val s = DictionaryTestService(scope)
+            s.start(null, null, 9, "built-in") { error("Run must not fabricate a demo target") }
+            assertFalse(s.status.value.running)
+            assertFalse(s.status.value.finished)
+            assertNull(s.status.value.result)
+            assertEquals("Load a handshake or PMKID first.", s.status.value.note)
+        } finally { scope.cancel() }
+    }
+
     @Test(timeout = 5000) fun reportsActualTriedCountOnEarlyMatchAndClosesReader() = runVirtual {
         val scope = CoroutineScope(Job() + clock)
         try {

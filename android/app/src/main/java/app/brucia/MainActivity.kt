@@ -8377,7 +8377,7 @@ private fun CrackScreen(vm: WardriveViewModel) {
         item {
             Text("Brucia", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, color = cs.primary)
             Text(
-                "WPA/WPA2 dictionary attack - heavy crypto on the phone (what Flipper cannot do)",
+                "WPA/WPA2 dictionary attack - the heavy crypto runs on the phone, not the ESP32",
                 color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -8450,7 +8450,7 @@ private fun CrackScreen(vm: WardriveViewModel) {
         }
 
         item {
-            Text("Target: ${target ?: "none loaded (Run uses a demo handshake)"}", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            Text("Target: ${target ?: "none loaded - Run needs a target; Demo uses a synthetic one"}", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
 
         // Primary run controls.
