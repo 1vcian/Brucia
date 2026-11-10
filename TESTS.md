@@ -107,8 +107,32 @@ the candidate cold-started (1.1 s) to the disconnected home screen, empty crash 
 NOT RUN: in-app download, import and Cancel of the four dictionaries on emulator or phone.
 `release.sh` rebuilds its own APK: the candidate is evidence, not the asset to upload.
 
-Blocked in this session: F38 (crack-target ownership) and F46 (Crack screen copy) were stopped
-by model safety filters; no code or media was changed for them.
+### F38 and F46 follow-up — 2026-11-11 (integrated `main` d4346059, local only)
+
+F38 and F46 were initially stopped by model safety filters on Opus 5.5; they were completed on
+Opus 4.8 and integrated with the same `--no-ff` process (merges `80a666d4`, `d4346059`). Both are
+defensive: F38 is a target-state concurrency fix, F46 makes misleading UI copy honest; neither adds
+any capability. Final suites rerun on the integrated tree, not reused from the task branches. No
+phone, board or tag connected.
+
+- F38: `importPcap`, `importPmkid`, the `pullFile` completion and the capture `onLoaded` callback
+  now route through `WifiTargetStore`, one generation-fenced value. A slow or failed import can no
+  longer relabel or revive a target a newer operation set; a failed/empty import commits no target,
+  so Run/export never reuse a stale one. New `WifiTargetStoreTest`: 8 tests (slow A -> B,
+  latest-owner, failed-import-clears, invalid line, non-capture pull keeps target, superseded pull
+  cannot relabel, PCAP/PMKID mutual exclusion, export follows target).
+- F46: the Crack screen no longer claims "Run uses a demo handshake" (Run with no target opens no
+  dictionary and sets "Load a handshake or PMKID first."; only the Demo button uses the synthetic
+  handshake) and the header drops the absolute Flipper comparison. New
+  `runWithoutTargetNeverFabricatesADemoHandshake` locks the behaviour; `docs/audit/wifi.md` marked
+  resolved. No screenshot regenerated: the Paparazzi `crackScreen` snapshot renders the stylized
+  `CrackPreview` fixture, not the real screen, so the text change does not touch it.
+- `./gradlew --offline :app:testDebugUnitTest :app:lintDebug`: **1,191 tests**, 167 suites,
+  0 failures/errors/skips (1,182 + 8 F38 + 1 F46); lint 0 errors, 1 warning (OldTargetApi).
+- `:app:verifyPaparazziDebug --no-build-cache --rerun-tasks`: PASS, 30 tasks executed (none
+  FROM-CACHE), confirming no snapshot drift from the F46 copy change.
+- Not rerun (unaffected by these two changes): `connectedDebugAndroidTest`, the host `tools`
+  suites and the firmware build. Phone checks of the Crack screen still NOT RUN.
 
 ## Brucia-hosted dictionary snapshots — 2026-11-10
 

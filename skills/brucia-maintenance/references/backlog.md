@@ -21,13 +21,16 @@ Coordinatore + worker Claude in worktree/branch separati (`audit/*`) dalla base 
 coordinatore). Ogni consegna è stata rivista e integrata su `main` con merge `--no-ff`; le
 verifiche finali sono state rieseguite sulla combinazione integrata (TESTS.md). Nessun push,
 tag o release. Nessun telefono, board o tag collegato: **tutti i criteri fisici restano OPEN**.
+F38 e F46, inizialmente BLOCKED (classificatore di sicurezza su Opus 5.5), sono stati
+completati il 2026-11-11 su Opus 4.8 e integrati con lo stesso processo (merge `--no-ff`
+`80a666d4`, `d4346059`); verifiche finali rieseguite sull'albero integrato.
 
 | ID | Stato software | Commit | Evidenza / limite |
 |---|---|---|---|
 | F35 residuo | DONE (host+build) | `88ed73f7`, `f371fb98` | Budget totale 60 s, date di ogni certificato presentato con floor = tempo sorgente del firmware e notBefore solo con NTP; 11 mutazioni rilevate; build T-Embed/Cardputer. Device cold-boot e mbedTLS reale NOT RUN; store HTTP successivo ancora OPEN. |
 | F36 | DONE (JVM) | `cf237e70`, `a90b2d4d` | IR off-UI 4 MiB, PCAP 32 MiB, conteggio righe bounded, import con limite 30 min e chiusura dello stream su Cancel. Telefono NOT RUN. |
 | F37 | DONE (JVM) | `3f307297`, `a90b2d4d` | Staging `.part`, validazione completa, promozione finale, esclusione import/download stesso nome; 13 fail-before. Nessuna garanzia power-loss. |
-| F38 | **BLOCKED** | — | Il worker è stato interrotto dai safeguard cyber del modello; decisione dell'utente: lasciare BLOCKED. Riprendere con accesso Cyber Verification Program o altro modello. Nessuna modifica eseguita. |
+| F38 | DONE (JVM) | `a52a9e23`, `80a666d4` | Target unificato in `WifiTargetStore` (generation fence): i quattro writer (importPcap/importPmkid/pullFile/capture) passano dallo store. Policy esplicita "nessun target su import fallito"; un import lento o fallito non rietichetta né rianima un target più recente, label sempre coerente con Run/export. `WifiTargetStoreTest` 8 test (A lenta→B, fail clears, pull non-capture, supersede, PCAP/PMKID esclusivi, export). Telefono NOT RUN. (Ripreso su Opus 4.8 dopo il blocco del classificatore su Opus 5.5.) |
 | F39 | DONE (JVM) | `2859a3c1`, `2f500af2` | `NusConsoleCore` + token di sessione; 13 test, 11 falliti sulla logica base. PIN/connect/`info` fisico NOT RUN. |
 | F40 | DONE (harness) | `fbe42f21`, `1752c918` | Bundle `.release-staging/`, `./release.sh resume`, preflight tag/release, draft fino a verifica asset; 16 test con git reale + remote bare + gh finto. Nessun run GitHub reale. |
 | F41 | DONE (JVM) | `10a72366`, `087361c7` | TransferWatch chiude la connessione su Cancel/deadline; un solo reader dopo Cancel/retry. Telefono NOT RUN. |
@@ -35,7 +38,7 @@ tag o release. Nessun telefono, board o tag collegato: **tutti i criteri fisici 
 | F43 | DONE (host) | `2f20f1c9`, `318f2fa4` | `--require-events`; copertura separata dal verdetto link; zero eventi = gate NOT MET (exit 3). F23 resta OPEN. |
 | F44 | DONE (locale) | `f5b12eb0`, `0a4e5cf0` | `verifyPaparazziDebug` in CI e release.sh (baseline alterata → exit 1, provato sul tree finale); job emulatore `connectedDebugAndroidTest`; nuovo `CompanionLinkFlowTest`. Job GitHub non eseguito (nessun push). |
 | F45 | DONE (doc) | `091e4018`, `dc8ba5ea` | CHANGELOG diviso in 0.1.6–0.1.12; stati F03/F21/F22/F35/A3/A5/DT07/E01–E03 con revisione e tipo di prova. |
-| F46 | **BLOCKED** | — | Revisione del testo della schermata Crack interrotta dal classificatore di sicurezza durante questa sessione; non ritentata. Copy, preview e media invariati. |
+| F46 | DONE (JVM) | `7ebaf413`, `d4346059` | Due stringhe false corrette: la riga Target non afferma più che Run usa un demo handshake (solo il pulsante Demo usa il sintetico); header senza il confronto Flipper assoluto ("heavy crypto runs on the phone, not the ESP32"). `runWithoutTargetNeverFabricatesADemoHandshake` blocca il comportamento; `docs/audit/wifi.md` marcato risolto. Nessuno screenshot rigenerato (il Paparazzi usa la fixture `CrackPreview`, non lo schermo reale). (Ripreso su Opus 4.8.) |
 | F47 | READY (non pubblicato) | HEAD `main` | APK candidato 0.1.13 firmato verificato (TESTS.md): versionCode 1000113, stesso certificato di 0.1.12, nessun URL upstream, quattro asset Brucia con SHA conforme. Pubblicazione: `./release.sh patch` da `main` pulito. Download/import/Cancel su telefono NOT RUN. |
 
 ### Nuovi task, in ordine di esecuzione

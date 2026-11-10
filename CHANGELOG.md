@@ -52,6 +52,16 @@ firmware: the 0.1.12 APK still downloads the four new dictionaries from their up
   `release.sh`, and a new emulator job runs the instrumented tests, including a navigation,
   reconnect and Stop flow over a simulated device link. The stale phone home-grid baseline
   was re-recorded. The GitHub job has not run yet (no push).
+- Crack target (F38): the imported Wi-Fi target (a handshake or a PMKID) is now one
+  generation-fenced value instead of three fields written from four places. A slow or failed
+  import can no longer relabel or revive a target a newer import, pull or capture set, and an
+  import that finds nothing clears the target instead of leaving a stale one that Run and export
+  would still use. The shown label always matches what Run and export act on. JVM tests only; not
+  checked on a phone.
+- Crack screen copy (F46): the target line no longer states that Run uses a demo handshake - Run
+  with no target does nothing and asks for one; only the Demo button uses a synthetic handshake.
+  The header no longer claims an absolute Flipper comparison. No behaviour change; a regression
+  test pins that a run without a target never fabricates one.
 
 ## [0.1.12] - 2026-11-10
 
