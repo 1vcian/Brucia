@@ -37,3 +37,6 @@ __pycache__/
 
 # Local hardware acceptance runner reports (tools/hw_acceptance.py)
 hw-acceptance-reports/
+
+# release.sh staging bundles (signed APK, firmware, SHA256SUMS, reports); see release.sh header
+.release-staging/

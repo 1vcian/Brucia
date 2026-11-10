@@ -58,9 +58,23 @@ jobs:
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           packages: platform-tools platforms;android-37.0 build-tools;${{ env.ANDROID_BUILD_TOOLS }}
-      - name: Unit tests (offload logic)
+      # verifyPaparazziDebug runs the unit tests with paparazzi.test.verify set, so every screenshot
+      # test is compared with its committed baseline (src/test/snapshots). The plain
+      # testDebugUnitTest task only renders: Paparazzi 2.0.0-alpha05.1 verifies nothing without
+      # that property, so a changed screen would pass unnoticed.
+      - name: Unit tests and screenshot verification against baselines
         working-directory: android
-        run: ./gradlew :app:testDebugUnitTest --no-daemon
+        run: ./gradlew :app:testDebugUnitTest :app:verifyPaparazziDebug --no-daemon
+      - name: Upload unit-test and screenshot-diff reports
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: brucia-unit-test-reports
+          path: |
+            android/app/build/reports/tests/
+            android/app/build/test-results/
+            android/app/build/paparazzi/failures/
+          if-no-files-found: ignore
       - name: Android lint
         working-directory: android
         run: ./gradlew :app:lintDebug --no-daemon
@@ -89,6 +103,57 @@ jobs:
           name: brucia-app-release-unsigned
           path: android/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
+
+  # Instrumented tests on an emulator: Room migrations, MainActivity receivers, ConnectionService
+  # foreground/wake lock, MITM rows and the simulated-device companion flow (navigation, stream,
+  # re-negotiation, Stop, Disconnect). An emulator does not replace real USB/radio peripherals.
+  android-instrumented:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ANDROID_BUILD_TOOLS: '36.0.0'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: platform-tools platforms;android-37.0 build-tools;${{ env.ANDROID_BUILD_TOOLS }}
+      # Hardware acceleration for the x86_64 emulator on the hosted runner.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build app and test APKs
+        working-directory: android
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+      - name: Instrumented tests (connectedDebugAndroidTest)
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-snapshot-save -no-boot-anim -gpu swiftshader_indirect
+          working-directory: android
+          script: |
+            adb logcat -c || true
+            adb logcat -v threadtime > ../instrumented-logcat.txt 2>&1 &
+            ./gradlew :app:connectedDebugAndroidTest --no-daemon
+      - name: Upload instrumented-test reports and logcat
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: brucia-instrumented-test-reports
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+            instrumented-logcat.txt
+          if-no-files-found: warn
 
   protocol-e2e:
     runs-on: ubuntu-24.04
