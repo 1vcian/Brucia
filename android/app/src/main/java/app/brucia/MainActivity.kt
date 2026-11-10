@@ -3398,23 +3398,33 @@ private fun IrScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val savedIr by vm.savedIr.collectAsState()
     LaunchedEffect(learned) { if (learned.isNotEmpty()) buttons = learned }
 
+    // Read + parse off the main thread, bounded; a failed import keeps the loaded codes.
+    val irImportScope = rememberCoroutineScope()
+    var irImportJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            try {
-                val text = context.contentResolver.openInputStream(uri)
-                    ?.bufferedReader()?.use { it.readText() } ?: ""
-                val parsed = IrParser.parse(text)
-                if (parsed.isNotEmpty()) {
-                    buttons = parsed
-                    browsing = false
-                    Toast.makeText(context, "Loaded ${parsed.size} codes", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "No codes found in file", Toast.LENGTH_SHORT).show()
+            irImportJob?.cancel()
+            irImportJob = irImportScope.launch {
+                val owner = coroutineContext[kotlinx.coroutines.Job]!!
+                try {
+                    val parsed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val input = context.contentResolver.openInputStream(uri) ?: throw java.io.IOException("cannot open file")
+                        input.use { BoundedImport.readIr(it, { !owner.isActive }, IrParser::parse) }
+                    }
+                    if (parsed.isNotEmpty()) {
+                        buttons = parsed
+                        browsing = false
+                        Toast.makeText(context, "Loaded ${parsed.size} codes", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "No codes found in file", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (owner.isActive) Toast.makeText(context, "Read failed: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
-            } catch (e: Exception) {
-                Toast.makeText(context, "Read failed: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -8353,6 +8363,7 @@ private fun CrackScreen(vm: WardriveViewModel) {
     val pcapLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) { vm.importPcap(uri); Toast.makeText(context, "Parsing handshake...", Toast.LENGTH_SHORT).show() }
     }
+    val wordlistImport by vm.wordlistImport.collectAsState()
     val hs by vm.hsFlow.collectAsState()
     val captureList by vm.captureList.collectAsState()
     var manualExpanded by remember { mutableStateOf(false) }
@@ -8454,6 +8465,22 @@ private fun CrackScreen(vm: WardriveViewModel) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Apply mangling rules (expand wordlist)", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
                 Switch(checked = rules, onCheckedChange = { vm.setRules(it) })
+            }
+        }
+
+        // Manual wordlist import status: progress with Cancel, then result or error.
+        wordlistImport?.let { imp ->
+            item {
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
+                    Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Wordlist import: ${imp.name}", fontWeight = FontWeight.SemiBold, color = if (imp.failed) cs.error else cs.primary)
+                            Text(imp.message ?: "Importing...", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                        }
+                        if (imp.running) TextButton(onClick = { vm.cancelWordlistImport() }) { Text("Cancel") }
+                        else TextButton(onClick = { vm.dismissWordlistImport() }) { Text("Dismiss") }
+                    }
+                }
             }
         }
 

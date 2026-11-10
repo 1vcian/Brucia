@@ -65,6 +65,7 @@ import app.brucia.wordlist.BundledWordlists
 import app.brucia.wordlist.BundledWordlistUi
 import app.brucia.wordlist.DownloadProgress
 import app.brucia.wordlist.WordlistCatalog
+import app.brucia.wordlist.WordlistImportState
 import app.brucia.wordlist.WordlistInfo
 import app.brucia.wordlist.WordlistStore
 import app.brucia.data.SavedItem
@@ -3373,11 +3374,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     fun importPcap(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val bytes = getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+                val bytes = getApplication<Application>().contentResolver.openInputStream(uri)!!
+                    .use { app.brucia.BoundedImport.read(it, app.brucia.wifi.PcapDissector.MAX_CAPTURE_BYTES.toLong()) }
                 val hs = HandshakeParser.parse(bytes)
                 loadedHandshake = hs
                 if (hs != null) loadedPmkid = null
                 _handshakeInfo.value = hs?.let { "${it.ssid} (WPA${it.keyVersion})" } ?: "no handshake found in file"
+            } catch (e: app.brucia.ImportTooLargeException) {
+                _handshakeInfo.value = "file too large (max 32 MiB)"
             } catch (e: Exception) {
                 _handshakeInfo.value = "read error"
             }
@@ -3397,12 +3401,44 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // Manual wordlist import: one at a time, result/error/cancellation shown on the Crack screen.
+    private val _wordlistImport = MutableStateFlow<WordlistImportState?>(null)
+    val wordlistImport: StateFlow<WordlistImportState?> = _wordlistImport.asStateFlow()
+    private var wordlistImportJob: Job? = null
+
     fun importWordlist(uri: Uri, name: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try { WordlistStore.importFrom(getApplication(), uri, name) } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "wordlist import failed", e) }
-            _wordlists.value = WordlistStore.list(getApplication())
+        if (wordlistImportJob?.isActive == true) return
+        val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            val owner = coroutineContext[Job]!!
+            _wordlistImport.value = WordlistImportState(name, running = true)
+            val result = try {
+                val info = withContext(Dispatchers.IO) {
+                    WordlistStore.importFrom(getApplication(), uri, name, isCancelled = { !owner.isActive })
+                }
+                WordlistImportState(info.name, running = false, message = "Imported ${info.lines} entries")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: InterruptedException) {
+                WordlistImportState(name, running = false, message = "Import cancelled", failed = true)
+            } catch (e: Exception) {
+                app.brucia.BruciaLog.w("VM", "wordlist import failed", e)
+                WordlistImportState(name, running = false, message = "Import failed: ${e.message ?: "error"}", failed = true)
+            }
+            if (owner.isActive) _wordlistImport.value = result
+            _wordlists.value = withContext(Dispatchers.IO) { WordlistStore.list(getApplication()) }
         }
+        wordlistImportJob = job
+        job.start()
     }
+
+    fun cancelWordlistImport() {
+        val job = wordlistImportJob ?: return
+        if (!job.isActive) return
+        job.cancel()
+        _wordlistImport.value = _wordlistImport.value?.copy(running = false, message = "Import cancelled", failed = true)
+    }
+
+    fun dismissWordlistImport() { if (wordlistImportJob?.isActive != true) _wordlistImport.value = null }
 
     fun deleteWordlist(name: String) {
         viewModelScope.launch(Dispatchers.IO) {
