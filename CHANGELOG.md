@@ -7,6 +7,11 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Public tutorials now show actual app screen recordings: navigation, the built-in
+  synthetic WPA demo and NFC dictionary imports. Replaced six text-slide videos;
+  emulator provenance and captions are included. The wordlists release now links
+  the four new upstream dictionaries.
+
 - Dictionaries: added Probable WPA top 4,800 / 204k alongside RockYou and SecLists,
   plus on-demand Flipper and Proxmark3 MIFARE Classic dictionaries in NFC. Imports
   accept comments/BOM, deduplicate keys and report errors without discarding earlier

@@ -53,7 +53,7 @@ follow [Getting Started](wiki/Getting-Started.md).
 
 <img src="docs/img/public-ui.png" alt="Brucia dashboard, reports and IR controls rendered with preview data" width="100%">
 
-*App preview renders with sample data.* Browse the [illustrated video guides](wiki/Tutorials.md)
+*App preview renders with sample data.* Browse the [app walkthroughs](wiki/Tutorials.md)
 for first connection, files, updates, observations and audio.
 
 ## What the phone brings

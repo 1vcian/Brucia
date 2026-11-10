@@ -4,6 +4,54 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## App recordings and dictionary release links — 2026-11-10
+
+Actual signed release APK 0.1.12 (digest below) installed on a temporary read-only
+Android API 36.1 arm64 emulator, serial emulator-5580. No physical phone, board or
+NFC tag connected. Android screenrecord captures replace six text-slide videos:
+- Home category navigation to NFC, with disconnected state visible.
+- Explicit built-in Demo: synthetic handshake, 401/401 candidates, known passphrase
+  `brucia-demo-pass`. Displayed 118 keys/s is emulator-only, not a phone benchmark.
+- Real Android HTTPS imports: Flipper 2,038 keys; Proxmark3 adds 473, total 2,511.
+  No tag command or radio transmission. This checks import and deduplication in the
+  release APK; cancellation, rotation and physical tag acceptance remain open.
+
+Raw captures retained in `.codex_tmp/app-recordings-0.1.12/` (ignored), with hashes
+and APK identity in `docs/media/manifest.json`. Full viewport retained; provenance
+banner, H.264 encoding, captions and 4-second final hold only. No fabricated results.
+The still-image generator no longer overwrites videos or Tutorials.
+Verification: site 17/17, brand 11 PASS + 1 SKIP, all new local links and manifest
+asset hashes checked; all three MP4s decode fully. Representative frames and final
+results visually inspected; captions aligned to observed state changes.
+
+GitHub `wordlists` release notes updated and read back: four upstream links for
+Probable WPA 4,800/204k and Flipper/Proxmark3 Classic. Existing four RockYou/SecLists
+assets unchanged; new sources are links, not mirrored assets.
+
+Observed copy follow-up: the released Crack screen still contains “what Flipper
+cannot do” and “Run uses a demo handshake”. The recording is unchanged; those
+strings need a scoped wording correction in a future app build.
+
+## Release 0.1.12 — published verification
+
+Published to Brucia at tag `v0.1.12`, release commit `21b8f80d` (feature commit
+`3bb6a3fe`). release.sh exit 0; full log in
+`hw-acceptance-reports/release-0.1.12.log`. Host discovery: 330 tests, 2 skipped;
+site tests 17/17; firmware codec/storage/framing and mock protocol pass. Android
+full unit run: 1,137 tests, 0 failures/errors/skips (XML totals observed before
+release clean); lint passes. T-Embed build and real-dependency AAC noise test pass;
+fresh signed APK assembled. APK identity `app.brucia`, version 0.1.12 / 1000112,
+minSdk 26, targetSdk 36, debuggable false; apksigner verification passes.
+
+GitHub release is published, not draft/prerelease; both assets uploaded. Remote
+SHA-256 digests match the local APK and firmware:
+- APK: `5f59691ddf5fcde46072e99c167c8e547ac6d272a0c294a129a0c4d8f900d083`.
+- Firmware: `3341813c7799d619d54ee20b3aba57662ac4c27ede4963c54ae3685e1932d010`.
+
+Build CI and Pages deployment completed successfully for `21b8f80d`. No physical
+phone/tag tests or device flash performed for the release. Emulator media preparation
+is separate from that physical acceptance.
+
 ## Additional Wi-Fi / NFC dictionaries — 2026-11-10
 
 Probable WPA top 4,800 and top 204k added to the existing Wi-Fi catalog. NFC adds

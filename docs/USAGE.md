@@ -10,7 +10,7 @@ Your quick route into the [Brucia wiki](https://1vcian.me/Brucia/wiki/).
 | Connection and update troubleshooting | [FAQ](../wiki/FAQ.md) |
 | Ways to contribute | [Contributing](../wiki/Contributing.md) |
 
-The [tutorials](../wiki/Tutorials.md) include illustrated videos, transcripts,
+The [tutorials](../wiki/Tutorials.md) include app screen recordings, transcripts,
 expected results and recovery steps. They cover first flash, Android installation,
 USB connection, updates, files, observations and audio.
 

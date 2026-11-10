@@ -1,34 +1,72 @@
 {
-  "kind": "Illustrated instructions and Compose fixture previews; not hardware recordings",
-  "version_context": "0.1.11",
-  "source_commit": "aa19f9b2cb92139bd994b264c3d08299f8f38f15",
-  "generator": "tools/render_public_media.py",
+  "kind": "Android app screen recordings plus separately labelled Compose preview images",
+  "version_context": "0.1.12",
+  "recordings": {
+    "date": "2026-11-10",
+    "apk_commit": "21b8f80d7c95422689e6a5089a1a52454a8c3eb8",
+    "apk_sha256": "5f59691ddf5fcde46072e99c167c8e547ac6d272a0c294a129a0c4d8f900d083",
+    "device": "Android emulator, API 36.1, arm64, 1080x2400; screenrecord 720x1600",
+    "hardware_connected": false,
+    "editing": "Full app viewport retained. Provenance banner added above it; H.264 encoding and 4-second final-frame hold. No speed-up or fabricated UI.",
+    "clips": {
+      "app-tour": {
+        "title": "Explore the app",
+        "raw_sha256": "37b525c57bede7d435529605495a3ab7875c82bd6ce59955baad957476a67ccd",
+        "duration_seconds": 20.679144,
+        "captions": [
+          "Browse the tools in the released Android app.",
+          "Open NFC. Tag operations require a connected device and PN532."
+        ]
+      },
+      "dictionary-demo": {
+        "title": "Run the built-in demo",
+        "raw_sha256": "8a35dc7a60acd818f8c6cb0c742eac573257519c8adbad60a5194a8d34c93e28",
+        "duration_seconds": 17.281744,
+        "captions": [
+          "Tap Demo to run the built-in synthetic WPA fixture.",
+          "The app checks candidates against the synthetic handshake.",
+          "401 candidates checked; the known demo passphrase is found.",
+          "No network capture. The displayed speed is from this emulator."
+        ]
+      },
+      "nfc-dictionaries": {
+        "title": "Import NFC dictionaries",
+        "raw_sha256": "4db2b92553ac49062d156586ddb81d3c836782184cc679dcd460508d16a06fff",
+        "duration_seconds": 14.686267,
+        "captions": [
+          "Add the public Flipper MIFARE Classic dictionary.",
+          "Flipper loads 2,038 Classic keys.",
+          "Add Proxmark3. Existing keys are deduplicated.",
+          "473 new keys; 2,511 total. Keys remain in this app session."
+        ]
+      }
+    }
+  },
+  "preview_images": {
+    "kind": "Compose fixtures and architecture illustration, not device captures",
+    "version_context": "0.1.12",
+    "source_commit": "21b8f80d7c95422689e6a5089a1a52454a8c3eb8",
+    "sources": {
+      "android/app/src/test/snapshots/images/app.brucia_FlameUiScreenshotTest_homeDashboardConnectedScreen.png": "b54f5a0a1eb9550f4519a50bdf06f408b56b0854cb464c8d05bf073ec46e4ed0",
+      "android/app/src/test/snapshots/images/app.brucia_FlameUiScreenshotTest_reportScreen.png": "7df87f1bef49e31d5f9b4d9030fedc05d006f0d3f1bbb05713b08ce940aedb9b",
+      "android/app/src/test/snapshots/images/app.brucia_FlameUiScreenshotTest_irBrowserScreen.png": "ac5f59635608092dcc0cce913e4cbf9dc269a2e19f939b75da60c3070ab9202c",
+      "tools/render_public_media.py": "6e47195b6f6cfc9393f3a80d620028e05de870e10cbf491bfeaedd1697c5d2c9"
+    }
+  },
   "sources": {
-    "android/app/src/test/snapshots/images/app.brucia_FlameUiScreenshotTest_homeDashboardConnectedScreen.png": "b54f5a0a1eb9550f4519a50bdf06f408b56b0854cb464c8d05bf073ec46e4ed0",
-    "android/app/src/test/snapshots/images/app.brucia_FlameUiScreenshotTest_reportScreen.png": "7df87f1bef49e31d5f9b4d9030fedc05d006f0d3f1bbb05713b08ce940aedb9b",
-    "android/app/src/test/snapshots/images/app.brucia_FlameUiScreenshotTest_irBrowserScreen.png": "ac5f59635608092dcc0cce913e4cbf9dc269a2e19f939b75da60c3070ab9202c",
-    "tools/render_public_media.py": "d9d5988832f3bea30ba77781f774be2aef2e5bdc023d6b86ef685b35b5d302ea"
+    "tools/package_app_recordings.py": "77ad2345f73d8ee45428cc84426678de8b6eccc53f4a86d1c94d486bf017e101"
   },
   "assets": {
     "docs/img/public-overview.png": "f96ee382593cf50da04ab095df3bbf7aa378dfd79310eccdd05cdd4bb4c91e18",
     "docs/img/public-ui.png": "35adfccb2cfddd680a3fb069cb5578256b895f1b4bacef7b70a6b5c031201e5e",
-    "docs/media/first-connection.png": "47e9725242439f7010ae5e10cabbb917b6c5911b491362fceae5d1af214ce0b3",
-    "docs/media/first-connection.vtt": "7547dbc48dd83e0da13d90667903efc20580200ef72359a166484fcb5946e4d0",
-    "docs/media/first-connection.mp4": "13d6f267bba72285c7a6e8e291ce6477cc5669b40ed68261dda891047a500ae2",
-    "docs/media/updates.png": "7ef91e3ea785950742154bd9cb2a9d303a5be77f114c9d6f85f32182e4578031",
-    "docs/media/updates.vtt": "6a79fd464fa5e3d340aa94ba503cd0270182c87acef184c1328b9d41e969ca42",
-    "docs/media/updates.mp4": "80ae21ba8dd824e048972f673d249c494ba22cabe4f7ff527ed590f1dc50d0d3",
-    "docs/media/files-scripts.png": "0f26bff46c40f8d683573350199fab6c69ee44dcb90412ab01f9c5ae1e576a4d",
-    "docs/media/files-scripts.vtt": "de53bd65f2e72ae65e9a981f9470b9f45cd10fcb68c680db24d900e1357e59cf",
-    "docs/media/files-scripts.mp4": "ec8eef01e31d127539d96ae24de4293cf466e5c2f399d81eddd240aa97257f9f",
-    "docs/media/observations.png": "638d46aa29fa89a57dd84d26803fc717b353db37119cf8eebb7b4e866dc2b6f1",
-    "docs/media/observations.vtt": "f3a2997defb1b88ca968ce9c534a234a6baffb82e0d36c56c4e290e92f5595fa",
-    "docs/media/observations.mp4": "86abd1ba9758ffe03d864e98ca275268308066c019a75fe4d7ed080c7977f907",
-    "docs/media/peripherals.png": "5ec518867a63c23fadda9bf3a91dec2af57471e23fceeec098a02461b2442143",
-    "docs/media/peripherals.vtt": "d1995747d62670290b594962e3baf387577a6c7813475f64284ac03a7e1f0281",
-    "docs/media/peripherals.mp4": "4b689c4cff1316730c1160df3d9dc8617932a09298d0cad9575124b371625100",
-    "docs/media/audio-remote.png": "a7cdd9aaa6a1149f8bdc00e07b42ef4fc200d0e070710a6c110936e2e7dd6614",
-    "docs/media/audio-remote.vtt": "9b29c5538d3c2c105226ca88d112690b7e0629c82a1dc61682dfb15cc4378832",
-    "docs/media/audio-remote.mp4": "c4e497b33062146c140236999c8f678f0402fb82ed6641965ab828d78b87eab6"
+    "docs/media/app-tour.mp4": "94fa1c658acc8d9ea96d7a8edaf950220653a0a3ea376acd3b7919d6725b7f11",
+    "docs/media/app-tour.png": "e74a5c6c13ea7b02a719512fe4f92e9e15976a573146ae89016195fcd2ac0db5",
+    "docs/media/app-tour.vtt": "6445b42b676aa48bded946689173129b84e89c1077655cd907451f5730bfaca6",
+    "docs/media/dictionary-demo.mp4": "d4763d16cf637f9b78d94a98e1f3ef0bcd739f5333786c8a94c0a88fa4eb4d37",
+    "docs/media/dictionary-demo.png": "21b522c422f01911eb4d363dd61fee041780279991804db8a6fed8d4afafea8f",
+    "docs/media/dictionary-demo.vtt": "9ee5ca7ae4505f64030a4ad47a8feb4b4b1bf3aa8422bd4dbc91c373b3651321",
+    "docs/media/nfc-dictionaries.mp4": "43b59fee5aedfbe407ab9f5f7b0317653c35d75b6548f15253fdd6c57249398c",
+    "docs/media/nfc-dictionaries.png": "4af38e070b91e4f8ddbc6004819d0ea5760789149d7e090889e3320a6ee354ca",
+    "docs/media/nfc-dictionaries.vtt": "7d9ac0ca71383c0a48b447e335daba56e7ffe68eb412549fd254156ec891d93c"
   }
 }

@@ -1,11 +1,22 @@
 # Work queue — single operational ledger
 
+App media correction 2026-11-10: six slide videos replaced with actual released-APK
+0.1.12 emulator recordings (navigation, synthetic demo, live NFC dictionary import).
+NFC import yields 2,038 + 473 = 2,511 unique keys. No board/tag or physical acceptance.
+Site/Tutorials use recordings, provenance hashes preserved; still renderer cannot
+regenerate slides. `wordlists` release notes now link all four new upstream sources.
+Open copy issue observed in released Crack screen: remove overbroad Flipper claim
+and clarify that synthetic input is selected by Demo, not every Run. TESTS.md records
+capture context; physical media and device gates remain open.
+
 Dictionary alternatives 2026-11-10: Probable WPA 4,800/204k added alongside existing
 RockYou/SecLists; Flipper/Proxmark3 Classic key downloads added in NFC. Modular bounded
 HTTPS loader + NFC import service; deduplication, visible failure, Cancel/Clear fencing,
 previous dictionary preservation. No firmware/crypto changes; NFC data lasts for the
 app session. Host endpoints/formats checked and focused JVM checks run; TESTS.md has
-limits. User explicitly requested commit, push and release after implementation.
+limits. Released as v0.1.12: feature 3bb6a3fe, release 21b8f80d; signed APK/firmware
+assets and matching digests verified. Full Android 1,137 tests, host 330 (2 skipped),
+firmware/noise checks pass; build CI and Pages green (TESTS.md).
 Remaining: phone download/import/cancel/rotation and known owned Classic-tag checks.
 
 Community presentation 2026-11-09: README, wiki home/navigation/feature guides,

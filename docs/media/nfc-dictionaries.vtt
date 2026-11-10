@@ -1,0 +1,13 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Add the public Flipper MIFARE Classic dictionary.
+
+00:00:05.000 --> 00:00:09.000
+Flipper loads 2,038 Classic keys.
+
+00:00:09.000 --> 00:00:10.500
+Add Proxmark3. Existing keys are deduplicated.
+
+00:00:10.500 --> 00:00:14.686
+473 new keys; 2,511 total. Keys remain in this app session.

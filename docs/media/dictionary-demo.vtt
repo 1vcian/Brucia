@@ -1,0 +1,13 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Tap Demo to run the built-in synthetic WPA fixture.
+
+00:00:05.000 --> 00:00:08.000
+The app checks candidates against the synthetic handshake.
+
+00:00:08.000 --> 00:00:12.000
+401 candidates checked; the known demo passphrase is found.
+
+00:00:12.000 --> 00:00:17.282
+No network capture. The displayed speed is from this emulator.

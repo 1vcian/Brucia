@@ -83,23 +83,26 @@ notes, sidebar/routes, usage guide and website copy now describe the public proj
 Toolchain detail remains in CONTRIBUTING.md and wiki/Building.md; wire details remain
 in proto/PROTOCOL.md rather than a second outdated command table.
 
-Media: `tools/render_public_media.py` produces two public images and six silent,
-40-second illustrated MP4 guides (install/connect, updates/recovery, files/scripts,
-observations, peripherals, audio/Remote), with posters, VTT captions and a complete
-transcript in wiki/Tutorials.md. `docs/media/manifest.json` records source revision,
-fixture hashes and output hashes. UI images are Compose previews with fixture data,
-verified with Paparazzi; the videos are instructions, not device recordings.
+Media: three real screen recordings of the signed 0.1.12 APK in an Android 36.1
+emulator replace the six text-slide videos. They show category navigation, the
+built-in synthetic WPA demo and actual Flipper/Proxmark3 dictionary imports.
+Each video keeps the full app viewport with a small provenance banner above it,
+a poster taken from the recording, captions and steps in wiki/Tutorials.md.
+`docs/media/manifest.json` records the APK, raw capture and output hashes.
+This is emulator evidence; radio/tag/USB effects are not demonstrated.
 
-Regenerate after verifying the preview sources:
+To package new captures, record the actual app with Android `screenrecord`, inspect
+all results, then update the capture context/captions in the packager. Keep originals:
 
 ```sh
-cd android
-./gradlew :app:verifyPaparazziDebug --tests '*FlameUiScreenshotTest'
-cd ..
-python3 tools/render_public_media.py  # Pillow, ffmpeg, Arial or DejaVu Sans
-python3 tools/brand.py write
+python3 tools/package_app_recordings.py PATH_TO_REAL_CAPTURES
 python3 tools/brand.py check
 ```
+
+`tools/render_public_media.py` now only regenerates the two still images from
+illustrations and verified Compose fixtures; it preserves recordings and tutorials.
+Those still images retain their fixture labels. Do not regenerate slide videos or
+present fixture data as a physical device recording.
 
 Still pending: new physical app/device recordings (boot, Device Info, companion,
 installation and actual peripheral effects) from an accepted release pair. Existing
@@ -117,6 +120,6 @@ The launch scope and its coverage:
   relationship to Bruce and its official app, licence and source offer.
 - Screenshots and images: app screens, device screens (boot, Device Info, companion), website
   hero and comparison images in `docs/img/` and `media/`.
-- Videos: six illustrated guides now exist; actual phone/device recordings remain pending acceptance.
+- Videos: three actual emulator recordings exist; physical phone/device recordings remain pending acceptance.
 - Website copy in `docs/index.html` and `docs/USAGE.md`, `SECURITY.md` and `CONTRIBUTING.md`
   wherever they describe the private phase.

@@ -1,95 +1,55 @@
-# Tutorials
+# Watch the app
 
-Illustrated instructions for the public project. These videos contain diagrams and text,
-**not recordings of a phone or device**. They do not establish hardware acceptance.
-Each silent video has a caption track and the complete transcript below.
+These clips show the released Brucia 0.1.12 APK running in an Android emulator:
+actual taps, screen changes, downloads and results. Each has English captions.
+No board or NFC reader is connected. The WPA demo uses a synthetic handshake.
 
-Start with [Getting Started](Getting-Started.md), then [Features](Features.md). Use equipment you own or are authorized
-to test. The expected outcomes below still need checking on your app/firmware pair.
+## Explore the tools
 
-## Install and connect
+[Watch the app tour](https://1vcian.me/Brucia/media/app-tour.mp4) ·
+[Captions](https://1vcian.me/Brucia/media/app-tour.vtt)
 
-[Watch the illustrated video](https://1vcian.me/Brucia/media/first-connection.mp4) ·
-[Captions](https://1vcian.me/Brucia/media/first-connection.vtt)
+Browse Home, scroll through the tool categories and open NFC. The disconnected
+state stays visible. Connect compatible hardware to enable device operations.
 
-1. **Choose a matching release.** Download the APK and firmware for your exact board. Read the release notes and back up files you need.
+## Try the built-in dictionary demo
 
-2. **Flash from a computer.** Use the public web flasher in desktop Chrome or Edge with a USB data cable. Confirm board and version before starting.
+[Watch the demo](https://1vcian.me/Brucia/media/dictionary-demo.mp4) ·
+[Captions](https://1vcian.me/Brucia/media/dictionary-demo.vtt)
 
-3. **Connect the Android app.** Install the APK. Connect via USB host / OTG, grant USB access and enter Brucia companion mode on the device.
+Open Crack and tap **Demo**. The app checks 401 candidates against its built-in
+synthetic WPA handshake and displays the known passphrase `brucia-demo-pass`.
+No nearby network is captured or contacted. The speed shown belongs to this
+emulator run; it is not a phone-versus-device benchmark.
 
-4. **Check the first reply.** Confirm device and firmware information. List files or request device info. No reply? Check cable, permission, mode and serial-port ownership.
+The recording preserves the released UI, including its older target hint and
+Flipper comparison text. Use the explicit Demo button for this synthetic example;
+see [the comparison](../docs/COMPARISON.md) for scoped capability claims.
 
-## Update and recover
+## Add the NFC dictionaries
 
-[Watch the illustrated video](https://1vcian.me/Brucia/media/updates.mp4) ·
-[Captions](https://1vcian.me/Brucia/media/updates.vtt)
+[Watch the import](https://1vcian.me/Brucia/media/nfc-dictionaries.mp4) ·
+[Captions](https://1vcian.me/Brucia/media/nfc-dictionaries.vtt)
 
-1. **Prepare the pair.** Read the release notes. Preserve required files. Stop tools and use stable power. APK installation and firmware flashing are separate.
+1. Open NFC and scroll to the MIFARE dictionary controls.
+2. Tap **Add Flipper Classic dictionary**. In this recording it loads 2,038 keys.
+3. Tap **Add Proxmark3 Classic dictionary**. It adds 473 new keys, bringing the
+   deduplicated total to 2,511. Upstream lists may change.
 
-2. **Use Updates.** Select the correct board and release. Review verification status. Keep USB connected while the app writes and verifies firmware.
+These are actual HTTPS downloads in the app. Keys stay in the app session;
+importing does not start a tag operation. They apply to MIFARE Classic, not
+NTAG, Ultralight or DESFire. See [NFC](Features-NFC.md) for the hardware workflow.
 
-3. **Reconnect and confirm.** After completion, reconnect to companion mode. Check the reported firmware version and a benign device-info reply.
+The [wordlists release](https://github.com/1vcian/Brucia/releases/tag/wordlists)
+links both NFC sources and the Probable WPA lists, alongside its existing
+RockYou and SecLists assets.
 
-4. **If flashing fails.** Keep the error and version details. Follow the board bootloader procedure and recover with the matching image. Never treat an incomplete upload as success.
+## Connect hardware next
 
-## Files and scripts
+Follow [Getting Started](Getting-Started.md) for installation and USB connection,
+[Features](Features.md) to choose a tool, and [FAQ](FAQ.md)
+for connection or update failures. Files, scripts, audio, Remote and physical
+radio/tag operations need their own device checks; they are not demonstrated here.
 
-[Watch the illustrated video](https://1vcian.me/Brucia/media/files-scripts.mp4) ·
-[Captions](https://1vcian.me/Brucia/media/files-scripts.vtt)
-
-1. **List device storage.** Connect over USB and open Files. A failed listing is not an empty folder. Confirm the path and selected storage before changing files.
-
-2. **Try a harmless file.** Use a small test file. Transfer it, open the returned copy and compare its content. Keep required device files backed up.
-
-3. **Review before running.** Scripts run on the device. Read the code first, use a harmless local script and stop it when done. Third-party store downloads have separate trust limits.
-
-4. **Check recovery.** Test disconnect and reconnect with disposable files. Inspect the visible result; do not infer a completed transfer from progress alone.
-
-## Wi-Fi and BLE observations
-
-[Watch the illustrated video](https://1vcian.me/Brucia/media/observations.mp4) ·
-[Captions](https://1vcian.me/Brucia/media/observations.vtt)
-
-1. **Use a known lab.** Open Wi-Fi or BLE observations for equipment you own or are permitted to test. Check capabilities and start one observation task.
-
-2. **Confirm actual input.** Look for your known device and changing timestamps. Preview fixtures and a connected badge are not evidence of received radio events.
-
-3. **Save a useful result.** Export a small observation set and inspect the file. Remove personal identifiers before sharing a report or screenshot.
-
-4. **Stop and reconnect.** Stop the task and confirm its result. Check rotation and reconnect separately. BLE advertisements do not guarantee a popup on another operating system.
-
-## Radio, NFC and IR checks
-
-[Watch the illustrated video](https://1vcian.me/Brucia/media/peripherals.mp4) ·
-[Captions](https://1vcian.me/Brucia/media/peripherals.vtt)
-
-1. **Check the actual module.** Open the feature guide and inspect runtime capabilities. CC1101, PN532 and IR have different limits. Optional radios need compatible hardware.
-
-2. **Start with inspection.** Use a saved sample, a disposable tag or a known lab signal. Read the selected protocol and operation before proceeding. Write and erase change the target.
-
-3. **Separate reply from effect.** An accepted command does not prove a receiver reacted. Physical output requires a controlled test and an independent observation.
-
-4. **Record the boundary.** Record app and firmware versions, peripheral, expected result and observed result. Keep blocked and not-run tests distinct from passes.
-
-## Audio and Remote
-
-[Watch the illustrated video](https://1vcian.me/Brucia/media/audio-remote.mp4) ·
-[Captions](https://1vcian.me/Brucia/media/audio-remote.vtt)
-
-1. **Check audio availability.** Inspect microphone and speaker capabilities. Start with a saved audio sample or a quiet, controlled input; keep output volume low.
-
-2. **One owner at a time.** Stop audio before switching to another audio function. FM needs separate hardware; a DSP unit test is not a physical sound-path test.
-
-3. **Enter Remote deliberately.** Stop other operations before starting Remote. Wait for confirmed mode change. The app must show a failure if entry is not acknowledged.
-
-4. **Return to companion.** Stop Remote, wait for reconnection and request device information again. Test disconnect and rotation separately; record failures with versions.
-
-## Evidence and further checks
-
-Use the release notes and TESTS.md in the repository for exact revisions and results.
-Optional Ethernet, FM, LoRa and NRF24 workflows need compatible peripherals.
-BLE peer popups, RF receiver responses, NFC writes and physical audio are separate
-acceptance checks. A simulator, UI preview or completed command does not prove them.
-
-[Media provenance](https://1vcian.me/Brucia/media/manifest.json)
+[Recording provenance and hashes](https://1vcian.me/Brucia/media/manifest.json) ·
+[Verification checklist](../TESTS.md)
