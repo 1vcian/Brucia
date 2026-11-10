@@ -1477,10 +1477,13 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }, onLoaded = { target ->
-            loadedHandshake = target.handshake
-            loadedPmkid = target.pmkid
-            _handshakeInfo.value = target.handshake?.let { "${it.ssid} (WPA${it.keyVersion}) [pulled]" }
-                ?: "${target.pmkid?.ssid} (PMKID) [pulled]"
+            // A completed capture installs its target atomically and takes the slot from any import
+            // still in flight (its older token is then dropped when it tries to commit).
+            wifiTarget.set(
+                WifiTargetStore.Target(target.handshake, target.pmkid),
+                target.handshake?.let { "${it.ssid} (WPA${it.keyVersion}) [pulled]" }
+                    ?: "${target.pmkid?.ssid} (PMKID) [pulled]",
+            )
             // Keep each accepted capture independently; delayed writes cannot overwrite a newer one.
             viewModelScope.launch(Dispatchers.IO) {
                 try {
@@ -3205,8 +3208,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val rules: StateFlow<Boolean> = _rules.asStateFlow()
     fun setRules(on: Boolean) { _rules.value = on }
 
-    @Volatile private var loadedHandshake: Handshake? = null
-    @Volatile private var loadedPmkid: PmkidTarget? = null
+    // One generation-fenced source of truth for the imported crack target and its label (F38).
+    // The latest import/pull/capture owns the slot; a slow or failed one cannot relabel or revive
+    // a target set by a newer operation. Run and export read it; the screen shows wifiTarget.info.
+    private val wifiTarget = WifiTargetStore()
 
     private val fileTransfers by lazy { FileTransferService(viewModelScope, { fileLink() }) }
 
@@ -3233,8 +3238,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     /** The latest manual import owns the target. Older/cancelled pulls cannot overwrite it. */
-    fun pullFile(path: String, ssidHint: String = "", onDone: ((Boolean) -> Unit)? = null): Job =
-        fileTransfers.submit("capture-import", onDiscard = { it: PulledCapture -> it.file.delete() }, work = {
+    fun pullFile(path: String, ssidHint: String = "", onDone: ((Boolean) -> Unit)? = null): Job {
+        val token = wifiTarget.begin()
+        return fileTransfers.submit("capture-import", onDiscard = { it: PulledCapture -> it.file.delete() }, work = {
             val bytes = read(path)
             val name = path.substringAfterLast('/').ifEmpty { "pulled.bin" }
             if (name == "." || name == "..") throw IOException("Invalid file name")
@@ -3268,13 +3274,17 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             val pulled = result.getOrNull()
             if (pulled != null) {
                 if (pulled.handshake != null || pulled.pmkid != null) {
-                    loadedHandshake = pulled.handshake
-                    loadedPmkid = pulled.pmkid
+                    // A capture: install it as the target, iff this pull still owns the slot.
+                    wifiTarget.commit(token, WifiTargetStore.Target(pulled.handshake, pulled.pmkid), pulled.message)
+                } else {
+                    // A general (non-capture) file pull: report what was downloaded but keep the
+                    // loaded target untouched. Fenced so a superseded pull cannot relabel a newer one.
+                    wifiTarget.touchInfo(token, pulled.message)
                 }
-                _handshakeInfo.value = pulled.message
-            } else _handshakeInfo.value = result.exceptionOrNull()?.message ?: "File download failed"
+            } else wifiTarget.touchInfo(token, result.exceptionOrNull()?.message ?: "File download failed")
             onDone?.invoke(pulled?.let { it.handshake != null || it.pmkid != null } == true)
         }
+    }
 
     /** Read/verify before opening the document. Provider writes cannot be rolled back on cancellation. */
     fun pullFileToUri(path: String, uri: Uri, onDone: (Boolean, String) -> Unit): Job =
@@ -3337,15 +3347,10 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private val _handshakeInfo = MutableStateFlow<String?>(null)
-    val handshakeInfo: StateFlow<String?> = _handshakeInfo.asStateFlow()
+    val handshakeInfo: StateFlow<String?> = wifiTarget.info
 
     /** Export the loaded target to hashcat 22000, or null if nothing is loaded. */
-    fun exportHashcat(): String? {
-        loadedPmkid?.let { return Hc22000.export(it) }
-        loadedHandshake?.let { return Hc22000.export(it) }
-        return null
-    }
+    fun exportHashcat(): String? = wifiTarget.export()
 
     /** Load a PMKID (hashcat 16800) or a full hashcat 22000 line (WPA*01/WPA*02). */
     fun importPmkid(line: String) {
@@ -3353,37 +3358,39 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             val r = Hc22000.parse(line)
             if (r != null) {
                 val (hs, pm) = r
-                if (hs != null) { loadedHandshake = hs; loadedPmkid = null; _handshakeInfo.value = "${hs.ssid} (WPA${hs.keyVersion}) [22000]" }
-                else if (pm != null) { loadedPmkid = pm; loadedHandshake = null; _handshakeInfo.value = "${pm.ssid} (PMKID) [22000]" }
+                when {
+                    hs != null -> wifiTarget.set(WifiTargetStore.Target(handshake = hs), "${hs.ssid} (WPA${hs.keyVersion}) [22000]")
+                    pm != null -> wifiTarget.set(WifiTargetStore.Target(pmkid = pm), "${pm.ssid} (PMKID) [22000]")
+                    else -> wifiTarget.set(null, "invalid 22000 line")
+                }
                 return
             }
-            _handshakeInfo.value = "invalid 22000 line"
+            wifiTarget.set(null, "invalid 22000 line")
             return
         }
         val t = Pmkid.parse(line)
-        if (t != null) {
-            loadedPmkid = t
-            loadedHandshake = null
-            _handshakeInfo.value = "${t.ssid} (PMKID)"
-        } else {
-            _handshakeInfo.value = "invalid PMKID line"
-        }
+        if (t != null) wifiTarget.set(WifiTargetStore.Target(pmkid = t), "${t.ssid} (PMKID)")
+        else wifiTarget.set(null, "invalid PMKID line")
     }
 
     /** Import a .pcap captured by the device and extract the WPA handshake. */
     fun importPcap(uri: Uri) {
+        // Claim the slot now, synchronously: a later import/pull/capture gets a higher token and
+        // this background parse, however slow, is dropped if it is no longer the latest (F38).
+        val token = wifiTarget.begin()
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val bytes = getApplication<Application>().contentResolver.openInputStream(uri)!!
                     .use { app.brucia.BoundedImport.read(it, app.brucia.wifi.PcapDissector.MAX_CAPTURE_BYTES.toLong()) }
                 val hs = HandshakeParser.parse(bytes)
-                loadedHandshake = hs
-                if (hs != null) loadedPmkid = null
-                _handshakeInfo.value = hs?.let { "${it.ssid} (WPA${it.keyVersion})" } ?: "no handshake found in file"
+                // No handshake is a failed import: commit no target, so a previously loaded PMKID
+                // is cleared instead of silently surviving under a "no handshake" label.
+                wifiTarget.commit(token, hs?.let { WifiTargetStore.Target(handshake = it) },
+                    hs?.let { "${it.ssid} (WPA${it.keyVersion})" } ?: "no handshake found in file")
             } catch (e: app.brucia.ImportTooLargeException) {
-                _handshakeInfo.value = "file too large (max 32 MiB)"
+                wifiTarget.commit(token, null, "file too large (max 32 MiB)")
             } catch (e: Exception) {
-                _handshakeInfo.value = "read error"
+                wifiTarget.commit(token, null, "read error")
             }
         }
     }
@@ -3471,7 +3478,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun crackWithWordlist(name: String) {
         val total = _wordlists.value.firstOrNull { it.name == name }?.lines ?: 0
-        dictionaryTest.start(loadedHandshake, loadedPmkid, total, name, _rules.value) {
+        val t = wifiTarget.current()
+        dictionaryTest.start(t?.handshake, t?.pmkid, total, name, _rules.value) {
             WordlistStore.file(getApplication(), name).bufferedReader()
         }
     }
@@ -3480,7 +3488,8 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun crackBundled(asset: String, note: String = asset) {
         val total = _bundledWordlists.value.firstOrNull { it.asset == asset }?.lines ?: 0
-        dictionaryTest.start(loadedHandshake, loadedPmkid, total, note, _rules.value) {
+        val t = wifiTarget.current()
+        dictionaryTest.start(t?.handshake, t?.pmkid, total, note, _rules.value) {
             getApplication<Application>().assets.open(asset).bufferedReader()
         }
     }
