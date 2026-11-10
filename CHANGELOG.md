@@ -7,6 +7,9 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+Changes after the 0.1.12 release commit `21b8f80d`. They are not in any published APK or
+firmware: the 0.1.12 APK still downloads the four new dictionaries from their upstream URLs.
+
 - Dictionary downloads now use Brucia-hosted copies of Probable WPA and
   Flipper/Proxmark3 Classic lists in the wordlists release. Pinned source revisions,
   hashes and complete license texts accompany the four unchanged data files.
@@ -15,6 +18,39 @@ that offloads computation to the phone. Format loosely follows
   synthetic WPA demo and NFC dictionary imports. Replaced six text-slide videos;
   emulator provenance and captions are included. The wordlists release now links
   the four new upstream dictionaries.
+- App Store installer (backlog F35, residual): the bootstrap download has a 60 s overall
+  budget (a slow or trickling server fails with "download took too long" and any previous
+  install is kept), and the certificate validity dates the device's TLS stack does not check
+  are now checked after the handshake: notAfter always against the later of the firmware
+  build time and a synced clock, notBefore only with a clock read from NTP (otherwise the
+  result says start dates were not checked). The store script's own plain-HTTP catalog and
+  app downloads are unchanged. Host tests of the portable policy only; not built into a
+  release or checked on a device.
+- Imports (F36/F37): a manual wordlist import stages to a temporary file (at most 512 MiB,
+  content-checked) and replaces the list only when complete, so a failed or cancelled import
+  keeps the previous list; Cancel and a 30-minute total limit also end a read blocked in the
+  file provider. An import and a download of the same list cannot run together. IR imports
+  run off the main thread with a 4 MiB limit; manual PCAP imports read at most 32 MiB. JVM
+  tests only; not checked on a phone.
+- BLE console (F39): callbacks, waits and timeouts are bound to the connection they were
+  started for, so a late event of an old session cannot act on a new one; a failed chunk ends
+  its line, and a possibly partial line ends the session with the reason. JVM tests with a
+  fake link only; not checked on a phone or device.
+- Dictionary transfers (F41/F42): Cancel and total time limits close a stalled or trickling
+  download or provider read; every byte is content-checked, not only the start; pinned sources
+  (Probable WPA and the two NFC dictionaries) are checked for size and SHA-256 while streaming,
+  and a mismatch keeps the previous list. JVM tests only; not checked on a phone.
+- Soak tooling (F43): `tools/hw_acceptance.py --require-events STREAM[:MIN]` reports radio
+  coverage (sufficient / insufficient / not run) separately from the link verdict; a soak that
+  saw no stream events can no longer be cited as radio-traffic evidence. Host tests only.
+
+## [0.1.12] - 2026-11-10
+
+Release commit `21b8f80d`. Verification recorded in the release notes: automated host and
+Android checks, lint, T-Embed firmware build and signed APK build in the release pipeline; the
+four new upstream downloads checked on the development host. Phone download/import/
+cancellation/rotation and physical MIFARE Classic key checks were NOT run; Mac benchmarks are
+not Android performance figures.
 
 - Dictionaries: added Probable WPA top 4,800 / 204k alongside RockYou and SecLists,
   plus on-demand Flipper and Proxmark3 MIFARE Classic dictionaries in NFC. Imports
@@ -39,9 +75,23 @@ that offloads computation to the phone. Format loosely follows
   setup/recovery tutorials, refreshed public-site copy, and six captioned illustrated videos.
   Media distinguishes Compose fixture previews and instructions from physical hardware evidence;
   source/output hashes and a repeatable renderer are included. No new hardware acceptance claimed.
+
+## [0.1.11] - 2026-11-09
+
+Release commit `aa19f9b2`. Release notes: not yet verified on hardware. (They also repeat the
+Spam IR entry, which first shipped in 0.1.10.)
+
+- Repository is now public as 1vcian/Brucia, site https://1vcian.me/Brucia/. Firmware, app
+  updater, web flasher and docs point to the new name. Apps from earlier versions still find
+  this update through GitHub's redirect.
 - App Store install (F35 follow-up): the downloaded script is written with storage sync errors
   checked and read back before it replaces the old one; if the old script cannot be put back it
   stays in `App Store.js.bak`, an error says so, and the next install attempt restores it.
+
+## [0.1.10] - 2026-11-08
+
+Release commit `09ef4a0f`. Release notes: not yet verified on hardware.
+
 - App: IR power spam is also in the Spam category ("Spam IR" tile and an IR section in the
   Spam hub). It stays on the IR screen too; both drive the same run, so Stop works from either.
 - From upstream Bruce (dev branch): ESP-NOW hardening (short or malformed frames are dropped,
@@ -63,6 +113,24 @@ that offloads computation to the phone. Format loosely follows
   service and requires pairing with the 6-digit PIN the device shows; only the paired phone can run
   commands or see their output. The app has a new Tools > BLE console. Before, the BLE API accepted
   commands from any nearby device without pairing.
+
+## [0.1.9] - 2026-11-07
+
+Release commit `c41bca36`. Release notes: host-tested (Python 312, including download/storage
+fault tests and TLS checks) and built for T-Embed CC1101 and Cardputer. Not checked on a
+device: App Store install over Wi-Fi, plus the open checks from 0.1.8. The store script
+itself still downloads its catalog and apps over plain HTTP.
+
+- App Store installer: the download is now verified against pinned root certificates (it used to
+  accept any server), and the script is installed only when it arrived complete and was fully
+  written; an interrupted download or full storage shows an error and keeps any previous install.
+
+## [0.1.8] - 2026-11-07
+
+Release commit `43f2972d`. Release notes: host-tested (Kotlin 1120, Python 306) and firmware
+built for T-Embed CC1101 and Cardputer. On-device checks pending: LoRa disconnect, Remote
+failed start, IR blast, FM owner, App Store install.
+
 - Follow-up hardening of the 0.1.7 stop/IR work (host-tested; transmit paths still need a device
   check):
   - IR power spam / jam detect / LoRa receive: a Stop can no longer land on the *next* run - a
@@ -84,9 +152,14 @@ that offloads computation to the phone. Format loosely follows
 - App Store: the menu entry is now "Install Bruce App Store" and shows, before installing, that it
   is the Bruce community store on a third-party host whose apps download over plain HTTP. The
   store address is now set in `brand.json` like the other links.
-- App Store installer: the download is now verified against pinned root certificates (it used to
-  accept any server), and the script is installed only when it arrived complete and was fully
-  written; an interrupted download or full storage shows an error and keeps any previous install.
+
+## [0.1.7] - 2026-11-06
+
+Release commit `33494d91`; its notes carry no verification statement. The feature commit
+`1db4b4d8` records Kotlin 1105 and Python 305 tests, firmware static checks and mock e2e, the
+T-Embed CC1101 firmware built and flashed, and a passive device acceptance (busy SUB 409, idle
+stops) PASS. The IR blast and the FM owner were not checked on a device. The F23 follow-up soak
+below is link evidence only (zero radio-stream events).
 
 - New IR power spam (authorized use only): `ir_power_spam` blasts the power-off codes for TVs,
   projectors, audio and more - both regions (NA + EU) and the universal parsed + raw tables - and
@@ -129,15 +202,7 @@ that offloads computation to the phone. Format loosely follows
     pcap) show "Export failed" on unavailable or full storage instead of crashing, fall back to
     internal storage when external is missing, and never share a partial file.
 
-- Companion frames are now emitted atomically and completely (backlog F23; firmware change, needs a
-  build and a clean hardware re-soak). `writeFrame()` had two framing-integrity defects behind the
-  2026-11-06 soak corruption (stray non-frame bytes, an undecodable frame, a tx/rx counter mismatch;
-  the app resynced, no crash or leak):
-  - Cross-task interleave: the length prefix, payload and flush were written with no lock, so a
-    stream EVENT (wifi.sta, wifi.probe, subghz.raw, ...) emitted from another task could interleave
-    its bytes with a response. A recursive FreeRTOS mutex now wraps the whole emission, so two tasks
-    can never interleave. No emitter runs in an ISR (the RMT and Wi-Fi promiscuous callbacks only
-    queue/ring-buffer; frames are emitted later from the loop), so blocking on the mutex is safe.
+- Companion frames, follow-up to 0.1.6 (backlog F23; firmware):
   - Partial writes: `Serial.write(buf, len)` is not guaranteed to accept all `len` bytes - on the
     T-Embed (`ARDUINO_USB_MODE=1`, so `Serial` is HWCDC) and on the TinyUSB path (USBCDC) it returns
     a short count under host backpressure (Arduino Stream::write contract; the classic-ESP32 UART path
@@ -188,6 +253,37 @@ that offloads computation to the phone. Format loosely follows
   does not stop it. Stop now reports honestly: it always cancels the remaining bursts, but a burst
   already sent to the device is on air and cannot be recalled, so the status says so instead of
   claiming the whole sweep stopped. No new transmit capability.
+
+## [0.1.6] - 2026-11-06
+
+Release commit `354a32db`. Release notes: verified on the T-Embed CC1101 over USB (acceptance
+suite, script control and a clean 40-minute link soak); radio transmit/receive still needs
+case-by-case field testing. The 40-minute soak recorded zero radio-stream events (TESTS.md),
+so it is link evidence only. Entries below that say "not yet checked on hardware" were
+written before that session; only the checks named here were run on the device.
+
+- Companion frames are now emitted atomically and completely (backlog F23; firmware change, needs a
+  build and a clean hardware re-soak). `writeFrame()` had two framing-integrity defects behind the
+  2026-11-06 soak corruption (stray non-frame bytes, an undecodable frame, a tx/rx counter mismatch;
+  the app resynced, no crash or leak):
+  - Cross-task interleave: the length prefix, payload and flush were written with no lock, so a
+    stream EVENT (wifi.sta, wifi.probe, subghz.raw, ...) emitted from another task could interleave
+    its bytes with a response. A recursive FreeRTOS mutex now wraps the whole emission, so two tasks
+    can never interleave. No emitter runs in an ISR (the RMT and Wi-Fi promiscuous callbacks only
+    queue/ring-buffer; frames are emitted later from the loop), so blocking on the mutex is safe.
+  - Partial writes: `Serial.write(buf, len)` is not guaranteed to accept all `len` bytes - the
+    ESP32-S3 USB-Serial-JTAG path (HWCDC) and the TinyUSB path (USBCDC) return a short count under
+    host backpressure (Arduino Stream::write contract; the classic-ESP32 UART path always writes
+    all). The code ignored both `Serial.write` return values, so a short write truncated the length
+    prefix or the payload and desynced the stream even with a single writer. A new bounded `writeAll`
+    loops on the return value, writing the remainder with a 1 ms yield up to a 2 s per-frame deadline
+    so a vanished host cannot wedge the companion loop; a frame that still cannot be completed is left
+    torn (link already dead) and is not counted in `tx_frames`.
+  The wire format is unchanged. Host test `tools/test_firmware_frame_lock.py` compiles the real
+  `writeFrame`/`writeAll` and proves (a) two concurrent writers never interleave with the lock and do
+  interleave once it is removed, and (b) a sink that accepts only a few bytes per write still yields
+  the complete framed stream with `writeAll` but a truncated one once it is reduced to the pre-fix
+  single write.
 - Stops, results and parsers (batch 18, software only; firmware changes need a build and the
   hardware checks H16-H19 in `docs/audit/radio.md`):
   - A stop could start the operation it named. Several companion commands were matched by a bare
