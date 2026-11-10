@@ -10,6 +10,12 @@ Soak (--soak, seconds-long real-time runs): a healthy soak PASSes with a CSV tim
 the mock leaves companion mode after 1 s without a frame (keepalive proven, and a too-slow
 keepalive fails); a simulated heap leak, reboot (uptime/counters reset) and device noise are
 findings that FAIL the soak; Ctrl-C during a stream or an upload cleans up and still reports.
+Radio coverage (F43, --require-events): the link verdict and the coverage are separate; with a
+requirement, zero events (mock emission disabled, nothing made to emit), too few events, a Ctrl-C
+before the planned minutes, a stream absent from CAPS or never started leave the radio gate NOT MET
+(exit 3, or 1/130 when the link also FAILed/was interrupted); enough events MET (exit 0); no
+requirement keeps a link PASS with coverage NOT REQUIRED. RadioCoverageTest (unittest) covers the
+verdict function, the options and the zero-events run for `python3 -m unittest`.
 Link tests: the reader resyncs after device text between/inside frames (counted, reported as a
 warning, never fatal) and upload chunks follow CAPS rx_max (legacy 768 without it) so they fit a
 simulated small RX queue that drops bytes, while oversized chunks reproduce the hardware loss.
@@ -17,6 +23,7 @@ The opt-in script_stop check PASSes on a mock that stops the run and FAILs on mo
 ignores the stop or stays `interpreter busy` after it (SKIP on LITE). This proves the runner, not the device.
 
     python3 tools/test_hw_acceptance.py
+    python3 -m unittest tools.test_hw_acceptance -v   # RadioCoverageTest only
 """
 import contextlib
 import io
@@ -28,6 +35,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -473,7 +481,10 @@ def test_bad_args():
     for argv in (["--streams", "wifi.ap"], ["--streams", "ble.scan"], ["--only", "tx"], ["--only", "soak"],
                  ["--soak", "0"], ["--soak", "5", "--soak-keepalive", "60"], ["--soak", "5", "--soak-keepalive", "0"],
                  ["--soak", "5", "--streams", "wifi.ap"], ["--soak", "5", "--stream-secs", "45"],
-                 ["--script-stop-after", "0"], ["--script-stop-bound", "30"]):
+                 ["--script-stop-after", "0"], ["--script-stop-bound", "30"],
+                 ["--require-events", "wifi.probe"], ["--soak", "5", "--require-events", "wifi.ap"],
+                 ["--soak", "5", "--require-events", "wifi.probe:0"],
+                 ["--soak", "5", "--require-events", "wifi.probe:many"]):
         try:
             with contextlib.redirect_stderr(io.StringIO()):
                 hw.parse_args(["--port", "x"] + argv)
@@ -694,6 +705,205 @@ def test_soak_interrupt_upload(tmp):
           f"code={code} {rep['cleanup']} {soak_files(dev)}")
 
 
+# ---------------------------------------------------------------------------------------------
+# Radio coverage (F43): link verdict and radio coverage are separate verdicts
+# ---------------------------------------------------------------------------------------------
+
+
+def coverage_run(tmp, extra, emit=True, runner_cls=None):
+    """A short soak with only the soak check; emit=False disables the mock's synthetic events
+    (the radio is quiet: nothing is made to emit)."""
+    original = hw.Runner
+    if runner_cls is not None:
+        hw.Runner = runner_cls
+    try:
+        with mock() as (dev, path):
+            if not emit:
+                dev.emit_interval = 1e20
+            code, rep, paths, log = run_runner(path, SOAK + ["--only", "soak"] + extra, tmp)
+            return dev, code, rep, paths, log
+    finally:
+        hw.Runner = original
+
+
+def test_coverage_zero_events(tmp):
+    dev, code, rep, paths, log = coverage_run(tmp, ["--require-events", "wifi.probe"], emit=False)
+    cov, s = rep["radio_coverage"], rep["summary"]
+    check("coverage zero events: link PASS but coverage INSUFFICIENT, gate NOT MET, exit 3",
+          code == hw.EXIT_COVERAGE == 3 and s["result"] == "PASS" and s["coverage"] == "INSUFFICIENT"
+          and s["gate"] == "NOT MET" and cov["streams"]["wifi.probe"]["events"] == 0
+          and cov["streams"]["wifi.probe"]["verdict"] == "INSUFFICIENT", f"code={code} {s} {cov}")
+    check("coverage zero events: nothing transmitting sent, only wifi.probe SUBs",
+          all_sent_allowed(dev) and {d["stream"] for d in dev.received_subs} == {"wifi.probe"})
+    md = Path(paths[1]).read_text()
+    check("coverage zero events: Markdown states INSUFFICIENT and NOT MET with the per-stream table",
+          "## Radio coverage" in md and "| wifi.probe | INSUFFICIENT | 0 | 1 |" in md and "**NOT MET**" in md
+          and "radio gate NOT MET" in log, md[:600])
+
+
+def test_coverage_few_events(tmp):
+    _, code, rep, _, _ = coverage_run(tmp, ["--require-events", "wifi.probe:1000"])
+    e = rep["radio_coverage"]["streams"]["wifi.probe"]
+    check("coverage few events: some events but below the minimum -> INSUFFICIENT, exit 3",
+          code == 3 and rep["summary"]["result"] == "PASS" and 0 < e["events"] < 1000
+          and e["verdict"] == "INSUFFICIENT" and "< required 1000" in e["reason"], f"code={code} {e}")
+
+
+def test_coverage_sufficient(tmp):
+    _, code, rep, paths, _ = coverage_run(tmp, ["--require-events", "wifi.probe:2", "--stream-secs", "0.7"])
+    cov = rep["radio_coverage"]
+    check("coverage sufficient: enough events over the full duration -> SUFFICIENT, gate MET, exit 0",
+          code == 0 and rep["summary"]["result"] == "PASS" and cov["overall"] == "SUFFICIENT"
+          and rep["summary"]["gate"] == "MET" and cov["streams"]["wifi.probe"]["events"] >= 2
+          and cov["duration"]["verdict"] == "SUFFICIENT", f"code={code} {cov}")
+    check("coverage sufficient: soak summary has effective minutes >= planned and started cycles",
+          rep["soak"]["summary"]["effective_min"] >= rep["soak"]["summary"]["planned_min"]
+          and rep["soak"]["summary"]["stream_started"]["wifi.probe"] >= 1, str(rep["soak"]["summary"])[:300])
+
+
+def test_coverage_interrupted(tmp):
+    class Interrupting(hw.Runner):
+        calls = 0
+
+        def stream_listen(self, stream, collect):
+            Interrupting.calls += 1
+            if Interrupting.calls == 3:
+                raise KeyboardInterrupt
+            super().stream_listen(stream, collect)
+
+    _, code, rep, _, _ = coverage_run(tmp, ["--soak", "1", "--require-events", "wifi.probe:1"],
+                                      runner_cls=Interrupting)
+    cov = rep["radio_coverage"]
+    check("coverage Ctrl-C: events seen but the run ended early -> duration and coverage INSUFFICIENT",
+          code == 130 and cov["overall"] == "INSUFFICIENT" and cov["duration"]["verdict"] == "INSUFFICIENT"
+          and cov["duration"]["effective_min"] < 1 and rep["summary"]["gate"] == "NOT MET", f"code={code} {cov}")
+
+
+def test_coverage_stream_absent(tmp):
+    # The mock's CAPS has no cc1101: subghz.raw is required but cannot run.
+    _, code, rep, _, _ = coverage_run(tmp, ["--require-events", "subghz.raw"])
+    cov = rep["radio_coverage"]
+    e = cov["streams"]["subghz.raw"]
+    check("coverage stream absent from CAPS: NOT RUN, gate NOT MET, exit 3",
+          code == 3 and rep["summary"]["result"] == "PASS" and e["verdict"] == "NOT RUN"
+          and "CAPS" in e["reason"] and cov["overall"] == "NOT RUN"
+          and "subghz.raw" in rep["soak"]["config"]["streams_requested"], f"code={code} {cov}")
+
+
+def test_coverage_never_started(tmp):
+    class Refusing(hw.Runner):
+        """SUB ON answered with an ERR (as a busy radio would): the stream never starts."""
+
+        def stream_cycle(self, stream, info):
+            real, seen = self.link.reply, []
+
+            def reply(mid, timeout, on_other=None):
+                f = real(mid, timeout, on_other)
+                seen.append(f)
+                return {"t": hw.ERR, "d": {"code": 409, "msg": "busy (simulated)"}} if len(seen) == 1 else f
+            self.link.reply = reply
+            try:
+                return super().stream_cycle(stream, info)
+            finally:
+                self.link.reply = real
+
+    _, code, rep, _, _ = coverage_run(tmp, ["--require-events", "wifi.probe"], runner_cls=Refusing)
+    e = rep["radio_coverage"]["streams"]["wifi.probe"]
+    check("coverage stream never started: NOT RUN, link FAIL (SUB not ACKed), gate NOT MET",
+          code == 1 and e["verdict"] == "NOT RUN" and e["started"] == 0 and e["cycles"] >= 1
+          and "never started" in e["reason"] and rep["summary"]["gate"] == "NOT MET", f"code={code} {e}")
+
+
+def test_coverage_not_required(tmp):
+    _, code, rep, paths, _ = coverage_run(tmp, [], emit=False)
+    md = Path(paths[1]).read_text()
+    check("no requirement: zero events, link PASS, exit 0, coverage NOT REQUIRED stated in JSON and Markdown",
+          code == 0 and rep["summary"]["result"] == "PASS" and rep["summary"]["coverage"] == "NOT REQUIRED"
+          and rep["summary"]["gate"] == "NOT REQUIRED" and "radio coverage NOT REQUIRED" in soak_of(rep)["reason"]
+          and "Radio coverage: **NOT REQUIRED**" in md and "not evidence under radio traffic" in md,
+          f"code={code} {rep['summary']}")
+
+
+def test_coverage_args():
+    o = hw.parse_args(["--port", "x", "--soak", "5", "--streams", "wifi.probe",
+                       "--require-events", "wifi.sta:7,subghz.raw", "--require-events", "wifi.probe:3"])
+    check("--require-events: parsed with defaults, required streams added to --streams",
+          o.require_events == {"wifi.sta": 7, "subghz.raw": 1, "wifi.probe": 3}
+          and o.streams == ["wifi.probe", "wifi.sta", "subghz.raw"], f"{o.require_events} {o.streams}")
+    out = []
+    hw.run(["--port", "/dev/brucia-no-such-port", "--dry-run", "--soak", "5", "--require-events", "wifi.sta:4"],
+           log=out.append)
+    check("--require-events dry run: states the requirement", "radio coverage required: wifi.sta >= 4" in "\n".join(out))
+
+
+class RadioCoverageTest(unittest.TestCase):
+    """radio_coverage() verdicts (pure) and the zero-events soak against the mock (F43)."""
+
+    @staticmethod
+    def summary(**kw):
+        sm = {"stream_events": {"wifi.probe": 0}, "stream_cycles": {"wifi.probe": 3},
+              "stream_started": {"wifi.probe": 3}, "streams_unsupported": [], "interrupted": False,
+              "stopped": None, "effective_min": 1.02}
+        sm.update(kw)
+        return sm
+
+    def test_not_required(self):
+        cov = hw.radio_coverage({}, 1, self.summary())
+        self.assertEqual(cov["overall"], "NOT REQUIRED")
+        self.assertIn("NOT RUN", cov["reasons"][0])
+
+    def test_zero_events_insufficient(self):
+        cov = hw.radio_coverage({"wifi.probe": 1}, 1, self.summary())
+        self.assertEqual((cov["overall"], cov["streams"]["wifi.probe"]["verdict"]), ("INSUFFICIENT", "INSUFFICIENT"))
+
+    def test_few_events_insufficient(self):
+        cov = hw.radio_coverage({"wifi.probe": 10}, 1, self.summary(stream_events={"wifi.probe": 9}))
+        self.assertEqual(cov["overall"], "INSUFFICIENT")
+
+    def test_sufficient(self):
+        cov = hw.radio_coverage({"wifi.probe": 10}, 1, self.summary(stream_events={"wifi.probe": 10}))
+        self.assertEqual((cov["overall"], cov["duration"]["verdict"]), ("SUFFICIENT", "SUFFICIENT"))
+        self.assertEqual(cov["reasons"], [])
+
+    def test_short_or_interrupted_or_stopped(self):
+        ev = {"wifi.probe": 50}
+        for kw in ({"effective_min": 0.5}, {"interrupted": True}, {"stopped": "unexpected reboot"}):
+            cov = hw.radio_coverage({"wifi.probe": 1}, 1, self.summary(stream_events=ev, **kw))
+            self.assertEqual((cov["overall"], cov["duration"]["verdict"]), ("INSUFFICIENT", "INSUFFICIENT"), kw)
+
+    def test_absent_and_never_started(self):
+        cov = hw.radio_coverage({"subghz.raw": 1}, 1, self.summary(streams_unsupported=["subghz.raw"]))
+        self.assertEqual((cov["overall"], cov["streams"]["subghz.raw"]["verdict"]), ("NOT RUN", "NOT RUN"))
+        cov = hw.radio_coverage({"wifi.probe": 1, "subghz.raw": 1}, 1,
+                                self.summary(stream_events={"wifi.probe": 5}, streams_unsupported=["subghz.raw"]))
+        self.assertEqual(cov["overall"], "INSUFFICIENT")  # one stream sufficient does not cover the other
+        cov = hw.radio_coverage({"wifi.probe": 1}, 1, self.summary(stream_started={"wifi.probe": 0}))
+        self.assertEqual(cov["streams"]["wifi.probe"]["verdict"], "NOT RUN")
+        self.assertIn("never started", cov["streams"]["wifi.probe"]["reason"])
+
+    def test_soak_never_ran(self):
+        cov = hw.radio_coverage({"wifi.probe": 1}, 1, None)
+        self.assertEqual((cov["overall"], cov["duration"]["verdict"]), ("NOT RUN", "NOT RUN"))
+
+    def test_args(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            for argv in (["--require-events", "wifi.probe"], ["--soak", "1", "--require-events", "wifi.ap"],
+                         ["--soak", "1", "--require-events", "wifi.probe:0"]):
+                with self.assertRaises(SystemExit, msg=argv):
+                    hw.parse_args(["--port", "x"] + argv)
+        o = hw.parse_args(["--port", "x", "--soak", "1", "--require-events", "subghz.raw:2"])
+        self.assertEqual((o.require_events, o.streams), ({"subghz.raw": 2}, ["wifi.probe", "subghz.raw"]))
+
+    def test_zero_events_soak_does_not_pass(self):
+        """The F43 repro: a soak with emission disabled and a requirement must not pass."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dev, code, rep, _, _ = coverage_run(tmp, ["--require-events", "wifi.probe"], emit=False)
+        self.assertEqual(rep["soak"]["summary"]["stream_events"], {"wifi.probe": 0})
+        self.assertEqual(rep["summary"]["result"], "PASS")  # the link itself is healthy
+        self.assertEqual((rep["summary"]["coverage"], rep["summary"]["gate"]), ("INSUFFICIENT", "NOT MET"))
+        self.assertEqual(code, hw.EXIT_COVERAGE)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         test_allowlist()
@@ -720,6 +930,14 @@ def main():
         test_soak_noise(tmp)
         test_soak_interrupt_stream(tmp)
         test_soak_interrupt_upload(tmp)
+        test_coverage_args()
+        test_coverage_zero_events(tmp)
+        test_coverage_few_events(tmp)
+        test_coverage_sufficient(tmp)
+        test_coverage_interrupted(tmp)
+        test_coverage_stream_absent(tmp)
+        test_coverage_never_started(tmp)
+        test_coverage_not_required(tmp)
     ok = all(v for _, v in results)
     print(f"{sum(v for _, v in results)}/{len(results)} checks passed")
     print("HW ACCEPTANCE TEST PASS" if ok else "HW ACCEPTANCE TEST FAIL")
