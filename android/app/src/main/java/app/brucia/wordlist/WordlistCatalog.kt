@@ -38,6 +38,7 @@ object WordlistCatalog {
             approxBytes = 45_276L,
             entries = "4.8k",
             description = "berzerk0 / Probable-Wordlists (CC BY-SA 4.0). Popularity-ordered, 8-40 characters; general passwords filtered by length, not Wi-Fi captures.",
+            integrity = AssetIntegrity(45_276L, "5dc33214cad9a11eb926de00f5ded20b1a5fc12ba3332319e054713265a35c51"),
         ),
         DownloadableWordlist(
             name = "probable-wpa-204k.txt",
@@ -46,6 +47,7 @@ object WordlistCatalog {
             approxBytes = 2_121_750L,
             entries = "204k",
             description = "berzerk0 / Probable-Wordlists (CC BY-SA 4.0). Includes the smaller list; no need to run both. Not a guarantee of recovery.",
+            integrity = AssetIntegrity(2_121_750L, "e416890a4742481971ba6d85039e0072111c92cb46c8cb7f3f8f22b865f48bf4"),
         ),
         DownloadableWordlist(
             name = "rockyou.txt",
