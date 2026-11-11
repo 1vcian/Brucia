@@ -39,7 +39,8 @@ data class CapturedTarget(val handshake: Handshake?, val pmkid: PmkidTarget?, va
 class CaptureWorkflow(
     private val scope: CoroutineScope,
     private val connect: () -> CaptureLink?,
-    private val onLoaded: (CapturedTarget) -> Unit,
+    /** Reserve ownership synchronously at start; the returned sink belongs only to this run. */
+    private val beginImport: () -> (CapturedTarget) -> Boolean,
     private val parse: (ByteArray, String) -> Pair<Handshake?, PmkidTarget?> = { bytes, ssid ->
         val h = HandshakeParser.parse(bytes, ssid.ifEmpty { null })
         h to if (h == null) HandshakeParser.parsePmkid(bytes, ssid.ifEmpty { null }) else null
@@ -72,6 +73,7 @@ class CaptureWorkflow(
         if (link == null) { state.value = HandshakeFlow(step = "failed", message = "Connect the device over USB first."); return }
         val address = mac.chunked(2).joinToString(":")
         val duration = if (pmkid) seconds.coerceIn(5, 120) else if (seconds < 5) 30 else seconds.coerceAtMost(120)
+        val acceptTarget = beginImport()
         state.value = HandshakeFlow(true, "prepare", "Checking existing captures...", bssid, ssid)
         job = scope.launch {
             try {
@@ -144,9 +146,11 @@ class CaptureWorkflow(
                     val note = if (link.descriptorSupported) "verified by device descriptor" else "verified by listing diff"
                     synchronized(this@CaptureWorkflow) {
                         if (owner == epoch) {
-                            onLoaded(selected)
-                            state.value = state.value.copy(active = false, step = "ready",
-                                message = "Handshake loaded ($note) - ready to test.")
+                            val accepted = acceptTarget(selected)
+                            state.value = state.value.copy(active = false,
+                                step = if (accepted) "ready" else "superseded",
+                                message = if (accepted) "Handshake loaded ($note) - ready to test."
+                                    else "Capture finished; a newer target selection was kept.")
                         }
                     }
                 }

@@ -3,6 +3,7 @@ package app.brucia
 import app.brucia.files.FileEntry
 import app.brucia.session.CommandRunner
 import app.brucia.wifi.*
+import app.brucia.wardrive.WifiTargetStore
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -56,7 +57,7 @@ class CaptureWorkflowTest {
         return JSONObject().put("desc", d)
     }
     private fun service(scope: CoroutineScope, link: Link?, loaded: MutableList<CapturedTarget>) =
-        CaptureWorkflow(scope, { link }, { loaded.add(it) }, parse = { _, _ -> target() to null },
+        CaptureWorkflow(scope, { link }, { { loaded.add(it) } }, parse = { _, _ -> target() to null },
             compute = scope.virtualUnconfined)
     private suspend fun finished(service: CaptureWorkflow) {
         withTimeout(2000) { while (service.status.value.active) delay(5) }
@@ -125,7 +126,7 @@ class CaptureWorkflowTest {
     }
     @Test(timeout = 5000) fun rejectsCaptureContentForOtherApEvenWithMatchingFilename() = runVirtual {
         val link = Link().apply { after = listOf(entry()) }
-        val s = CaptureWorkflow(this, { link }, { fail("Wrong target imported") }, parse = { _, _ -> target().copy(apMac = ByteArray(6)) to null },
+        val s = CaptureWorkflow(this, { link }, { { fail("Wrong target imported"); false } }, parse = { _, _ -> target().copy(apMac = ByteArray(6)) to null },
             compute = virtualUnconfined)
         s.start(address, 6, "fixture", 20, false); finished(s)
         assertEquals("failed", s.status.value.step)
@@ -160,11 +161,62 @@ class CaptureWorkflowTest {
         val offline = service(this, null, loaded)
         offline.start(address, 6, "fixture", 20, false)
         assertEquals("failed", offline.status.value.step)
-        val blocked = CaptureWorkflow(this, { link }, { fail("Unexpected import") }, blockedReason = { "Update firmware" },
+        val blocked = CaptureWorkflow(this, { link }, { { fail("Unexpected import"); false } }, blockedReason = { "Update firmware" },
             compute = virtualUnconfined)
         blocked.start(address, 6, "fixture", 20, false)
         assertEquals("Update firmware", blocked.status.value.message)
         assertTrue(link.sent.isEmpty())
+    }
+
+    @Test(timeout = 5000) fun slowCaptureCannotOverwriteANewerManualImport() = runVirtual {
+        val store = WifiTargetStore()
+        var gate: Continuation<ByteArray>? = null
+        val link = Link().apply { after = listOf(entry()); read = { suspendCoroutine { gate = it } } }
+        val workflow = CaptureWorkflow(this, { link }, store::beginCapture,
+            parse = { _, _ -> target() to null }, compute = virtualUnconfined)
+        workflow.start(address, 6, "fixture", 20, false)
+        withTimeout(2000) { while (gate == null) delay(5) }
+        val newer = store.begin()
+        assertTrue(store.commit(newer, WifiTargetStore.Target(handshake = target().copy(ssid = "newer")), "newer"))
+        val exported = store.export()
+        gate!!.resume(byteArrayOf(2))
+        finished(workflow)
+        assertEquals("newer", store.current()?.handshake?.ssid)
+        assertEquals("newer", store.info.value)
+        assertEquals(exported, store.export())
+        assertEquals("superseded", workflow.status.value.step)
+    }
+
+    @Test(timeout = 5000) fun captureReservesSelectionBeforeItsFirstSuspension() = runVirtual {
+        val store = WifiTargetStore()
+        val oldImport = store.begin()
+        var gate: Continuation<ByteArray>? = null
+        val link = Link().apply { after = listOf(entry()); read = { suspendCoroutine { gate = it } } }
+        val workflow = CaptureWorkflow(this, { link }, store::beginCapture,
+            parse = { _, _ -> target() to null }, compute = virtualUnconfined)
+        workflow.start(address, 6, "fixture", 20, false)
+        assertFalse(store.commit(oldImport, WifiTargetStore.Target(handshake = target().copy(ssid = "old")), "old"))
+        withTimeout(2000) { while (gate == null) delay(5) }
+        gate!!.resume(byteArrayOf(2))
+        finished(workflow)
+        assertEquals("fixture", store.current()?.handshake?.ssid)
+        assertEquals("ready", workflow.status.value.step)
+    }
+
+    @Test(timeout = 5000) fun stoppedCaptureDoesNotImportWhenItsReadReturnsLate() = runVirtual {
+        val store = WifiTargetStore()
+        var gate: Continuation<ByteArray>? = null
+        val link = Link().apply { after = listOf(entry()); read = { suspendCoroutine { gate = it } } }
+        val workflow = CaptureWorkflow(this, { link }, store::beginCapture,
+            parse = { _, _ -> target() to null }, compute = virtualUnconfined)
+        workflow.start(address, 6, "fixture", 20, false)
+        withTimeout(2000) { while (gate == null) delay(5) }
+        workflow.stop()
+        store.set(WifiTargetStore.Target(handshake = target().copy(ssid = "newer")), "newer")
+        gate!!.resume(byteArrayOf(2))
+        coroutineContext[Job]!!.children.toList().joinAll()
+        assertEquals("newer", store.current()?.handshake?.ssid)
+        assertEquals("newer", store.info.value)
     }
 
     // --- features.capture_descriptor path ------------------------------------------------------
@@ -268,7 +320,7 @@ class CaptureWorkflowTest {
         val bytes = byteArrayOf(4, 5, 6)
         val link = Link().apply { descriptor = true; captureData = desc(path, bytes.size, crc32(bytes)); read = { bytes } }
         val loaded = mutableListOf<CapturedTarget>()
-        val s = CaptureWorkflow(this, { link }, { loaded.add(it) }, parse = { _, _ -> target().copy(apMac = ByteArray(6)) to null },
+        val s = CaptureWorkflow(this, { link }, { { loaded.add(it) } }, parse = { _, _ -> target().copy(apMac = ByteArray(6)) to null },
             compute = virtualUnconfined)
         s.start(address, 6, "fixture", 20, false); finished(s)
         assertEquals("failed", s.status.value.step); assertTrue(loaded.isEmpty())
@@ -282,7 +334,7 @@ class CaptureWorkflowTest {
             read = { bytes }
         }
         val loaded = mutableListOf<CapturedTarget>()
-        val s = CaptureWorkflow(this, { link }, { loaded.add(it) }, parse = { _, _ -> null to PmkidTarget(ByteArray(16), byteArrayOf(0,17,34,51,68,85), ByteArray(6), "fixture") },
+        val s = CaptureWorkflow(this, { link }, { { loaded.add(it) } }, parse = { _, _ -> null to PmkidTarget(ByteArray(16), byteArrayOf(0,17,34,51,68,85), ByteArray(6), "fixture") },
             compute = virtualUnconfined)
         s.start(address, 6, "fixture", 15, true); finished(s)
         assertEquals("ready", s.status.value.step)

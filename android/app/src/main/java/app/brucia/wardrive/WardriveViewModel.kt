@@ -1476,22 +1476,23 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     result.bytes ?: throw java.io.IOException(result.error)
                 }
             }
-        }, onLoaded = { target ->
-            // A completed capture installs its target atomically and takes the slot from any import
-            // still in flight (its older token is then dropped when it tries to commit).
-            wifiTarget.set(
-                WifiTargetStore.Target(target.handshake, target.pmkid),
-                target.handshake?.let { "${it.ssid} (WPA${it.keyVersion}) [pulled]" }
-                    ?: "${target.pmkid?.ssid} (PMKID) [pulled]",
-            )
-            // Keep each accepted capture independently; delayed writes cannot overwrite a newer one.
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    val dir = java.io.File(getApplication<Application>().filesDir, "pulled").apply { mkdirs() }
-                    java.io.File.createTempFile("capture-", ".pcap", dir).writeBytes(target.bytes)
-                    FileRetention.prune(dir, PulledFiles.PREFIXES, PulledFiles.KEEP)
-                } catch (e: Exception) { BruciaLog.d("Capture", "Local capture copy failed: ${e.message}") }
+        }, beginImport = {
+            val accept = wifiTarget.beginCapture()
+            val receiver: (app.brucia.wifi.CapturedTarget) -> Boolean = { target ->
+                val accepted = accept(target)
+                if (accepted) {
+                    // Keep accepted captures independently; delayed writes cannot replace another.
+                    viewModelScope.launch(Dispatchers.IO) {
+                        try {
+                            val dir = java.io.File(getApplication<Application>().filesDir, "pulled").apply { mkdirs() }
+                            java.io.File.createTempFile("capture-", ".pcap", dir).writeBytes(target.bytes)
+                            FileRetention.prune(dir, PulledFiles.PREFIXES, PulledFiles.KEEP)
+                        } catch (e: Exception) { BruciaLog.d("Capture", "Local capture copy failed: ${e.message}") }
+                    }
+                }
+                accepted
             }
+            receiver
         })
     }
     val hsFlow: StateFlow<HandshakeFlow> get() = captureWorkflow.status
@@ -3232,6 +3233,9 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) { FileReadResult(error = e.message ?: "File download failed") }
 
+    private val _filePullStatus = MutableStateFlow("")
+    val filePullStatus: StateFlow<String> = _filePullStatus.asStateFlow()
+
     private data class PulledCapture(
         val file: java.io.File, val message: String,
         val handshake: Handshake? = null, val pmkid: PmkidTarget? = null,
@@ -3239,12 +3243,13 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The latest manual import owns the target. Older/cancelled pulls cannot overwrite it. */
     fun pullFile(path: String, ssidHint: String = "", onDone: ((Boolean) -> Unit)? = null): Job {
-        val token = wifiTarget.begin()
-        return fileTransfers.submit("capture-import", onDiscard = { it: PulledCapture -> it.file.delete() }, work = {
+        val accept = wifiTarget.beginPull(path)
+        val capture = WifiTargetStore.isCapturePath(path)
+        _filePullStatus.value = "Pulling $path..."
+        return fileTransfers.submit(if (capture) "capture-import" else "file-pull:$path", onDiscard = { it: PulledCapture -> it.file.delete() }, work = {
             val bytes = read(path)
             val name = path.substringAfterLast('/').ifEmpty { "pulled.bin" }
             if (name == "." || name == "..") throw IOException("Invalid file name")
-            val capture = name.endsWith(".pcap", true) || name.endsWith(".cap", true)
             val hs = if (capture) HandshakeParser.parse(bytes) else null
             val pm = if (capture && hs == null) HandshakeParser.parsePmkid(bytes, ssidHint.ifEmpty { null }) else null
             checkActive()
@@ -3272,17 +3277,13 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) { file.delete(); throw e }
         }) { result ->
             val pulled = result.getOrNull()
-            if (pulled != null) {
-                if (pulled.handshake != null || pulled.pmkid != null) {
-                    // A capture: install it as the target, iff this pull still owns the slot.
-                    wifiTarget.commit(token, WifiTargetStore.Target(pulled.handshake, pulled.pmkid), pulled.message)
-                } else {
-                    // A general (non-capture) file pull: report what was downloaded but keep the
-                    // loaded target untouched. Fenced so a superseded pull cannot relabel a newer one.
-                    wifiTarget.touchInfo(token, pulled.message)
-                }
-            } else wifiTarget.touchInfo(token, result.exceptionOrNull()?.message ?: "File download failed")
-            onDone?.invoke(pulled?.let { it.handshake != null || it.pmkid != null } == true)
+            val message = pulled?.message ?: result.exceptionOrNull()?.message ?: "File download failed"
+            val target = pulled?.takeIf { it.handshake != null || it.pmkid != null }
+                ?.let { WifiTargetStore.Target(it.handshake, it.pmkid) }
+            val accepted = accept(target, message)
+            _filePullStatus.value = if (capture && !accepted)
+                "$message; newer target selection kept" else message
+            onDone?.invoke(accepted && target != null)
         }
     }
 

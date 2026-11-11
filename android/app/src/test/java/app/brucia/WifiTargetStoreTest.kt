@@ -77,30 +77,40 @@ class WifiTargetStoreTest {
         assertEquals("invalid PMKID line", store.info.value)
     }
 
-    /** A non-capture file pull reports what it downloaded but keeps the loaded target. */
     @Test
-    fun nonCapturePullKeepsTheTarget() {
+    fun nonCapturePullKeepsTargetLabelAndDoesNotInvalidatePendingImport() {
         val store = WifiTargetStore()
         store.set(WifiTargetStore.Target(handshake = handshake("home")), "home (WPA2)")
-        val pull = store.begin()
-        assertTrue(store.touchInfo(pull, "pulled 1234 B: notes.bin"))
-
-        assertEquals("pulled 1234 B: notes.bin", store.info.value)
-        assertEquals("home", store.current()?.handshake?.ssid) // target untouched
+        val pending = store.begin()
+        val pull = store.beginPull("/notes.bin")
+        assertFalse(pull(null, "pulled 1234 B: notes.bin"))
+        assertEquals("home (WPA2)", store.info.value)
+        assertEquals("home", store.current()?.handshake?.ssid)
+        assertTrue(store.commit(pending, WifiTargetStore.Target(pmkid = pmkid("new")), "new"))
     }
 
-    /** A superseded pull cannot relabel a newer target, even with touchInfo. */
     @Test
-    fun supersededPullCannotRelabel() {
+    fun emptyOrFailedCapturePullClearsPreviousTargetAndExport() {
+        for (message in listOf("pulled 100 B, no handshake", "File download failed")) {
+            val store = WifiTargetStore()
+            store.set(WifiTargetStore.Target(pmkid = pmkid("old")), "old")
+            assertTrue(store.beginPull("/EMPTY.PCAP")(null, message))
+            assertNull(store.current())
+            assertNull(store.export())
+            assertEquals(message, store.info.value)
+        }
+    }
+
+    @Test
+    fun supersededCapturePullCannotClearOrRelabelNewerTarget() {
         val store = WifiTargetStore()
-        val pull = store.begin() // a slow pull starts
-        store.set(WifiTargetStore.Target(pmkid = pmkid("fresh")), "fresh (PMKID)") // a newer import lands
-        assertFalse(store.touchInfo(pull, "pulled 10 B: junk.bin"))
+        val pull = store.beginPull("/old.cap")
+        store.set(WifiTargetStore.Target(pmkid = pmkid("fresh")), "fresh (PMKID)")
+        assertFalse(pull(null, "File download failed"))
         assertEquals("fresh (PMKID)", store.info.value)
         assertEquals("fresh", store.current()?.pmkid?.ssid)
     }
 
-    /** PCAP vs PMKID: each type replaces the other cleanly; never both loaded at once. */
     @Test
     fun handshakeAndPmkidAreMutuallyExclusive() {
         val store = WifiTargetStore()

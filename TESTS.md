@@ -116,9 +116,10 @@ any capability. Final suites rerun on the integrated tree, not reused from the t
 phone, board or tag connected.
 
 - F38: `importPcap`, `importPmkid`, the `pullFile` completion and the capture `onLoaded` callback
-  now route through `WifiTargetStore`, one generation-fenced value. A slow or failed import can no
-  longer relabel or revive a target a newer operation set; a failed/empty import commits no target,
-  so Run/export never reuse a stale one. New `WifiTargetStoreTest`: 8 tests (slow A -> B,
+  now route through `WifiTargetStore`. The independent review below reopens F38: capture uses
+  unconditional `set` at completion, and empty/failed capture pulls only update the label.
+  The generation and failure policy therefore do not yet cover every writer.
+  New `WifiTargetStoreTest`: 8 tests (slow A -> B,
   latest-owner, failed-import-clears, invalid line, non-capture pull keeps target, superseded pull
   cannot relabel, PCAP/PMKID mutual exclusion, export follows target).
 - F46: the Crack screen no longer claims "Run uses a demo handshake" (Run with no target opens no
@@ -156,6 +157,57 @@ published, not tagged, not pushed. Kept in `.codex_tmp/releases/0.1.13-candidate
   but was not re-exercised. In-app download, import and Cancel of the dictionaries on an emulator
   or phone: still NOT RUN. `release.sh` rebuilds its own APK; this candidate is evidence, not the
   asset to upload.
+
+### Independent completion review — 2026-11-11, base `b4dcaecc`
+
+F38 was **REOPENED** by this review, despite its existing eight tests passing; the
+subsequent fix and verification follow below. Fresh command:
+`python3 .codex_tmp/review-20261111/check_target.py`; output in the adjacent `result.log`.
+Compiled the current production `WifiTargetStore.kt` and `WifiTargetStoreTest.kt`, using
+cached Kotlin/JUnit dependencies and already-built production Wi-Fi model classes.
+The probe executes the real store; it mirrors the call order found by inspecting the
+VM, but does not instantiate the VM or run a capture workflow/device.
+
+- Existing `WifiTargetStoreTest`: **8/8 PASS**.
+- Counterexample: capture A begins without a shared store token; import B commits;
+  capture A completes through unconditional `set` → A replaces B.
+- Counterexample: with B loaded, a capture pull completes without a handshake and calls
+  `touchInfo("pulled 100 B, no handshake")` → B remains current and exportable while the
+  label says no handshake. The download-failure branch also uses `touchInfo`.
+- Source: VM `onLoaded`, capture entrypoints and `pullFile` completion. Required fixes
+  and integration regressions are recorded under F38 in the backlog.
+- Independently hashed the existing candidate APK: SHA-256
+  `b8386d20ad1f7b0da48b6aa6a5be4040db770818e063e6c64c15c10351ce89fb`, matching the record.
+  This candidate still contains the F38 residuals; rebuild after their fix.
+
+No fresh full Gradle/lint/firmware run, flash, phone check, release or remote CI check
+in this review. The earlier 1,191-test result above is the recorded integration result,
+not a new full-suite run. Only evidence records changed; no production fix applied.
+
+### F38 correction and release preparation — 2026-11-11
+
+Production fix: capture reserves a store receiver at start; its late completion cannot
+replace a newer import. The workflow reports superseded instead of falsely reporting
+ready. Empty/failed capture pulls clear the owned target; generic file pulls neither
+reserve a target generation nor change its label, with download feedback shown separately.
+
+Fresh checks on the corrected source:
+- `cd android && ./gradlew --offline :app:testDebugUnitTest --tests app.brucia.WifiTargetStoreTest --tests app.brucia.CaptureWorkflowTest`:
+  **31 tests PASS** (9 store, 22 workflow), fresh app/test compilation.
+- `python3 tools/test_android_logic.py`: **269 tests PASS**.
+- Workflow/store integration regressions use a delayed fake CaptureLink read with the
+  real CaptureWorkflow and WifiTargetStore: late capture vs newer manual import, token
+  reserved before the job's first suspension, and Stop followed by late read completion.
+- Mutation checks in isolated copies: the original 22 workflow tests pass; moving the
+  reservation to completion fails the two new ownership regressions. Keeping the old target
+  after an empty pull fails the new clearing regression (1/9). Evidence:
+  `.codex_tmp/review-20261111/mutations.py` and per-variant logs. No production mutation kept.
+- Store regressions: empty/failed PCAP pull clears both current/export; obsolete failed
+  pull cannot clear a newer target; generic pull preserves label and pending import token.
+
+No radio action, flash or phone check. Publication explicitly requested before the
+owner's hardware testing; physical acceptance gates remain OPEN. Full release-pipeline
+results and the published artifact identity will be recorded after the script completes.
 
 ## Brucia-hosted dictionary snapshots — 2026-11-10
 

@@ -54,7 +54,7 @@ SOURCES = [
     "subghz/DeBruijn.kt", "subghz/DeBruijnTx.kt",
     "audio/Dtmf.kt", "audio/Fft.kt", "audio/Goertzel.kt", "audio/Oscilloscope.kt", "audio/Sstv.kt",
     "session/CommandRunner.kt", "session/StreamSubscriptions.kt", "ui/ParkedLeaves.kt", "device/DeviceOutputs.kt",
-    "wifi/CaptureWorkflow.kt", "wifi/CaptureDescriptor.kt",
+    "wifi/CaptureWorkflow.kt", "wifi/CaptureDescriptor.kt", "wardrive/WifiTargetStore.kt", "wifi/Hc22000.kt",
     "wifi/HandshakeParser.kt", "wifi/WpaCracker.kt", "wifi/Pmkid.kt",
     "wifi/PcapReader.kt", "wifi/PcapWriter.kt", "wifi/Dot11Frame.kt", "subghz/SubFile.kt",
     "update/EspProtocol.kt", "BrandLinks.kt",

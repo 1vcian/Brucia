@@ -22,15 +22,16 @@ coordinatore). Ogni consegna è stata rivista e integrata su `main` con merge `-
 verifiche finali sono state rieseguite sulla combinazione integrata (TESTS.md). Nessun push,
 tag o release. Nessun telefono, board o tag collegato: **tutti i criteri fisici restano OPEN**.
 F38 e F46, inizialmente BLOCKED (classificatore di sicurezza su Opus 5.5), sono stati
-completati il 2026-11-11 su Opus 4.8 e integrati con lo stesso processo (merge `--no-ff`
-`80a666d4`, `d4346059`); verifiche finali rieseguite sull'albero integrato.
+integrati il 2026-11-11 su Opus 4.8 con lo stesso processo (merge `--no-ff`
+`80a666d4`, `d4346059`); verifiche finali rieseguite sull'albero integrato. La review
+indipendente successiva su `b4dcaecc` riapre F38 per i due casi descritti sotto.
 
 | ID | Stato software | Commit | Evidenza / limite |
 |---|---|---|---|
 | F35 residuo | DONE (host+build) | `88ed73f7`, `f371fb98` | Budget totale 60 s, date di ogni certificato presentato con floor = tempo sorgente del firmware e notBefore solo con NTP; 11 mutazioni rilevate; build T-Embed/Cardputer. Device cold-boot e mbedTLS reale NOT RUN; store HTTP successivo ancora OPEN. |
 | F36 | DONE (JVM) | `cf237e70`, `a90b2d4d` | IR off-UI 4 MiB, PCAP 32 MiB, conteggio righe bounded, import con limite 30 min e chiusura dello stream su Cancel. Telefono NOT RUN. |
 | F37 | DONE (JVM) | `3f307297`, `a90b2d4d` | Staging `.part`, validazione completa, promozione finale, esclusione import/download stesso nome; 13 fail-before. Nessuna garanzia power-loss. |
-| F38 | DONE (JVM) | `a52a9e23`, `80a666d4` | Target unificato in `WifiTargetStore` (generation fence): i quattro writer (importPcap/importPmkid/pullFile/capture) passano dallo store. Policy esplicita "nessun target su import fallito"; un import lento o fallito non rietichetta né rianima un target più recente, label sempre coerente con Run/export. `WifiTargetStoreTest` 8 test (A lenta→B, fail clears, pull non-capture, supersede, PCAP/PMKID esclusivi, export). Telefono NOT RUN. (Ripreso su Opus 4.8 dopo il blocco del classificatore su Opus 5.5.) |
+| F38 | DONE (JVM, review follow-up) | release 0.1.13 preparation | CaptureWorkflow reserves a store receiver synchronously at start and reports superseded results; capture pulls clear the target on empty/error, general files neither reserve nor relabel it. 31 focused JVM tests PASS (22 workflow + 9 store), including real workflow/store overlap and stop. 269 host Kotlin tests PASS. Phone NOT RUN. |
 | F39 | DONE (JVM) | `2859a3c1`, `2f500af2` | `NusConsoleCore` + token di sessione; 13 test, 11 falliti sulla logica base. PIN/connect/`info` fisico NOT RUN. |
 | F40 | DONE (harness) | `fbe42f21`, `1752c918` | Bundle `.release-staging/`, `./release.sh resume`, preflight tag/release, draft fino a verifica asset; 16 test con git reale + remote bare + gh finto. Nessun run GitHub reale. |
 | F41 | DONE (JVM) | `10a72366`, `087361c7` | TransferWatch chiude la connessione su Cancel/deadline; un solo reader dopo Cancel/retry. Telefono NOT RUN. |
@@ -40,6 +41,43 @@ completati il 2026-11-11 su Opus 4.8 e integrati con lo stesso processo (merge `
 | F45 | DONE (doc) | `091e4018`, `dc8ba5ea` | CHANGELOG diviso in 0.1.6–0.1.12; stati F03/F21/F22/F35/A3/A5/DT07/E01–E03 con revisione e tipo di prova. |
 | F46 | DONE (JVM) | `7ebaf413`, `d4346059` | Due stringhe false corrette: la riga Target non afferma più che Run usa un demo handshake (solo il pulsante Demo usa il sintetico); header senza il confronto Flipper assoluto ("heavy crypto runs on the phone, not the ESP32"). `runWithoutTargetNeverFabricatesADemoHandshake` blocca il comportamento; `docs/audit/wifi.md` marcato risolto. Nessuno screenshot rigenerato (il Paparazzi usa la fixture `CrackPreview`, non lo schermo reale). (Ripreso su Opus 4.8.) |
 | F47 | READY (non pubblicato) | HEAD `main` | APK candidato 0.1.13 **ricostruito su `aba66024`** (include F38/F46; sostituisce il candidato pre-F38/F46 `3708bf45`). SHA-256 `b8386d20…89fb`, versionCode 1000113, firma `deac265d…c84b` identica alla 0.1.12; nessun URL dizionario upstream, quattro asset Brucia HTTPS con size+SHA conformi ai pin, stringhe F46 corrette presenti nel binario (TESTS.md follow-up 2026-11-11). Nessun push/tag/release; VERSION su main resta 0.1.12. Pubblicazione: `./release.sh patch` da `main` pulito. Install-over-0.1.12/download/import/Cancel su telefono NOT RUN. |
+
+### Review indipendente — 2026-11-11, base `b4dcaecc`
+
+**F38 riaperto nella review; corretto nel follow-up qui sotto.**
+`WardriveViewModel.captureAndCrack/capturePmkidAndCrack` non riservano una generazione
+nello store; `onLoaded` usa `wifiTarget.set`, che vince sempre. Sequenza: parte capture A,
+si importa B, termina A → il target torna A. La generazione interna al capture workflow
+non ordina le importazioni manuali rispetto alle catture.
+In `pullFile`, anche una `.pcap` senza handshake o un download fallito passa da
+`touchInfo`: la label segnala assenza/errore, ma Run/export conservano il target vecchio.
+Il pull di file generici non deve cambiare la label del target né invalidare un import.
+
+Prova fresca: compilato il sorgente attuale `WifiTargetStore.kt` e gli 8 test esistenti
+con i modelli JVM già compilati; gli 8 passano, due controesempi aggiuntivi riproducono
+le sequenze sopra. Il VM è stato ispezionato, non eseguito nel probe; nessuna cattura
+radio o prova sul telefono. Script/output: `.codex_tmp/review-20261111/` (ignorato da git).
+Accettazione: prenotare e portare il token dall'inizio della capture al suo risultato;
+rifiutare il completamento obsoleto; svuotare il target per pull capture fallito/vuoto
+secondo la policy scelta; separare stato del download generico dalla label del target.
+Aggiungere regressioni che esercitino il collegamento reale tra workflow e store.
+Il candidato F47 attuale precede queste correzioni: dopo il fix va ricostruito e verificato.
+
+### Correzione F38 e preparazione release — 2026-11-11
+
+Richiesta del proprietario: correggere F38 e pubblicare, poi prove hardware a cura sua.
+`CaptureWorkflow` acquisisce il receiver di importazione all'avvio, prima del job;
+il receiver mantiene la generazione per tutta la cattura. Un risultato superato non
+cambia target/label/export e lo stato della cattura dice `superseded`, non `ready`.
+`beginPull` prenota solo `.pcap`/`.cap`; esito vuoto o errore svuota il target se ancora
+proprietario. File generici hanno owner di trasferimento separato e messaggio di download
+separato in Files/Crack: non cancellano né rietichettano una selezione pendente.
+Verifiche fresche: Gradle 31 test mirati, host Kotlin 269 PASS. Le regressioni collegano
+CaptureWorkflow e WifiTargetStore reali con lettura ritardata, import successivo e Stop.
+Mutazioni in copie isolate: token preso a completamento → 2 regressioni fallite;
+target conservato su pull vuoto → 1 regressione fallita. Baseline workflow 22/22 PASS.
+Nessun flash/prova fisica: F23, F35 device e gli altri gate hardware restano OPEN.
+Il candidato APK precedente non viene caricato: release.sh ricostruirà APK e firmware.
 
 ### Nuovi task, in ordine di esecuzione
 

@@ -7,8 +7,10 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
-Changes after the 0.1.12 release commit `21b8f80d`. They are not in any published APK or
-firmware: the 0.1.12 APK still downloads the four new dictionaries from their upstream URLs.
+## [0.1.13] - 2026-11-11
+
+Changes since 0.1.12. Hardware/phone acceptance remains pending; this release is for
+installing the fixes and performing those checks. Software evidence is in TESTS.md.
 
 - Dictionary downloads now use Brucia-hosted copies of Probable WPA and
   Flipper/Proxmark3 Classic lists in the wordlists release. Pinned source revisions,
@@ -16,16 +18,15 @@ firmware: the 0.1.12 APK still downloads the four new dictionaries from their up
 
 - Public tutorials now show actual app screen recordings: navigation, the built-in
   synthetic WPA demo and NFC dictionary imports. Replaced six text-slide videos;
-  emulator provenance and captions are included. The wordlists release now links
-  the four new upstream dictionaries.
+  emulator provenance and captions are included. The wordlists release now hosts
+  copies of the four new dictionaries with their licenses.
 - App Store installer (backlog F35, residual): the bootstrap download has a 60 s overall
   budget (a slow or trickling server fails with "download took too long" and any previous
   install is kept), and the certificate validity dates the device's TLS stack does not check
   are now checked after the handshake: notAfter always against the later of the firmware
   build time and a synced clock, notBefore only with a clock read from NTP (otherwise the
   result says start dates were not checked). The store script's own plain-HTTP catalog and
-  app downloads are unchanged. Host tests of the portable policy only; not built into a
-  release or checked on a device.
+  app downloads are unchanged. Portable policy host tests and firmware builds; not checked on a device.
 - Imports (F36/F37): a manual wordlist import stages to a temporary file (at most 512 MiB,
   content-checked) and replaces the list only when complete, so a failed or cancelled import
   keeps the previous list; Cancel and a 30-minute total limit also end a read blocked in the
@@ -51,13 +52,15 @@ firmware: the 0.1.12 APK still downloads the four new dictionaries from their up
 - CI (F44): screenshot baselines are now compared (`verifyPaparazziDebug`) in CI and in
   `release.sh`, and a new emulator job runs the instrumented tests, including a navigation,
   reconnect and Stop flow over a simulated device link. The stale phone home-grid baseline
-  was re-recorded. The GitHub job has not run yet (no push).
+  was re-recorded. Remote CI status is recorded separately from local verification.
 - Crack target (F38): the imported Wi-Fi target (a handshake or a PMKID) is now one
   generation-fenced value instead of three fields written from four places. A slow or failed
   import can no longer relabel or revive a target a newer import, pull or capture set, and an
   import that finds nothing clears the target instead of leaving a stale one that Run and export
   would still use. The shown label always matches what Run and export act on. JVM tests only; not
-  checked on a phone.
+  checked on a phone. The follow-up reserves capture ownership at start, refuses a late
+  capture after a newer import, and clears the target after empty/failed PCAP pulls.
+  Generic file downloads report their status separately without touching target selection.
 - Crack screen copy (F46): the target line no longer states that Run uses a demo handshake - Run
   with no target does nothing and asks for one; only the Demo button uses a synthetic handshake.
   The header no longer claims an absolute Flipper comparison. No behaviour change; a regression

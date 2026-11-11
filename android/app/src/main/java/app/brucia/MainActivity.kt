@@ -2423,6 +2423,7 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val loading by vm.deviceListing.collectAsState()
     val listStatus by vm.deviceListStatus.collectAsState()
     val fileStatus by vm.deviceFileStatus.collectAsState()
+    val pullStatus by vm.filePullStatus.collectAsState()
     fun refresh() { if (connected) vm.listDir(path) }
     LaunchedEffect(path, connected) { refresh() }
 
@@ -2498,6 +2499,7 @@ private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         if (loading) Text("Loading...", color = cs.onSurfaceVariant)
         if (listStatus.isNotBlank()) Text(listStatus, color = cs.error, style = MaterialTheme.typography.bodySmall)
         if (fileStatus.isNotBlank()) Text(fileStatus, color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        if (pullStatus.isNotBlank()) Text(pullStatus, color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(entries) { e ->
                 Card(
@@ -8348,6 +8350,7 @@ private fun CrackScreen(vm: WardriveViewModel) {
     val installedNames = wordlists.map { it.name }.toSet()
     val crack by vm.crack.collectAsState()
     val target by vm.handshakeInfo.collectAsState()
+    val pullStatus by vm.filePullStatus.collectAsState()
     val rules by vm.rules.collectAsState()
     var pmkidText by rememberSaveable { mutableStateOf("") }
     var pullPath by rememberSaveable { mutableStateOf("/BrucePCAP/handshakes/") }
@@ -8523,6 +8526,7 @@ private fun CrackScreen(vm: WardriveViewModel) {
                                 onClick = { vm.listCaptures() },
                             ) { Text("List captures") }
                         }
+                        if (pullStatus.isNotBlank()) Text(pullStatus, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                         if (captureList.isNotBlank()) {
                             Text(captureList, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
                         }

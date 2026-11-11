@@ -1,6 +1,7 @@
 package app.brucia.wardrive
 
 import app.brucia.wifi.Handshake
+import app.brucia.wifi.CapturedTarget
 import app.brucia.wifi.Hc22000
 import app.brucia.wifi.PmkidTarget
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,8 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
  *    completes late (a slow import, a late pull) is dropped instead of overwriting a newer target.
  *  - A failed or empty import commits a null target: Run/export then see nothing, so a stale target
  *    is never silently reused. (Policy: "no target" on failure, not "keep the previous target".)
- *  - [touchInfo] refreshes only the label for an operation that is not a target import (a general,
- *    non-capture file pull), still fenced, so a superseded pull cannot relabel a newer target.
+ *  - General file pulls neither reserve a generation nor change the target label.
  *
  * All mutating methods and the reads of the target are synchronized on this instance; target
  * operations are infrequent user actions, so the single monitor is cheap and keeps the generation,
@@ -67,8 +67,8 @@ class WifiTargetStore {
     }
 
     /**
-     * Claim and commit atomically for a synchronous operation with no slow window (a pasted line, a
-     * completed capture). Always wins the slot, so any import still in flight is dropped when it
+     * Claim and commit atomically for a synchronous operation with no slow window (a pasted
+     * target). Always wins the slot, so any import still in flight is dropped when it
      * tries to commit its older token.
      */
     @Synchronized
@@ -78,16 +78,26 @@ class WifiTargetStore {
         _info.value = info
     }
 
-    /**
-     * Refresh only the label for operation [token] without touching the target. Used by a general
-     * file pull that is not a capture: it reports what it downloaded but must not clear the loaded
-     * target. Fenced like [commit]; returns false (and writes nothing) if superseded.
-     */
-    @Synchronized
-    fun touchInfo(token: Long, info: String?): Boolean {
-        if (generation != token) return false
-        _info.value = info
-        return true
+    /** Called by CaptureWorkflow at start, never at its delayed completion. */
+    fun beginCapture(): (CapturedTarget) -> Boolean {
+        val token = begin()
+        return { captured ->
+            commit(token, Target(captured.handshake, captured.pmkid),
+                captured.handshake?.let { "${it.ssid} (WPA${it.keyVersion}) [pulled]" }
+                    ?: "${captured.pmkid?.ssid} (PMKID) [pulled]")
+        }
+    }
+
+    /** Empty/failed capture pulls clear the target; ordinary files are unrelated to selection. */
+    fun beginPull(path: String): (Target?, String) -> Boolean {
+        if (!isCapturePath(path)) return { _, _ -> false }
+        val token = begin()
+        return { target, message -> commit(token, target, message) }
+    }
+
+    companion object {
+        fun isCapturePath(path: String): Boolean =
+            path.endsWith(".pcap", true) || path.endsWith(".cap", true)
     }
 
     /** The loaded target, or null if none. */
