@@ -184,7 +184,7 @@ No fresh full Gradle/lint/firmware run, flash, phone check, release or remote CI
 in this review. The earlier 1,191-test result above is the recorded integration result,
 not a new full-suite run. Only evidence records changed; no production fix applied.
 
-### F38 correction and release preparation — 2026-11-11
+### F38 correction and published release 0.1.13 — 2026-11-11
 
 Production fix: capture reserves a store receiver at start; its late completion cannot
 replace a newer import. The workflow reports superseded instead of falsely reporting
@@ -206,8 +206,37 @@ Fresh checks on the corrected source:
   pull cannot clear a newer target; generic pull preserves label and pending import token.
 
 No radio action, flash or phone check. Publication explicitly requested before the
-owner's hardware testing; physical acceptance gates remain OPEN. Full release-pipeline
-results and the published artifact identity will be recorded after the script completes.
+owner's hardware testing; physical acceptance gates remain OPEN.
+
+Release pipeline completed successfully, commit `b0808a1c5b0f60c71953b5b4eff4a4a2ae15b8da`
+(tag `v0.1.13`), including F38 fix `08cdcac3`. Published on Brucia at
+2026-11-11 01:56 UTC: https://github.com/1vcian/Brucia/releases/tag/v0.1.13 .
+- Python discovery: **357 tests, 2 skipped, OK**; website **17/17**.
+- Firmware codec/storage/framing/protocol checks PASS in the release script.
+- Full Android unit suite **1,195**, 0 failures/errors/skips; explicit Paparazzi verification
+  PASS; lint 0 errors, 2 warnings (OldTargetApi, AndroidGradlePluginVersion).
+- T-Embed firmware build PASS, exception guard 9/9, AAC noise bounds/UBSan PASS.
+  App slot 4,361,680 / 4,653,056 B (93.74%; warning threshold 92%, failure 98%).
+- Fresh signed release APK build PASS. Identity independently verified: app.brucia,
+  versionName 0.1.13, versionCode 1000113, minSdk 26, targetSdk 36, not debuggable.
+  Signing certificate SHA-256 `deac265d4ab251c3bdc73bd54c067f55ade2f5060d01058cf11790f20140c84b`
+  matches the previous release. No installation/upgrade test on this exact APK.
+- Published APK SHA-256 `fa8e19400700d4d6c6412e6bd4a59f59d019de0ac0b1eaef270e843f396dc569`
+  (19,081,547 B); firmware SHA-256
+  `c21eb8bae539709ccb37bce26bc1e3257a66666bb0b8bac7ac015ee83251edb6` (4,427,216 B).
+  Both assets downloaded back and compared by release.sh before publication; GitHub
+  digest/size and published/non-draft status independently checked afterward.
+- DEX contains the four dictionary integrity pins and the F38 superseded-selection message.
+- Log: `.codex_tmp/review-20261111/release-0.1.13.log`; immutable publication bundle,
+  SHA256SUMS, release notes and pre-clean test reports: `.release-staging/v0.1.13/`.
+  Earlier 0.1.13 candidate APKs are superseded, not release evidence.
+
+Hardware checks next: install this APK over the existing app; confirm a newer import stays
+selected when an older operation completes; import an empty/failed capture file and verify
+Run/export have no old target; pull a generic file and check the target label stays unchanged.
+F23 real-event soak, F35 device TLS/installer, BLE reconnect and dictionary import/Cancel on
+phone remain OPEN. No board was flashed, no radio operation or physical acceptance was run
+in this session. Remote CI status is separate; a local build is not a remote CI result.
 
 ## Brucia-hosted dictionary snapshots — 2026-11-10
 

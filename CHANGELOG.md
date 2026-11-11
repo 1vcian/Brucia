@@ -48,7 +48,8 @@ installing the fixes and performing those checks. Software evidence is in TESTS.
   tagging, pushing, creating, uploading or publishing fails after the release commit,
   `./release.sh resume` publishes the same version without a new bump or rebuild. Existing
   tags and assets are verified and never overwritten; the release stays a draft until every
-  asset matches. Tested with a local harness only (no real GitHub run).
+  asset matches. Failure recovery tested with a local harness; the 0.1.13 publication also verified the normal
+  GitHub upload/download path.
 - CI (F44): screenshot baselines are now compared (`verifyPaparazziDebug`) in CI and in
   `release.sh`, and a new emulator job runs the instrumented tests, including a navigation,
   reconnect and Stop flow over a simulated device link. The stale phone home-grid baseline

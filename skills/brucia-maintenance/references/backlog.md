@@ -14,13 +14,15 @@ dispatch/stop **13/13**. Le suite passano anche in presenza dei difetti riprodot
 qui sotto: i nuovi casi devono diventare regressioni. Prove e limiti in
 [TESTS.md](../../../TESTS.md#project-audit--2026-11-10).
 
-### Esito della sessione di correzione — 2026-11-10 (commit locali, non pubblicati)
+### Esito della sessione di correzione — 2026-11-10/11 (pubblicato in 0.1.13)
 
 Coordinatore + worker Claude in worktree/branch separati (`audit/*`) dalla base verificata
 `326ad1ad` (seam condiviso `DictionaryTextCheck` + parametro integrity, proprietà del
 coordinatore). Ogni consegna è stata rivista e integrata su `main` con merge `--no-ff`; le
-verifiche finali sono state rieseguite sulla combinazione integrata (TESTS.md). Nessun push,
-tag o release. Nessun telefono, board o tag collegato: **tutti i criteri fisici restano OPEN**.
+verifiche finali sono state rieseguite sulla combinazione integrata (TESTS.md). La sessione
+worker aveva lasciato commit locali; dopo la review e il fix `08cdcac3`, il proprietario ha
+autorizzato push e release: **0.1.13 pubblicata**, tag su `b0808a1c`, 2026-11-11.
+Nessuna nuova prova fisica: **tutti i criteri fisici restano OPEN**.
 F38 e F46, inizialmente BLOCKED (classificatore di sicurezza su Opus 5.5), sono stati
 integrati il 2026-11-11 su Opus 4.8 con lo stesso processo (merge `--no-ff`
 `80a666d4`, `d4346059`); verifiche finali rieseguite sull'albero integrato. La review
@@ -31,16 +33,16 @@ indipendente successiva su `b4dcaecc` riapre F38 per i due casi descritti sotto.
 | F35 residuo | DONE (host+build) | `88ed73f7`, `f371fb98` | Budget totale 60 s, date di ogni certificato presentato con floor = tempo sorgente del firmware e notBefore solo con NTP; 11 mutazioni rilevate; build T-Embed/Cardputer. Device cold-boot e mbedTLS reale NOT RUN; store HTTP successivo ancora OPEN. |
 | F36 | DONE (JVM) | `cf237e70`, `a90b2d4d` | IR off-UI 4 MiB, PCAP 32 MiB, conteggio righe bounded, import con limite 30 min e chiusura dello stream su Cancel. Telefono NOT RUN. |
 | F37 | DONE (JVM) | `3f307297`, `a90b2d4d` | Staging `.part`, validazione completa, promozione finale, esclusione import/download stesso nome; 13 fail-before. Nessuna garanzia power-loss. |
-| F38 | DONE (JVM, review follow-up) | release 0.1.13 preparation | CaptureWorkflow reserves a store receiver synchronously at start and reports superseded results; capture pulls clear the target on empty/error, general files neither reserve nor relabel it. 31 focused JVM tests PASS (22 workflow + 9 store), including real workflow/store overlap and stop. 269 host Kotlin tests PASS. Phone NOT RUN. |
+| F38 | DONE (JVM, review follow-up) | `08cdcac3` | CaptureWorkflow reserves a store receiver synchronously at start and reports superseded results; capture pulls clear the target on empty/error, general files neither reserve nor relabel it. 31 focused JVM tests PASS (22 workflow + 9 store), including real workflow/store overlap and stop. 269 host Kotlin tests PASS. Phone NOT RUN. |
 | F39 | DONE (JVM) | `2859a3c1`, `2f500af2` | `NusConsoleCore` + token di sessione; 13 test, 11 falliti sulla logica base. PIN/connect/`info` fisico NOT RUN. |
-| F40 | DONE (harness) | `fbe42f21`, `1752c918` | Bundle `.release-staging/`, `./release.sh resume`, preflight tag/release, draft fino a verifica asset; 16 test con git reale + remote bare + gh finto. Nessun run GitHub reale. |
+| F40 | DONE (harness) | `fbe42f21`, `1752c918` | Bundle `.release-staging/`, `./release.sh resume`, preflight tag/release, draft fino a verifica asset; 16 test con git reale + remote bare + gh finto. Recovery su failure verificato nel harness; pubblicazione normale 0.1.13 riuscita su GitHub, asset riscaricati e hash verificati. |
 | F41 | DONE (JVM) | `10a72366`, `087361c7` | TransferWatch chiude la connessione su Cancel/deadline; un solo reader dopo Cancel/retry. Telefono NOT RUN. |
 | F42 | DONE (JVM) | `10a72366`, `362275db` | Validazione di ogni byte; quattro snapshot ospitati con size+SHA pinnati e test catalogo↔manifest. rockyou/top-* restano non pinnati (nessun digest registrato). |
 | F43 | DONE (host) | `2f20f1c9`, `318f2fa4` | `--require-events`; copertura separata dal verdetto link; zero eventi = gate NOT MET (exit 3). F23 resta OPEN. |
-| F44 | DONE (locale) | `f5b12eb0`, `0a4e5cf0` | `verifyPaparazziDebug` in CI e release.sh (baseline alterata → exit 1, provato sul tree finale); job emulatore `connectedDebugAndroidTest`; nuovo `CompanionLinkFlowTest`. Job GitHub non eseguito (nessun push). |
+| F44 | DONE (locale) | `f5b12eb0`, `0a4e5cf0` | `verifyPaparazziDebug` in CI e release.sh (baseline alterata → exit 1, provato sul tree finale); job emulatore `connectedDebugAndroidTest`; nuovo `CompanionLinkFlowTest`. Push della 0.1.13 effettuato; esito CI remoto separato dalle verifiche locali. |
 | F45 | DONE (doc) | `091e4018`, `dc8ba5ea` | CHANGELOG diviso in 0.1.6–0.1.12; stati F03/F21/F22/F35/A3/A5/DT07/E01–E03 con revisione e tipo di prova. |
 | F46 | DONE (JVM) | `7ebaf413`, `d4346059` | Due stringhe false corrette: la riga Target non afferma più che Run usa un demo handshake (solo il pulsante Demo usa il sintetico); header senza il confronto Flipper assoluto ("heavy crypto runs on the phone, not the ESP32"). `runWithoutTargetNeverFabricatesADemoHandshake` blocca il comportamento; `docs/audit/wifi.md` marcato risolto. Nessuno screenshot rigenerato (il Paparazzi usa la fixture `CrackPreview`, non lo schermo reale). (Ripreso su Opus 4.8.) |
-| F47 | READY (non pubblicato) | HEAD `main` | APK candidato 0.1.13 **ricostruito su `aba66024`** (include F38/F46; sostituisce il candidato pre-F38/F46 `3708bf45`). SHA-256 `b8386d20…89fb`, versionCode 1000113, firma `deac265d…c84b` identica alla 0.1.12; nessun URL dizionario upstream, quattro asset Brucia HTTPS con size+SHA conformi ai pin, stringhe F46 corrette presenti nel binario (TESTS.md follow-up 2026-11-11). Nessun push/tag/release; VERSION su main resta 0.1.12. Pubblicazione: `./release.sh patch` da `main` pulito. Install-over-0.1.12/download/import/Cancel su telefono NOT RUN. |
+| F47 | DELIVERED (release; phone OPEN) | `b0808a1c` / `v0.1.13` | APK firmato e firmware T-Embed ricostruiti e pubblicati su Brucia dopo il fix `08cdcac3`; asset riscaricati e SHA-256 verificati. APK `fa8e1940…c569`, firma identica alla 0.1.12, versionCode 1000113; quattro pin dizionari presenti nel DEX. Sostituisce il candidato non pubblicato `b8386d20…89fb`. Install-over/download/import/Cancel su telefono NOT RUN. |
 
 ### Review indipendente — 2026-11-11, base `b4dcaecc`
 
@@ -63,7 +65,7 @@ secondo la policy scelta; separare stato del download generico dalla label del t
 Aggiungere regressioni che esercitino il collegamento reale tra workflow e store.
 Il candidato F47 attuale precede queste correzioni: dopo il fix va ricostruito e verificato.
 
-### Correzione F38 e preparazione release — 2026-11-11
+### Correzione F38 e release 0.1.13 — 2026-11-11
 
 Richiesta del proprietario: correggere F38 e pubblicare, poi prove hardware a cura sua.
 `CaptureWorkflow` acquisisce il receiver di importazione all'avvio, prima del job;
@@ -77,7 +79,11 @@ CaptureWorkflow e WifiTargetStore reali con lettura ritardata, import successivo
 Mutazioni in copie isolate: token preso a completamento → 2 regressioni fallite;
 target conservato su pull vuoto → 1 regressione fallita. Baseline workflow 22/22 PASS.
 Nessun flash/prova fisica: F23, F35 device e gli altri gate hardware restano OPEN.
-Il candidato APK precedente non viene caricato: release.sh ricostruirà APK e firmware.
+Il candidato precedente non è stato caricato: release.sh ha ricostruito APK e firmware.
+Release `b0808a1c` pubblicata e pushata: 1.195 unit JVM, screenshot, lint (0 errori,
+2 warning), 357 host (2 skipped), 17 web, build T-Embed e noise test PASS. APK firmato,
+identità/versione/firma e asset remoti verificati. Firmware: 93,74% dello slot app.
+Log `.codex_tmp/review-20261111/release-0.1.13.log`, bundle `.release-staging/v0.1.13/`.
 
 ### Nuovi task, in ordine di esecuzione
 
