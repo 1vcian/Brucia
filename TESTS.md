@@ -4,6 +4,18 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Shared pioarduino build script guard — 2026-11-12
+
+Base `ea3c7dc4`, macOS, pioarduino 55.03.39, arduino-esp32 3.3.9, `~/.platformio/penv/bin/pio`.
+Root cause reproduced: `pio run -e lilygo-t-display-s3-mmc -t envdump` (`lib_ignore = SD`)
+left `framework-arduinoespressif32-libs/esp32s3/pioarduino-build.py` without its three
+`include/fatfs/{diskio,src,vfs}` CPPPATH entries plus a stale `.esp32s3` backup, because
+the platform restores only after `checkprogsize`. With `pre_restore_pioarduino_build.py`:
+a simulated stale state was restored at the start of `lilygo-t-display-s3 -t envdump`;
+the `-mmc` envdump ended with a byte-identical file and no backup; full
+`pio run -e ES3C28P` succeeded (101 s) with the file pristine. Not tested: Windows,
+a full 50-env batch, concurrent `pio run` on one core dir (documented as unsupported).
+
 ## Public review follow-up — 2026-11-11
 
 Base `942287e5`, production changes not committed/released yet. Review corrections:

@@ -151,6 +151,17 @@ a `__has_include` and change the firmware (it did for the Cardputer and M5Unifie
 Use the wrapper for a new checkout, after deleting `.pio`, or whenever libraries
 were installed by hand; plain `pio run` does not clean `.pio/libdeps`.
 
+The pioarduino platform edits the shared
+`~/.platformio/packages/framework-arduinoespressif32-libs/<chip>/pioarduino-build.py`
+for `lib_ignore` (for example `SD` strips the `fatfs` include paths) and restores it
+only when a build reaches the size check. A failed or interrupted build, or a target
+such as `envdump`/`compiledb`, used to leave it edited, and every later env of that
+chip then failed with `esp_vfs_fat.h: No such file or directory`.
+`pre_restore_pioarduino_build.py` puts the original back before and after every
+build. Keep it the first `pre:` entry, and if a board overrides `extra_scripts`,
+include it there. It does not protect parallel `pio run` processes sharing one core
+directory: give each parallel worker its own `PLATFORMIO_CORE_DIR`.
+
 #### Pinned libraries and how to bump one
 
 Every library in `lib_deps` (platformio.ini `[env]`/`[env_light]` and the `boards/**/*.ini`

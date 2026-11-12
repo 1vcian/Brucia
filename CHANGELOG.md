@@ -7,6 +7,10 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Firmware builds no longer break after a failed or interrupted build of another board:
+  a pre-build script restores pioarduino's shared `pioarduino-build.py`, which `lib_ignore = SD`
+  had left without the FATFS include paths (`esp_vfs_fat.h: No such file or directory` on ESP32-S3).
+
 - USB write failures propagate immediately with the driver cause and mark the link broken;
   outgoing companion frames return an explicit result. Oversized commands/subscriptions fail
   locally without crashing or writing bytes; handshake, ping and direct-stop failures are handled.
