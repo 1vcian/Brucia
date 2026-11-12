@@ -1,5 +1,21 @@
 # Work queue — single operational ledger
 
+## Public review follow-up — 2026-11-11, base `942287e5`
+
+Current changes are local/unreleased; 0.1.13 is unchanged. No firmware/physical radio change.
+
+| ID | State | Result / remaining acceptance |
+|---|---|---|
+| F48 — USB write failure | DONE (JVM) | UsbTransport marks the link broken and propagates IOException with its cause; a closed port is not written again. Actual transport tested with a fake driver; pending command fails without timeout or incrementing sent counters. Physical unplug NOT RUN. |
+| F49 — explicit send result | DONE (JVM) | CompanionClient returns Result for CMD/fields/SUB/HELLO/PING; oversized frames write nothing. CommandSession resolves the local error; hello/ping failures visibly disconnect; direct stops no longer always report success. 1,200 Android tests, lint 0 errors/1 OldTargetApi warning, 270 host Kotlin tests PASS. |
+| F50 — decoder copying | MEASURED; Android profiling OPEN | Existing copying retained. Synthetic host benchmark: 8 KiB payload at 1/64/4096-byte reads = 3.47/68.15/87.93 MiB/s; allocations 32.6 MiB/576.4 KiB/74.7 KiB per frame. Quadratic allocation on pathological fragments is real; host throughput does not establish Android GC/jank or actual USB throughput. Profile Android before a buffer refactor. |
+| F51 — public docs / proxy scope | DONE (docs) | README leads with existing WPA offload, GUI MITM, GPS wardrive and PCAP tools; 3 new actual 0.1.13 emulator screenshots. Roadmap lower, authorized use prominent. README/wiki document proxy 4–8 workers, 32 queued connections, 60 s client read timeout and queue wait. SECURITY.md date-policy/reporting corrected. No Predatory branding found in current text; GitHub About now describes authorized security research with HTTPS homepage. |
+| F52 — committed credential audit | DONE (scoped scan) | 3,695 reachable commits, including merge-parent patches, 16,032,321 added lines scanned. 65 candidates triaged: test/example credentials, config placeholders, variable expressions and 15 historical cURL test/example private-key markers. No operational credential identified in checked patterns; no historical keystore/.env/private credential-container paths found. No history rewrite or rotation. Heuristic text scan, not a guarantee over binaries, deleted/unreachable objects or remote-only refs. |
+
+Evidence: TESTS.md section “Public review follow-up — 2026-11-11”; decoder sources/report
+under tools/benchmarks and docs/benchmarks. Secret scan details stay redacted in ignored
+`.codex_tmp/public-review-20261111/`. Existing F23/peripheral acceptance stays OPEN.
+
 ## Audit operativo — 2026-11-10, base `78ef13dc`
 
 Questa è la coda corrente; i batch e le tabelle più sotto conservano la storia e non

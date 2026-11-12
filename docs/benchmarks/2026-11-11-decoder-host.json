@@ -1,0 +1,124 @@
+{
+  "rows": [
+    {
+      "payload_bytes": 128,
+      "read_chunk": 1,
+      "frames_per_trial": 20,
+      "median_bytes_per_second": 2455718.0091568516,
+      "allocated_bytes_per_frame": 23111,
+      "elapsed_ns": [
+        1389208,
+        1075042,
+        1009667
+      ]
+    },
+    {
+      "payload_bytes": 128,
+      "read_chunk": 64,
+      "frames_per_trial": 200,
+      "median_bytes_per_second": 12909535.452322738,
+      "allocated_bytes_per_frame": 3018,
+      "elapsed_ns": [
+        2791417,
+        2045000,
+        1488500
+      ]
+    },
+    {
+      "payload_bytes": 128,
+      "read_chunk": 4096,
+      "frames_per_trial": 200,
+      "median_bytes_per_second": 24063812.856456622,
+      "allocated_bytes_per_frame": 4607,
+      "elapsed_ns": [
+        1156500,
+        1097083,
+        907125
+      ]
+    },
+    {
+      "payload_bytes": 1024,
+      "read_chunk": 1,
+      "frames_per_trial": 20,
+      "median_bytes_per_second": 6798474.179024723,
+      "allocated_bytes_per_frame": 629937,
+      "elapsed_ns": [
+        3719708,
+        2115333,
+        3024208
+      ]
+    },
+    {
+      "payload_bytes": 1024,
+      "read_chunk": 64,
+      "frames_per_trial": 200,
+      "median_bytes_per_second": 75398823.47030419,
+      "allocated_bytes_per_frame": 18811,
+      "elapsed_ns": [
+        2712958,
+        2726833,
+        2763750
+      ]
+    },
+    {
+      "payload_bytes": 1024,
+      "read_chunk": 4096,
+      "frames_per_trial": 200,
+      "median_bytes_per_second": 84153068.5376808,
+      "allocated_bytes_per_frame": 11551,
+      "elapsed_ns": [
+        2536250,
+        2442458,
+        2443167
+      ]
+    },
+    {
+      "payload_bytes": 8192,
+      "read_chunk": 1,
+      "frames_per_trial": 20,
+      "median_bytes_per_second": 3640735.0544572184,
+      "allocated_bytes_per_frame": 34218690,
+      "elapsed_ns": [
+        42908666,
+        47747750,
+        45023875
+      ]
+    },
+    {
+      "payload_bytes": 8192,
+      "read_chunk": 64,
+      "frames_per_trial": 200,
+      "median_bytes_per_second": 71458049.80467393,
+      "allocated_bytes_per_frame": 590260,
+      "elapsed_ns": [
+        22957417,
+        22939333,
+        22258375
+      ]
+    },
+    {
+      "payload_bytes": 8192,
+      "read_chunk": 4096,
+      "frames_per_trial": 200,
+      "median_bytes_per_second": 92199091.76695071,
+      "allocated_bytes_per_frame": 76487,
+      "elapsed_ns": [
+        17778917,
+        17717792,
+        17793083
+      ]
+    }
+  ],
+  "java": "23",
+  "scope": "Host JVM synthetic decoder benchmark; NOT Android or USB end-to-end throughput",
+  "host": "macOS-26.6-arm64-arm-64bit",
+  "revision": "942287e5a9b4e3e220117fa19dbb727ca2444ac0",
+  "source_sha256": {
+    "android/app/src/main/java/app/brucia/protocol/CompanionClient.kt": "176be956aad6a980c53f1569e9061d65bbfc190d7b9d70a7f3be6b05795ecfb6",
+    "android/app/src/main/java/app/brucia/protocol/FrameBudget.kt": "68e459ac758c879175e3c3057d9118be1ec529230b39dd1ac7aa8e2826926ecb",
+    "android/app/src/main/java/app/brucia/protocol/Protocol.kt": "998a22876aa2cd4ec023ab6447dfaf4c6ff46c31b671b2b68e10b016eeb8ac8d",
+    "android/app/src/main/java/app/brucia/protocol/LinkCounters.kt": "dca0e3383c3f310686ffe536a949bb08f689f71270b17410aa0140f00ecf1510",
+    "android/app/src/main/java/app/brucia/transport/Transport.kt": "25c68113752b1b40129d1a3875fe2fe28bfb0527c0ab6709fffc570d7f2bca83",
+    "tools/benchmarks/CompanionDecoderBenchmark.kt": "980d77aead62f59ee70fa3423473eb5aaf15681cdd27a59889a03c06daeb47cc"
+  }
+}

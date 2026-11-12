@@ -60,19 +60,28 @@ physical operation. Consult [TESTS.md](TESTS.md) for the exact evidence and limi
 The Bruce community App Store is a third-party service. Its later catalog/app
 downloads use plain HTTP; the bootstrap installer's checks do not authenticate
 those downloads. Scripts run on the device. Review them before execution.
-The current firmware TLS configuration checks the certificate chain and hostname
-but does not enforce certificate validity dates; host TLS tests are not evidence
-of date enforcement on the device.
+The App Store bootstrap installer checks the TLS chain and hostname and applies a separate
+certificate-date policy: expiry is checked against the firmware source-time floor or a newer
+synced clock; notBefore is checked only with a synced clock. A cold, unsynced device therefore
+does not establish full current-date validity. This is specific to the installer, not a claim
+about every firmware TLS client. Host tests do not replace mbedTLS/device acceptance.
+
+The phone-hosted MITM proxy is for a single-user lab. Its bounded worker pool can be occupied
+by slow clients or idle tunnels; it is not a production or high-concurrency proxy. Stop closes
+tracked connections. Captures and exports can contain credentials and personal data: redact
+reports before sharing them. WPA keys remain unmasked in exports by the owner's explicit choice.
 
 If you find a security issue in Brucia (firmware, app, or build tooling):
 
-- Preferably, open a [GitHub issue](https://github.com/1vcian/Brucia/issues) with
-  a clear description and reproduction steps. For most findings in a hobbyist
-  security-research tool, a public issue is fine.
-- If the issue is sensitive (for example, it could be used to attack users of the
-  app or firmware directly, rather than being inherent to the tool's intended
-  function), contact the maintainer directly instead of filing a public issue,
-  and allow reasonable time for a fix before any public disclosure.
+- For a vulnerability that could compromise users, use GitHub's
+  [private vulnerability reporting](https://github.com/1vcian/Brucia/security/advisories/new)
+  if available. If it is unavailable, request a private reporting channel from the maintainer
+  without posting exploit details, credentials or captures publicly.
+- For ordinary bugs without sensitive information, open a
+  [GitHub issue](https://github.com/1vcian/Brucia/issues) with versions and redacted steps.
+- Include the affected commit/release, expected and observed behavior, and a minimal
+  reproduction using synthetic or sanitized data. Never attach signing keys, service tokens
+  or unrelated users' traffic. Allow time to investigate before public disclosure.
 
 Please do not use Brucia's own features against the project's infrastructure or
 against other users without authorization, even as part of a security report.

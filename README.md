@@ -1,21 +1,41 @@
-<div align="center">
-<img src="docs/img/public-overview.png" alt="Brucia: ESP32 peripherals connected over USB to Android analysis and storage" width="100%">
+# Brucia
 
+**WPA/WPA2 dictionary checks on your phone. MITM inspection with a GUI. GPS wardriving. PCAP analysis.**
+
+Brucia pairs a native Android app with Bruce-derived ESP32 firmware. The phone runs
+password-candidate checks, the HTTP/HTTPS inspection proxy, maps and capture analysis;
+the ESP32 handles its radios and peripherals. Use a **LilyGO T-Embed CC1101**, an
+Android phone with USB host/OTG and a USB data cable. The firmware also works standalone.
+
+**[Download the latest APK + firmware](https://github.com/1vcian/Brucia/releases/latest)** ·
+[Get started](wiki/Getting-Started.md) · [Wiki](https://1vcian.me/Brucia/wiki/) ·
+[Tutorials](wiki/Tutorials.md) · [Changelog](CHANGELOG.md)
+
+> **Authorized security research only:** use Brucia on equipment you own or have explicit
+> permission to test. See [SECURITY.md](SECURITY.md) for scope, limitations and reporting.
+
+<p align="center">
+  <img src="docs/img/readme-home.png" alt="Brucia app home and tool categories" width="30%">
+  <img src="docs/img/readme-crack.png" alt="Brucia WPA dictionary screen with the built-in synthetic demo" width="30%">
+  <img src="docs/img/readme-mitm.png" alt="Brucia MITM inspection controls, proxy stopped" width="30%">
+</p>
+
+*Actual 0.1.13 app screens on an Android emulator. The demo uses a synthetic handshake;
+no board or network capture is shown.* [Watch the app walkthroughs](wiki/Tutorials.md).
+
+## What you can do today
+
+| Workflow | What runs on the phone |
+|---|---|
+| **WPA/WPA2 dictionary recovery** | Check candidates against imported handshakes or PMKIDs; manage wordlists, see progress and stop the run. A built-in synthetic demo needs no device. |
+| **MITM inspection** | Start a lab HTTP/HTTPS proxy, inspect requests and responses, and export captured traffic. HTTPS needs a compatible client that trusts your configured CA; certificate pinning can prevent inspection. |
+| **GPS wardriving** | Combine device Wi-Fi observations with phone GPS, map tracks and access points, and export WiGLE CSV, KML or GPX. |
+| **PCAP analysis** | Open capture files, browse packet summaries and protocol details, and export results. |
+
+Built on [Bruce](https://github.com/BruceDevices/firmware), with a Kotlin + Compose app.
 **The phone is the brain. The ESP32 is the antenna.**
 
 *Let your phone burn, so your ESP32 doesn't.*
-
-[Download](https://github.com/1vcian/Brucia/releases/latest) · [Get started](wiki/Getting-Started.md) ·
-[Wiki](https://1vcian.me/Brucia/wiki/) · [Tutorials](wiki/Tutorials.md) · [Contribute](CONTRIBUTING.md)
-</div>
-
-Brucia turns an Android phone and an ESP32 into a shared workspace for radio,
-security research and hardware experiments. The device handles peripherals and timing;
-the phone brings the screen, processing, maps and storage.
-
-Built on [Bruce](https://github.com/BruceDevices/firmware), with a native Kotlin +
-Compose app. Start with a **LilyGO T-Embed CC1101**, an Android phone with USB host/OTG
-and a USB data cable. The firmware also works from its own menus.
 
 ## One cable. Plenty to explore.
 
@@ -49,13 +69,6 @@ Use active tools on equipment you own or have permission to test.
 The app also includes a USB firmware updater. For installation, upgrades and recovery,
 follow [Getting Started](wiki/Getting-Started.md).
 
-## Take a look
-
-<img src="docs/img/public-ui.png" alt="Brucia dashboard, reports and IR controls rendered with preview data" width="100%">
-
-*App preview renders with sample data.* Browse the [app walkthroughs](wiki/Tutorials.md)
-for first connection, files, updates, observations and audio.
-
 ## What the phone brings
 
 Analyze audio, keep a history of Wi-Fi/BLE observations, work with captures and wordlists,
@@ -65,6 +78,19 @@ to the device's radios and peripherals.
 Bruce already offers dictionary recovery and radio tools; Flipper has its own mobile
 app and community ecosystem. Our [comparison](docs/COMPARISON.md) explains the differences
 and includes reproducible processing benchmarks, clearly labelled by hardware.
+
+## Current limits
+
+- The MITM proxy is a **single-user lab capture proxy**, not a production or high-concurrency
+  proxy. It uses 4 core workers (up to 8) and a queue of 32 connections. Slow clients or
+  idle tunnels can occupy workers until the 60-second client read timeout; excess connections
+  are closed when capacity is exhausted. Queue time can add to the delay; this is a read
+  timeout, not a maximum connection lifetime.
+- Hardware support and test coverage vary by board and peripheral. Optional LoRa, NRF24,
+  FM and Ethernet features need compatible modules. Command success is not proof that a
+  receiver reacted; BLE advertising does not guarantee a popup on a Mac or phone.
+- Releases and automated tests are available; [TESTS.md](TESTS.md) distinguishes software
+  results from the hardware checks still open.
 
 ## Built together
 
@@ -78,10 +104,11 @@ improve a screen, document a peripheral or contribute a focused fix.
 | Improve the project | [Contribution guide](CONTRIBUTING.md), [source map](wiki/Architecture.md) and [roadmap](ROADMAP.md). |
 | Try your hardware | [Functional checklist](docs/APP_CONTROLS_CHECKLIST.md) and [recorded results](TESTS.md). |
 
-Brucia is actively developed. Support varies by board, peripheral and operation;
-[TESTS.md](TESTS.md) tracks what has actually been checked. Optional modules such as
-LoRa, NRF24, FM and Ethernet need compatible hardware. BLE advertisements do not
-promise an OS popup, and command success alone does not confirm a receiver response.
+## What's next
+
+The priority is physical acceptance of the released app/firmware pair, followed by focused
+reliability fixes and community-tested peripherals. See the [roadmap](ROADMAP.md),
+[functional checklist](docs/APP_CONTROLS_CHECKLIST.md) and [contribution guide](CONTRIBUTING.md).
 
 ## Credits & license
 

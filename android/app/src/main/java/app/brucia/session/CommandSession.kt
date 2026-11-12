@@ -122,11 +122,15 @@ class CommandSession(
     }
 
     /** Run one frame write; any local failure is converted into a synthesized ERR for [id]. */
-    private fun write(id: Int, fallback: String, block: () -> Unit) {
+    private fun write(id: Int, fallback: String, block: () -> Result<*>) {
         try {
             // Checked after registration: a racing close() either drains this id or is seen here.
             check(!closed.get() && transport.isOpen) { "USB connection is closed or changed" }
-            block()
+            val result = block()
+            if (result.isFailure) {
+                fail(id, result.exceptionOrNull()?.message ?: fallback)
+                return
+            }
             check(transport.isOpen) { "USB write failed" }
         } catch (e: Exception) {
             fail(id, e.message ?: fallback)

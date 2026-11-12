@@ -67,6 +67,23 @@
     "docs/media/dictionary-demo.vtt": "9ee5ca7ae4505f64030a4ad47a8feb4b4b1bf3aa8422bd4dbc91c373b3651321",
     "docs/media/nfc-dictionaries.mp4": "43b59fee5aedfbe407ab9f5f7b0317653c35d75b6548f15253fdd6c57249398c",
     "docs/media/nfc-dictionaries.png": "4af38e070b91e4f8ddbc6004819d0ea5760789149d7e090889e3320a6ee354ca",
-    "docs/media/nfc-dictionaries.vtt": "7d9ac0ca71383c0a48b447e335daba56e7ffe68eb412549fd254156ec891d93c"
+    "docs/media/nfc-dictionaries.vtt": "7d9ac0ca71383c0a48b447e335daba56e7ffe68eb412549fd254156ec891d93c",
+    "docs/img/readme-home.png": "f3a721cfe5806636fe28fd2a2ef186e07f44a438a7f95a979667d3a47ffdf40f",
+    "docs/img/readme-crack.png": "81e20eac2eab5f0d67c0e071b21c52b5689a6b45e496e015682ce9cf66d56ca5",
+    "docs/img/readme-mitm.png": "c5d178643bc8ffb07feed740c33af67b3aa84cdab6a4084168efbcfc87d3f94e"
+  },
+  "readme_screenshots": {
+    "date": "2026-11-11",
+    "version": "0.1.13",
+    "release_commit": "b0808a1c5b0f60c71953b5b4eff4a4a2ae15b8da",
+    "apk_sha256": "fa8e19400700d4d6c6412e6bd4a59f59d019de0ac0b1eaef270e843f396dc569",
+    "device": "Android emulator, Medium_Phone_API_36.1, arm64, 1080x2400",
+    "hardware_connected": false,
+    "capture": "Unedited adb screencap; home, synthetic built-in WPA demo, stopped MITM proxy. No network capture or radio action. Displayed keys/s is emulator performance only.",
+    "files": [
+      "docs/img/readme-home.png",
+      "docs/img/readme-crack.png",
+      "docs/img/readme-mitm.png"
+    ]
   }
 }

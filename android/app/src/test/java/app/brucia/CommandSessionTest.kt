@@ -115,6 +115,19 @@ class CommandSessionTest {
         assertFalse(session.hasPending)
     }
 
+    @Test fun oversizedCommandsAndFieldsFailImmediatelyWithoutPoisoningSession() = runVirtual {
+        for (fields in listOf(false, true)) {
+            val result = if (fields) session.awaitFields("info", JSONObject().put("extra", "x".repeat(8192)), 650_000)
+                else session.await("x".repeat(8192), 650_000)
+            assertFalse(result.first)
+            assertTrue(result.second.contains("frame limit"))
+            assertFalse(session.hasPending)
+            assertTrue(t.frames.isEmpty())
+        }
+        t.onWrite = { frame -> session.route(ack(frame.getInt("id"), "ok")) }
+        assertEquals(true to "ok", session.await("info", 1000))
+    }
+
     @Test fun writeExceptionCompletesThroughErrPath() = runVirtual {
         t.writeError = java.io.IOException("pipe broken")
         assertEquals(false to "pipe broken", session.await("info", 1000))
@@ -123,7 +136,7 @@ class CommandSessionTest {
 
     @Test fun transportClosedBeforeOrDuringWriteFails() = runVirtual {
         t.onWrite = { t.close() }
-        assertEquals(false to "USB write failed", session.await("info", 1000))
+        assertEquals(false to "USB write failed: connection closed", session.await("info", 1000))
         assertEquals(1, t.frames.size)
         assertEquals(false to "USB connection is closed or changed", session.await("info", 1000))
         assertEquals(1, t.frames.size)

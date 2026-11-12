@@ -132,7 +132,7 @@ class LinkResyncTest {
         val wire = Wire(); val c = CompanionClient(wire)
         c.sendLimit = 100
         c.cmd("diag")
-        val error = runCatching { c.cmd("x".repeat(200)) }.exceptionOrNull()
+        val error = c.cmd("x".repeat(200)).exceptionOrNull()
         assertTrue(error is IllegalArgumentException && error.message!!.contains("receive buffer"))
         assertEquals(1, wire.written.size)
     }

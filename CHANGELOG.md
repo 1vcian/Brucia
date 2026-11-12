@@ -7,6 +7,13 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- USB write failures propagate immediately with the driver cause and mark the link broken;
+  outgoing companion frames return an explicit result. Oversized commands/subscriptions fail
+  locally without crashing or writing bytes; handshake, ping and direct-stop failures are handled.
+- README leads with available phone-side analysis and three real 0.1.13 emulator screenshots.
+  Proxy concurrency limits and authorized-use scope are visible; security reporting and the
+  installer certificate-date policy are clarified. Decoder copying measured on the host, unchanged.
+
 ## [0.1.13] - 2026-11-11
 
 Changes since 0.1.12. Hardware/phone acceptance remains pending; this release is for

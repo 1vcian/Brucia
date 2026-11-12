@@ -2,13 +2,10 @@ package app.brucia.transport
 
 import android.hardware.usb.UsbDeviceConnection
 import com.hoho.android.usbserial.driver.UsbSerialPort
+import java.io.IOException
 
 /** USB-CDC transport backed by usb-serial-for-android. */
-class UsbTransport(
-    connection: UsbDeviceConnection,
-    private val port: UsbSerialPort,
-    baudRate: Int = 115200,
-) : Transport {
+class UsbTransport internal constructor(private val port: UsbSerialPort) : Transport {
 
     // Set when an I/O call fails (typically the device was unplugged), so the
     // read loop can notice the link is gone instead of spinning on empty reads.
@@ -19,7 +16,7 @@ class UsbTransport(
      * [releaseUsbPort]): the port is closed only if this open succeeded, so a refused open never
      * closes a port another transport still uses; otherwise the connection is closed directly.
      */
-    init {
+    constructor(connection: UsbDeviceConnection, port: UsbSerialPort, baudRate: Int = 115200) : this(port) {
         var opened = false
         try {
             port.open(connection)
@@ -42,10 +39,12 @@ class UsbTransport(
 
     @Synchronized
     override fun write(bytes: ByteArray) {
+        if (!isOpen) throw IOException("USB connection is closed")
         try {
             port.write(bytes, WRITE_TIMEOUT_MS)
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             broken = true
+            throw IOException("USB write failed: ${error.message ?: "device disconnected"}", error)
         }
     }
 

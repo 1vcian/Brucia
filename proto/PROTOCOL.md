@@ -67,6 +67,12 @@ ArduinoJson keeps insertion order), so every device frame payload starts with th
 for every frame the firmware builds. The app also writes `v` first; the firmware does not
 depend on key order.
 
+Android send helpers return `Result`: a frame over the negotiated receive limit is rejected
+locally, no bytes are written and no sent-frame counter is incremented. USB write failures
+propagate from the transport and become local command failures immediately; they do not wait
+for a device reply. HELLO/PING failures end that companion session visibly. Rejected frame
+sizes leave a healthy session usable. This does not change the wire envelope.
+
 ### Resynchronisation (device → host)
 
 In companion mode the USB serial carries frames only, but text can still reach it: an unguarded

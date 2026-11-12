@@ -109,47 +109,53 @@ class CompanionClient(
     // --- outgoing ---
 
     @Synchronized
-    private fun send(kind: Int, id: Int, body: JSONObject) {
+    private fun send(kind: Int, id: Int, body: JSONObject): Result<Unit> = try {
         // Envelope keys in the firmware's order ("v" first) whatever the JSON library's map order.
         val env = "{\"v\":$PROTO_VERSION,\"t\":$kind,\"id\":$id,\"d\":$body}"
         val payload = unescapeSlashes(env).toByteArray(Charsets.UTF_8)
         val len = payload.size
         val limit = sendLimit
-        require(len <= limit) {
-            if (limit < FrameBudget.MAX_FRAME) "Command exceeds the device receive buffer ($len > $limit bytes)"
-            else "Command exceeds firmware frame limit (${FrameBudget.MAX_FRAME} bytes)"
+        if (len > limit) {
+            Result.failure(IllegalArgumentException(
+                if (limit < FrameBudget.MAX_FRAME) "Command exceeds the device receive buffer ($len > $limit bytes)"
+                else "Command exceeds firmware frame limit (${FrameBudget.MAX_FRAME} bytes)"
+            ))
+        } else {
+            val head = byteArrayOf(
+                (len and 0xFF).toByte(),
+                ((len ushr 8) and 0xFF).toByte(),
+                ((len ushr 16) and 0xFF).toByte(),
+                ((len ushr 24) and 0xFF).toByte(),
+            )
+            if (!transport.isOpen) throw java.io.IOException("USB connection is closed")
+            transport.write(head + payload)
+            if (!transport.isOpen) throw java.io.IOException("USB write failed: connection closed")
+            counters.noteFrameSent()
+            Result.success(Unit)
         }
-        val head = byteArrayOf(
-            (len and 0xFF).toByte(),
-            ((len ushr 8) and 0xFF).toByte(),
-            ((len ushr 16) and 0xFF).toByte(),
-            ((len ushr 24) and 0xFF).toByte(),
-        )
-        transport.write(head + payload)
-        counters.noteFrameSent()
+    } catch (error: java.util.concurrent.CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
     }
 
     fun hello() = send(Kind.HELLO, 1, JSONObject().put("app", "Brucia").put("appVersion", BuildConfig.VERSION_NAME))
     fun ping(id: Int = 2) = send(Kind.PING, id, JSONObject())
-    /** Send a command; returns the id used so the caller can match the response. */
-    fun cmd(command: String, id: Int = nextId()): Int {
-        send(Kind.CMD, id, JSONObject().put("cmd", command))
-        return id
-    }
+    /** Send a command; success carries its id. Rejection/failure writes no successful frame. */
+    fun cmd(command: String, id: Int = nextId()): Result<Int> =
+        send(Kind.CMD, id, JSONObject().put("cmd", command)).map { id }
     /** Structured CMD body used by firmware handlers such as speaker PCM. */
-    fun cmdFields(command: String, fields: JSONObject, id: Int = nextId()): Int {
-        send(Kind.CMD, id, JSONObject(fields.toString()).put("cmd", command))
-        return id
-    }
+    fun cmdFields(command: String, fields: JSONObject, id: Int = nextId()): Result<Int> =
+        send(Kind.CMD, id, JSONObject(fields.toString()).put("cmd", command)).map { id }
     fun sub(stream: String, on: Boolean, id: Int = 4) =
         send(Kind.SUB, id, JSONObject().put("stream", stream).put("on", on))
 
     /** SUB variant carrying optional monitor parameters: {stream, on, channel?, bssid?}. */
-    fun sub(stream: String, on: Boolean, channel: Int?, bssid: String?, id: Int = 4) {
+    fun sub(stream: String, on: Boolean, channel: Int?, bssid: String?, id: Int = 4): Result<Unit> {
         val body = JSONObject().put("stream", stream).put("on", on)
         if (channel != null) body.put("channel", channel)
         if (!bssid.isNullOrEmpty()) body.put("bssid", bssid)
-        send(Kind.SUB, id, body)
+        return send(Kind.SUB, id, body)
     }
 
     fun subWifiAp(on: Boolean) = sub("wifi.ap", on)

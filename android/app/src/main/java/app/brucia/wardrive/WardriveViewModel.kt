@@ -659,13 +659,23 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         val s = session ?: return
         readJob?.cancel()
         pingJob?.cancel()
+        suspend fun controlSent(result: Result<Unit>): Boolean {
+            val error = result.exceptionOrNull() ?: return true
+            val reason = error.message ?: "Unable to send companion frame"
+            BruciaLog.w("VM", reason, error)
+            s.close(reason)
+            withContext(Dispatchers.Main) {
+                if (client === c) { disconnect(); _status.value = reason }
+            }
+            return false
+        }
         readJob = viewModelScope.launch(Dispatchers.IO) {
             // Mode auto-negotiation: send the framed HELLO; if no CAPS/DeviceInfo lands
             // within ~1.5s the device is likely sitting at its normal CLI menu, so nudge it
             // into companion mode with the RAW (un-framed) line "companion\n" and retry
             // HELLO. When the device is already in companion mode the first HELLO just works
             // and the nudge never fires (CAPS arrives, _device becomes non-null).
-            c.hello()
+            if (!controlSent(c.hello())) return@launch
             var helloDeadline = companionNowMs() + 1500
             while (isActive) {
                 if (transport?.isOpen != true) {
@@ -712,7 +722,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
                     // Raw bytes, NOT a framed message: the plain-text CLI reads this line.
                     try { transport?.write("companion\n".toByteArray(Charsets.US_ASCII)) } catch (e: Exception) { app.brucia.BruciaLog.w("VM", "companion-mode nudge write", e) }
                     kotlinx.coroutines.delay(300)
-                    c.hello()
+                    if (!controlSent(c.hello())) break
                     helloDeadline = companionNowMs() + 1500
                 }
             }
@@ -722,13 +732,13 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
             while (isActive) {
                 kotlinx.coroutines.delay(8000)
                 if (transport?.isOpen != true || client !== c) break
-                c.ping(c.nextId())
+                if (!controlSent(c.ping(c.nextId()))) break
                 // Also re-fetch CAPS so a theme change made ON THE DEVICE propagates to the app: CAPS
                 // carries the live device UI color (theme), and handling it rebuilds _device, which
                 // re-themes the app accent. The device always wins; app-side theme_set updates _device
                 // immediately. Cheap (cached caps) and no device redraw (helloSeen already true). Skip
                 // while a command is awaiting its ACK so we don't interleave during a long blocking op.
-                if (!s.hasPending) c.hello()
+                if (!s.hasPending && !controlSent(c.hello())) break
                 // Link watchdog: if the device has stopped answering (no PONG/CAPS for ~26s, i.e.
                 // ~3 missed pings) while we believe we are connected, it most likely rebooted out of
                 // companion mode (the USB-CDC can stay open, so every command just errors and the UI
@@ -3066,14 +3076,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         // Include streams with missing ACKs: a timeout does not prove hardware stopped.
         val c = client?.takeIf { transport?.isOpen == true }
         subscriptions.disconnect { stream ->
-            try { c?.sub(stream, false) } catch (e: Exception) { BruciaLog.d("VM", "stream unsubscribe: ${e.message}") }
+            c?.sub(stream, false)?.onFailure { BruciaLog.d("VM", "stream unsubscribe: ${it.message}") }
         }
         // Screen/LED the app turned off: restore them now so a quick reconnect does not find the
         // device dark while the switches show on (the device itself waits 15 s of silence).
         val restoreOutputs = outputs.disconnect()
         if (c != null) {
             restoreOutputs.forEach { cmd ->
-                try { c.cmd(cmd) } catch (e: Exception) { BruciaLog.d("VM", "restore $cmd: ${e.message}") }
+                c.cmd(cmd).onFailure { BruciaLog.d("VM", "restore $cmd: ${it.message}") }
             }
         }
         fileReader.disconnect()
@@ -3805,15 +3815,20 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
         val captured = client
         withContext(Dispatchers.IO) {
             try {
-                if (client === captured && captured != null) {
-                    // Same preflight as the session (stops are always permitted on an open link).
-                    check(!remoteOwnsLink) { REMOTE_OWNS_LINK }
-                    CommandCapabilities.check(cmd, _device.value?.caps, _device.value?.features)
-                    captured.cmd(cmd)
-                }
-            } catch (e: Exception) { BruciaLog.d("Op", "$cmd: ${e.message}") }
+                if (client !== captured || captured == null) return@withContext false to "Device disconnected"
+                check(!remoteOwnsLink) { REMOTE_OWNS_LINK }
+                CommandCapabilities.check(cmd, _device.value?.caps, _device.value?.features)
+                captured.cmd(cmd).fold(
+                    onSuccess = { true to "" },
+                    onFailure = { false to (it.message ?: "Unable to send stop") },
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BruciaLog.d("Op", "$cmd: ${e.message}")
+                false to (e.message ?: "Unable to send stop")
+            }
         }
-        true to ""
     }
     private val responder = ResponderService(viewModelScope, commandRunner, isConnected = { session != null }, stopRunner = directStop)
     private val karma = KarmaService(viewModelScope, commandRunner, isConnected = { session != null }, stopRunner = directStop)

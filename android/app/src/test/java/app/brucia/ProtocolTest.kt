@@ -59,12 +59,26 @@ class ProtocolTest {
 
     @Test fun oversizedCommandIsRejectedBeforeWriting() {
         val t = FakeTransport()
-        try {
-            CompanionClient(t).cmd("x".repeat(8192))
-            org.junit.Assert.fail("Expected oversized frame rejection")
-        } catch (_: IllegalArgumentException) {
-            assertTrue(t.written.isEmpty())
-        }
+        val result = CompanionClient(t).cmd("x".repeat(8192))
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("frame limit"))
+        assertTrue(t.written.isEmpty())
+    }
+
+    @Test fun everyEnvelopeKindReportsBudgetFailureWithoutThrowingOrWriting() {
+        val pipe = FakeTransport()
+        val client = CompanionClient(pipe).apply { sendLimit = 1 }
+        assertTrue(client.hello().isFailure)
+        assertTrue(client.ping().isFailure)
+        assertTrue(client.cmd("info").isFailure)
+        assertTrue(client.cmdFields("info", JSONObject()).isFailure)
+        assertTrue(client.sub("wifi.ap", true).isFailure)
+        assertTrue(client.sub("wifi.ap", true, 1, "fixture").isFailure)
+        assertTrue(pipe.written.isEmpty())
+        assertEquals(0L, client.counters.snapshot().framesSent)
+        client.sendLimit = 8192
+        assertEquals(77, client.cmd("info", 77).getOrThrow())
+        assertEquals(1L, client.counters.snapshot().framesSent)
     }
 
     @Test fun subscriptionAckCannotCompletePendingCommand() {
@@ -201,7 +215,7 @@ class ProtocolTest {
         val workers = java.util.concurrent.Executors.newFixedThreadPool(8)
         try {
             val tasks = (0 until 160).map { index ->
-                workers.submit<Int> { client.cmd("info $index") }
+                workers.submit<Int> { client.cmd("info $index").getOrThrow() }
             }
             val ids = tasks.map { it.get(5, java.util.concurrent.TimeUnit.SECONDS) }
             assertEquals(160, ids.toSet().size)

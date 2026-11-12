@@ -4,6 +4,66 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Public review follow-up — 2026-11-11
+
+Base `942287e5`, production changes not committed/released yet. Review corrections:
+UsbTransport.write no longer swallows driver failures; CompanionClient outgoing APIs return
+Result instead of throwing for size rejection. Session, HELLO/PING, teardown and direct-stop
+callers consume the result. Existing CommandSession already checked isOpen after writes;
+therefore a delayed timeout was not universal in the previous version.
+
+Fresh verification:
+- `cd android && ./gradlew --offline :app:testDebugUnitTest :app:lintDebug`:
+  **1,200 tests**, zero failures/errors/skips; lint 0 errors, 1 warning (OldTargetApi).
+  New UsbTransportWriteTest runs the real transport against an already-open fake driver:
+  error/cause propagate, broken link refuses a second write, closed driver writes nothing,
+  pending session returns immediately without a timeout or sent-frame counter increment.
+  Protocol/session tests reject every envelope kind and oversized fields without a crash,
+  preserve the healthy session, and successfully send a subsequent small command.
+- First intermediate run failed one old assertion expecting the less-specific USB error text;
+  it was updated to the new explicit closed-link message. The full final run above passed.
+- `python3 tools/test_android_logic.py`: **270 PASS** (host subset, not a second Android build).
+- `python3 tools/test_brand.py`: **12 tests, 1 skipped, OK**.
+- README relative links/image paths resolve. Three PNGs inspected visually; metadata and hashes
+  are in docs/media/manifest.json. These are unedited screenshots of the released 0.1.13 APK
+  on the API 36.1 arm64 emulator, not the unreleased transport changes. Built-in synthetic WPA
+  demo only; proxy left stopped, no board or radio actions. Screens are not hardware acceptance.
+
+Decoder measurement (no implementation rewrite):
+`python3 tools/benchmark_companion_decoder.py --output docs/benchmarks/2026-11-11-decoder-host.json`
+compiles actual CompanionClient/FrameBudget/LinkCounters with cached dependencies and runs
+synthetic framed JSON. Warmup then three measured trials for each payload/read size;
+report records samples, source hashes, JVM and host. Thread allocation includes parser/harness
+work, not only buffer copies. For 8 KiB payloads:
+
+| Read size | Median throughput (host) | Allocated bytes per frame (approx.) |
+|---|---|---|
+| 1 byte | 3.47 MiB/s | 32.6 MiB |
+| 64 bytes | 68.15 MiB/s | 576.4 KiB |
+| 4096 bytes | 87.93 MiB/s | 74.7 KiB |
+
+The quadratic copying cost is real for extreme fragmentation. These measurements do not show
+an end-to-end bottleneck, nor rule out Android GC/jank. No phone throughput, USB line-rate or
+radio-stream performance claim; keep a device profiling follow-up before a ring-buffer change.
+
+Credential/branding audit:
+- Non-shallow repository; 3,695 commits reachable from local refs, including merge-parent
+  diffs, 16,032,321 added text lines. Patterns cover private-key headers, common service tokens,
+  bearer tokens and quoted/unquoted credential assignments. 65 candidates triaged.
+- 15 private-key markers belong to historical cURL tests/examples; bearer samples also belong
+  to cURL tests. Other matches are test/example constants, public firmware defaults,
+  placeholders and variable expressions. No operational credentials identified in checked
+  patterns. Historical object names contain no keystore/.jks/.p12/.pfx/.env/credential-container
+  paths matching the scan. No secret values printed or written to the report.
+- This heuristic text scan does not certify all binaries, unreachable/deleted objects or
+  remote-only refs. No history rewrite, credential rotation or service calls with candidate keys.
+- Redacted script/results: `.codex_tmp/public-review-20261111/scan_history.py`,
+  `secret-scan.json`, `secret-scan-summary.txt`. No Predatory text found in current public
+  Markdown/HTML/SVG/JSON. GitHub About had an empty description and HTTP homepage; updated
+  to an authorized-research description and the existing HTTPS site.
+
+No new firmware build, flash, hardware acceptance, commit, push or release in this task.
+
 ## Project audit — 2026-11-10
 
 Base `78ef13dc`, clean tree at audit start. Scope: all 52 catalog descriptors/IDs/tabs

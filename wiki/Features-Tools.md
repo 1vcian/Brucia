@@ -83,6 +83,13 @@ A **MITM HTTPS proxy that runs on the phone**, used together with the Wi-Fi ARP-
 redirect (see [Features-Wi-Fi](Features-Wi-Fi.md)) so intercepted traffic can be inspected on the device
 you already own. Authorized testing only.
 
+This is a **single-user lab capture proxy**, not a production or high-concurrency service.
+The executor has 4 core workers, a maximum of 8, and a queue of 32 connections. Slow clients
+and idle tunnels can occupy those workers until a client read times out (60 s); queue wait
+can add to that. This is a read timeout, not a maximum connection lifetime. Extra connections are closed when the executor is saturated. Stop closes
+tracked sockets. HTTPS inspection requires the client to trust the configured CA; pinned
+clients may refuse it. Do not expose the proxy as a shared or public service.
+
 ## Session report
 A generated report of the session with **OSINT** enrichment and **insights**, built from
 everything captured during the session.
