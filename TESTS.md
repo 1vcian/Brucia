@@ -13,8 +13,25 @@ left `framework-arduinoespressif32-libs/esp32s3/pioarduino-build.py` without its
 the platform restores only after `checkprogsize`. With `pre_restore_pioarduino_build.py`:
 a simulated stale state was restored at the start of `lilygo-t-display-s3 -t envdump`;
 the `-mmc` envdump ended with a byte-identical file and no backup; full
-`pio run -e ES3C28P` succeeded (101 s) with the file pristine. Not tested: Windows,
-a full 50-env batch, concurrent `pio run` on one core dir (documented as unsupported).
+`pio run -e ES3C28P` succeeded (101 s) with the file pristine.
+
+Sequential batch of all 70 envs on one `~/.platformio`, checking after each env that no
+`pioarduino-build.py.<chip>` backup remained and every chip's `pioarduino-build.py` matched
+its pre-batch hash: no leftover backup and no change after any env. This includes
+`lilygo-t-display-s3-mmc` (`lib_ignore = SD`), which failed to compile, the case that used to
+corrupt the file. 64 envs built. 6 failed for reasons unrelated to this fix, and not covered
+by the 3-board `build` CI:
+- `lilygo-t-display-s3`, `-touch`, `-mmc`, `-touch-mmc`, and `lilygo-t-hmi`:
+  `lib/TFT_eSPI/Extensions/Touch.cpp`, "no declaration matches
+  `TFT_eSPI::begin_touch_read_write()`".
+- `m5stack-dinmeter`: `<command-line>: error: no match for 'operator='` on
+  `std::vector<std::pair<const char*, int>>`.
+- `NewDeviceModel`: template env, not in any CI matrix. LiteLED rejects arduino-esp32 3.x.
+
+16 envs were rebuilt in a second pass after the first ran out of disk space. Keeping all 70
+`.pio/build` dirs needs about 15 GB or more. A run killed with SIGTERM skips the exit restore;
+the next build's start-up restore repaired it. Not tested: Windows, concurrent `pio run` on
+one core dir (documented as unsupported).
 
 ## Public review follow-up — 2026-11-11
 
