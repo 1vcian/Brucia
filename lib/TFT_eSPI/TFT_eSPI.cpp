@@ -6188,7 +6188,9 @@ void TFT_eSPI::getSetup(setup_t &tft_settings)
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
-#ifdef TOUCH_CS
+// Same condition as the Touch.h include in TFT_eSPI.h: Brucia's precompiler_flags.h
+// always defines TOUCH_CS, and parallel/PIO displays have no touch declarations.
+#if defined(TOUCH_CS) && !defined(TFT_PARALLEL_8_BIT) && !defined(RP2040_PIO_INTERFACE)
   #include "Extensions/Touch.cpp"
 #endif
 

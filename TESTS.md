@@ -20,13 +20,18 @@ Sequential batch of all 70 envs on one `~/.platformio`, checking after each env 
 its pre-batch hash: no leftover backup and no change after any env. This includes
 `lilygo-t-display-s3-mmc` (`lib_ignore = SD`), which failed to compile, the case that used to
 corrupt the file. 64 envs built. 6 failed for reasons unrelated to this fix, and not covered
-by the 3-board `build` CI:
-- `lilygo-t-display-s3`, `-touch`, `-mmc`, `-touch-mmc`, and `lilygo-t-hmi`:
-  `lib/TFT_eSPI/Extensions/Touch.cpp`, "no declaration matches
-  `TFT_eSPI::begin_touch_read_write()`".
-- `m5stack-dinmeter`: `<command-line>: error: no match for 'operator='` on
-  `std::vector<std::pair<const char*, int>>`.
-- `NewDeviceModel`: template env, not in any CI matrix. LiteLED rejects arduino-esp32 3.x.
+by the 3-board `build` CI. 5 are now fixed and build on macOS:
+- `lilygo-t-display-s3`, `-touch`, `-mmc`, `-touch-mmc`, and `lilygo-t-hmi` (parallel
+  displays) failed in `Extensions/Touch.cpp` with "no declaration matches". Brucia's
+  `precompiler_flags.h` always defines `TOUCH_CS`, and `TFT_eSPI.cpp` included the touch
+  implementation that the header skips for parallel displays. It now uses the header's
+  condition.
+- `m5stack-dinmeter` failed with `no match for 'operator='` (macOS only). Its pin-list defines
+  had no spaces, so SCons passed them unquoted and macOS `/bin/sh` (bash) brace-expanded them
+  into several `-D`. Linux CI uses dash, so it never failed there. The values now have spaces,
+  like every other board.
+- `NewDeviceModel` still fails: template env, not in any CI matrix. LiteLED rejects
+  arduino-esp32 3.x.
 
 16 envs were rebuilt in a second pass after the first ran out of disk space. Keeping all 70
 `.pio/build` dirs needs about 15 GB or more. A run killed with SIGTERM skips the exit restore;

@@ -10,6 +10,9 @@ that offloads computation to the phone. Format loosely follows
 - Firmware builds no longer break after a failed or interrupted build of another board:
   a pre-build script restores pioarduino's shared `pioarduino-build.py`, which `lib_ignore = SD`
   had left without the FATFS include paths (`esp_vfs_fat.h: No such file or directory` on ESP32-S3).
+- LilyGo T-Display S3 (all four variants) and T-HMI build again: TFT_eSPI no longer compiles touch
+  code for parallel displays. M5Stack DinMeter builds on macOS: its pin lists were brace-expanded
+  by the shell.
 
 - USB write failures propagate immediately with the driver cause and mark the link broken;
   outgoing companion frames return an explicit result. Oversized commands/subscriptions fail
