@@ -1,122 +1,122 @@
 # Scoped worker preparation
 
-Stato aggiornato 2026-11-04: quattro worker Claude locali avviati dai pacchetti
-S08a, S09, S11a e S06-S10a; consegne ancora da revisionare. L'accesso esplicitamente
-consentito ha verificato autenticazione Claude (`loggedIn:true`) e Docker 27.5.1.
-L'utente ha poi richiesto **Claude Code già installato direttamente sul Mac, senza
-Linux/Docker**: questa istruzione sostituisce per questo lotto il requisito di
-isolamento container/rete descritto sotto. La modalità locale usa copie allowlist,
-`--safe-mode`, strumenti espliciti e `--permission-mode dontAsk`, senza flag di bypass;
-non offre isolamento OS del filesystem o della rete. Configurazione host `opus`,
-limite CLI 5 USD stimati per worker; modello effettivo registrato nei log JSON locali.
-S02/S07 restano bloccati dai rispettivi prerequisiti. Il coordinatore rivede ogni
-consegna prima dell'integrazione. Nessun nuovo login o consenso all'orchestrazione
-è richiesto. Questo indice resta al coordinatore, non ai worker.
+Status updated 2026-11-04: four local Claude workers started from packets
+S08a, S09, S11a and S06-S10a; deliveries still to be reviewed. The explicitly
+granted access verified Claude authentication (`loggedIn:true`) and Docker 27.5.1.
+The user then requested **Claude Code installed directly on the Mac, without
+Linux/Docker**: for this batch this instruction replaces the container/network
+isolation requirement described below. The local mode uses allowlist copies,
+`--safe-mode`, explicit tools and `--permission-mode dontAsk`, with no bypass flags;
+it does not provide OS-level filesystem or network isolation. Host configuration `opus`,
+CLI limit 5 USD estimated per worker; actual model recorded in the local JSON logs.
+S02/S07 remain blocked by their respective prerequisites. The coordinator reviews every
+delivery before integration. No new login or orchestration consent
+is required. This index stays with the coordinator, not the workers.
 
-## Orchestrazione autorizzata — S06/S08–S11, con prerequisiti S02/S07
+## Authorized orchestration — S06/S08–S11, with prerequisites S02/S07
 
-Manifest locale: `.codex_tmp/claude-stabilization-20261104/orchestration.json`.
-Ogni directory contiene `task.json`, copie in `baseline/`, hash SHA-256 e allowlist;
-S08a/S09 includono copie modificabili in `work/` e `run_checks.py`. Le sole dipendenze
-Maven pubbliche sono esportate in `deps/`; nessuna intera cache, credenziale, APK,
-cronologia Git o checkout completo è stato incluso. Gli estratti mantengono percorso,
-righe e hash del file originale. Questi pacchetti locali sono ignorati da Git.
-Baseline eseguite dal coordinatore: S08a **44 test JVM**, S09 **27 test JVM**, tutte
-passate. Sono test esistenti e sovrapposti alla suite principale, non risultati
-prodotti da Claude né nuove prove di stress/interoperabilità.
+Local manifest: `.codex_tmp/claude-stabilization-20261104/orchestration.json`.
+Each directory contains `task.json`, copies in `baseline/`, SHA-256 hashes and an allowlist;
+S08a/S09 include editable copies in `work/` and `run_checks.py`. Only the public Maven
+dependencies are exported into `deps/`; no entire cache, credential, APK,
+Git history or full checkout was included. The extracts preserve the path,
+lines and hash of the original file. These local packets are ignored by Git.
+Baselines run by the coordinator: S08a **44 JVM tests**, S09 **27 JVM tests**, all
+passed. These are existing tests overlapping with the main suite, not results
+produced by Claude nor new stress/interoperability evidence.
 
-| Pacchetto | Incarico e criterio di accettazione | Ordine |
+| Packet | Assignment and acceptance criterion | Order |
 |---|---|---|
-| S08a | Stress deterministico di CommandSession/CompanionClient/StreamSubscriptions: frame frammentati, timeout, cancellazioni, riconnessione, callback residue, cleanup OFF. Una correzione riprodotta e regressione sintetica; non certifica heap Android o tutte le code dell'app. | Primo lotto, indipendente |
-| S09 | Sincronizzazione Scottie e fixture indipendenti; baseline AudioDspTest. La sola auto-decodifica non prova interoperabilità. Mancano ancora fixture esterne/spec esportate: richiederle con provenienza, senza inventarle. | Primo lotto, revisione iniziale |
-| S11a | Audit in sola lettura di catture RF, troncamento e capability; distinguere percorso nativo e standalone. Nessuna estensione di trasmissioni o operazioni radio. Servono pacchetti successivi per completare l'inventario S11. | Primo lotto, indipendente |
-| S06-S10a | Revisione comune di proprietà connessione/porta/flash, permessi, ricreazione Activity e onCleared. Solo estratti dei coordinatori e adapter necessari. Consegna stati/proprietari e contratto del primo componente da estrarre; implementazione dopo revisione del coordinatore. | Evitare refactor concorrenti S06/S10 |
-| S02 | Configurazione build/CI e requisiti di verifica APK/upgrade; senza chiavi di firma. Non dichiarare accettazione senza ambiente build ed emulatore realmente utilizzabili. | Bloccato dai prerequisiti |
-| S07 | Prerequisiti migrazioni Room storiche. Nessuna implementazione senza schemi/fixture autentici v1/v2 e nessun fallback distruttivo. | Bloccato dai dati mancanti |
+| S08a | Deterministic stress of CommandSession/CompanionClient/StreamSubscriptions: fragmented frames, timeouts, cancellations, reconnection, residual callbacks, cleanup OFF. One reproduced fix and synthetic regression; does not certify Android heap or all of the app's queues. | First batch, independent |
+| S09 | Scottie synchronization and independent fixtures; AudioDspTest baseline. Self-decoding alone does not prove interoperability. External fixtures/exported specs are still missing: request them with provenance, without inventing them. | First batch, initial review |
+| S11a | Read-only audit of RF captures, truncation and capability; distinguish the native and standalone path. No extension of transmissions or radio operations. Later packets are needed to complete the S11 inventory. | First batch, independent |
+| S06-S10a | Shared review of connection/port/flash ownership, permissions, Activity recreation and onCleared. Only the necessary coordinator extracts and adapters. Delivers states/owners and the contract of the first component to extract; implementation after coordinator review. | Avoid concurrent S06/S10 refactors |
+| S02 | Build/CI configuration and APK/upgrade verification requirements; without signing keys. Do not declare acceptance without a genuinely usable build environment and emulator. | Blocked by prerequisites |
+| S07 | Historical Room migration prerequisites. No implementation without authentic v1/v2 schemas/fixtures and no destructive fallback. | Blocked by missing data |
 
-Regola ordinaria prima del dispatch: autenticazione nel runtime consentito, isolamento
-effettivo verificato, rete limitata al provider e nuova verifica degli hash. Per il
-lotto locale 2026-11-04 si applica la deroga esplicita dell’utente descritta sopra. Il solo chmod
-delle baseline e il cambio di cwd **non** costituiscono isolamento. Nessun flag di
-bypass dei permessi e nessuna esposizione della repo per aggirare il blocco.
-Il coordinatore rivede e testa ogni consegna, integra in sequenza, poi esegue le
-verifiche complete applicabili. Un rifiuto o `NEEDS_INPUT` termina quel tentativo;
-eventuali follow-up risolvono lacune tecniche, non riformulano lo scopo per eludere controlli.
-Lo stato dei task resta nel backlog; preparazione non equivale a implementazione.
+Ordinary rule before dispatch: authentication in the permitted runtime, actual isolation
+verified, network limited to the provider and a fresh verification of the hashes. For the
+local 2026-11-04 batch the explicit user waiver described above applies. Merely chmod-ing
+the baselines and changing the cwd do **not** constitute isolation. No permission-bypass
+flags and no exposure of the repo to work around the block.
+The coordinator reviews and tests every delivery, integrates in sequence, then runs the
+applicable full checks. A refusal or `NEEDS_INPUT` ends that attempt;
+any follow-ups resolve technical gaps, they do not reframe the scope to evade controls.
+The task status stays in the backlog; preparation is not equivalent to implementation.
 
-## Archivio: preparazione iniziale W06 / T06
+## Archive: initial preparation W06 / T06
 
-Priorità esplicita dell'utente: **migrare le funzionalità esistenti verso moduli
-manutenibili prima degli altri task di sviluppo**. Il coordinatore prepara e
-revisiona; l'implementazione viene assegnata a Claude soltanto dopo l'istruzione
-di avvio. Nessun worker è stato lanciato e nessun sorgente è stato modificato per
-questa migrazione. Il primo pacchetto è descritto qui; isolamento e harness sono
-ancora da predisporre.
+Explicit user priority: **migrate the existing features toward maintainable
+modules before the other development tasks**. The coordinator prepares and
+reviews; implementation is assigned to Claude only after the start
+instruction. No worker has been launched and no source has been modified for
+this migration. The first packet is described here; isolation and harness are
+still to be set up.
 
-## Contratto operativo
+## Operational contract
 
-- Il coordinatore conserva architettura, priorità, contratti fra moduli e decisioni
-  d'integrazione. Il worker verifica un componente, propone una patch piccola e termina.
-- Contesto minimo e veritiero: scopo del componente, impiego rilevante, contratti,
-  limiti e test. Non servono narrazione del prodotto o funzionalità estranee.
-  Non eliminare informazioni necessarie a valutare correttamente il lavoro.
-- I task sono attività di qualità software per un progetto di ricerca in sicurezza.
-  Si usano fixture sintetiche e test locali. Se un incarico futuro riguarda una
-  capacità duale, il pacchetto deve esplicitarne uso e perimetro autorizzato.
-- Nessuna esecuzione automatica di altri task dopo una consegna. Il coordinatore
-  rivede, prova e accetta/rifiuta; solo allora prepara eventuali follow-up.
-- Un esito `NO_CHANGE`, `NEEDS_INPUT` o un rifiuto si registra con la motivazione.
-  Non avviare cicli di riformulazione per aggirare controlli del modello.
+- The coordinator keeps the architecture, priorities, inter-module contracts and integration
+  decisions. The worker verifies one component, proposes a small patch and stops.
+- Minimal and truthful context: the component's purpose, relevant usage, contracts,
+  limits and tests. Product narrative or unrelated features are not needed.
+  Do not remove information necessary to correctly evaluate the work.
+- The tasks are software-quality activities for a security-research project.
+  Synthetic fixtures and local tests are used. If a future assignment concerns a
+  dual-use capability, the packet must make its use and authorized scope explicit.
+- No automatic execution of other tasks after a delivery. The coordinator
+  reviews, tests and accepts/rejects; only then does it prepare any follow-ups.
+- A `NO_CHANGE`, `NEEDS_INPUT` outcome or a refusal is recorded with its reason.
+  Do not start reframing cycles to work around the model's controls.
 
-## Isolamento da predisporre prima dell'avvio
+## Isolation to set up before launch
 
-**Non ancora predisposto né verificato.** Il testo di questo file non è una
-barriera tecnica. Cambiare directory o chiedere di non leggere altro non limita
-l'accesso al filesystem. Un worktree completo espone comunque l'intero progetto.
+**Not yet set up or verified.** The text of this file is not a
+technical barrier. Changing directory or asking not to read anything else does not limit
+filesystem access. A full worktree exposes the entire project anyway.
 
-Per ogni task il coordinatore dovrà:
+For each task the coordinator must:
 
-1. Creare un pacchetto con le sole copie dei file in allowlist, preservando package,
-   copyright e licenze, più un brief e un harness di test limitato a quei file.
-2. Registrare SHA-256 e mappa dei percorsi originali. Dare al worker copie modificabili;
-   conservare la baseline e l'harness in sola lettura.
-3. Eseguire il worker in un ambiente con restrizioni reali: nessun mount della repo,
-   dei suoi antenati o della home del maintainer; solo pacchetto, directory output,
-   temporanei e toolchain/dependency pubbliche necessarie. Non basta un prompt.
-4. Escludere Git metadata, cronologia chat, configurazioni globali, chiavi di firma,
-   credenziali GitHub/ADB e altri segreti. Non montare l'intera cache o home per
-   comodità; esportare soltanto gli artefatti pubblici necessari al compilatore.
-5. Limitare la rete al trasporto necessario al provider; il task non richiede
-   navigazione, installazioni o connessioni a sistemi di prova. Validare questa
-   configurazione e l'isolamento effettivo prima di assegnare codice.
+1. Create a packet with only the copies of the allowlisted files, preserving package,
+   copyright and licenses, plus a brief and a test harness limited to those files.
+2. Record SHA-256 and a map of the original paths. Give the worker editable copies;
+   keep the baseline and the harness read-only.
+3. Run the worker in an environment with real restrictions: no mount of the repo,
+   its ancestors or the maintainer's home; only the packet, output directory,
+   temporaries and the necessary public toolchain/dependencies. A prompt is not enough.
+4. Exclude Git metadata, chat history, global configurations, signing keys,
+   GitHub/ADB credentials and other secrets. Do not mount the entire cache or home for
+   convenience; export only the public artifacts needed by the compiler.
+5. Limit the network to the transport needed for the provider; the task does not require
+   browsing, installations or connections to test systems. Validate this
+   configuration and the actual isolation before assigning code.
 
-Se l'ambiente non offre questa separazione, lo stato resta `NOT_READY`.
-Modello, identificativo CLI, autenticazione e limiti di costo saranno verificati
-al momento dell'avvio: questo file non assume opzioni CLI o versioni disponibili.
+If the environment does not provide this separation, the status stays `NOT_READY`.
+The model, CLI identifier, authentication and cost limits will be verified
+at launch time: this file does not assume CLI options or available versions.
 
-### Harness del pacchetto
+### Packet harness
 
-Il coordinatore prepara un `run_checks` che compila esclusivamente i file del task
-e avvia i relativi test. Per i primi tre task bastano Kotlin/JVM e JUnit; il terzo
-richiede anche org.json. Usare le versioni già verificate: Kotlin 2.4.21,
-JUnit 4.13.2 e org.json 20260814, con le dipendenze pubbliche del compilatore.
-Non consegnare `tools/check_android_changes.py` o un APK come harness: danno accesso
-a dipendenze/output dell'intera applicazione e non sono necessari ai worker.
+The coordinator prepares a `run_checks` that compiles exclusively the task's files
+and runs their tests. For the first three tasks Kotlin/JVM and JUnit are enough; the third
+requires also org.json. Use the already-verified versions: Kotlin 2.4.21,
+JUnit 4.13.2 and org.json 20260814, with the compiler's public dependencies.
+Do not deliver `tools/check_android_changes.py` or an APK as the harness: they give access
+to the whole application's dependencies/output and are not needed by the workers.
 
-## Regole comuni da includere in ogni brief
+## Common rules to include in every brief
 
-- Leggi e modifica solo i file assegnati. Harness e dependency sono in sola lettura.
-- Mantieni le API e i limiti dichiarati; niente refactor trasversali, nuove librerie
-  o cambi dei criteri di sicurezza per far passare un test.
-- Prima riproduci un problema o identifica un caso contrattuale realmente scoperto.
-  Evita test che duplicano quelli esistenti o riscrivono l'implementazione.
-- Proponi al massimo una correzione circoscritta e pochi test pertinenti. Se servono
-  altri file o oltre 160 righe di diff, restituisci `NEEDS_INPUT` con la ragione.
-- Esegui solo l'harness del pacchetto. Riporta comandi, esito e limiti reali.
-- Consegna diff e `RESULT.md` (massimo 20 righe): stato, caso riprodotto, cambiamento,
-  verifiche, eventuale dubbio. Non integrare o committare direttamente nella repo.
+- Read and modify only the assigned files. Harness and dependencies are read-only.
+- Keep the declared APIs and limits; no cross-cutting refactors, new libraries
+  or changes to the security criteria to make a test pass.
+- First reproduce a problem or identify a genuinely uncovered contractual case.
+  Avoid tests that duplicate existing ones or rewrite the implementation.
+- Propose at most one circumscribed fix and a few relevant tests. If other
+  files or over 160 lines of diff are needed, return `NEEDS_INPUT` with the reason.
+- Run only the packet harness. Report commands, outcome and real limits.
+- Deliver a diff and `RESULT.md` (at most 20 lines): status, reproduced case, change,
+  checks, any doubt. Do not integrate or commit directly into the repo.
 
-## T06 — primo task da esportare: registro delle feature esistenti
+## T06 — first task to export: registry of the existing features
 
 **Title:** Extract the existing Android tool catalog into a validated JVM registry.
 
@@ -599,7 +599,7 @@ After accepting T06, prepare one packet at a time with actual source boundaries:
 Each follow-up needs a new explicit file allowlist, frozen baseline and acceptance
 harness after reviewing the prior result. No bulk rewrite or feature additions.
 
-## T01 — brief da esportare
+## T01 — brief to export
 
 **Title:** Review bounded PCM recording and export ownership.
 
@@ -624,7 +624,7 @@ Do not change the default duration, UI or export format.
 **Acceptance:** Assigned suite passes; memory stays bounded; snapshot ownership and
 cancellation remain correct. `NO_CHANGE` is valid when the review finds no gap.
 
-## T02 — brief da esportare
+## T02 — brief to export
 
 **Title:** Review bounded HTTP/1 inspection parser.
 
@@ -650,7 +650,7 @@ Use synthetic streams and a fake monotonic clock where needed.
 **Acceptance:** Valid fixtures still parse; malformed/truncated messages cannot
 escape bounds or silently consume another message. No live network tests required.
 
-## T03 — brief da esportare
+## T03 — brief to export
 
 **Title:** Review deterministic release asset selection.
 
@@ -675,7 +675,7 @@ Duplicate canonical boards or multiple APK candidates must fail explicitly; do n
 **Acceptance:** Existing fixtures pass; invalid metadata never selects an unrelated
 asset; valid board identities are preserved. No API calls or installer execution.
 
-## T04 — non esportare ancora
+## T04 — do not export yet
 
 Possible later packet: `src/companion/codec.cpp`, `src/companion/codec.h` and
 `tools/test_firmware_codec.py`. Review RFC Base64 edge cases against an independent
@@ -684,20 +684,20 @@ its full contract and harness only after the first batch's master review.
 
 ## S01 — coordinator integration review, not a worker packet
 
-Completato dal coordinatore il 2026-11-01. `AppUpdater.fetchSnapshot()` legge
-`/latest` una volta; `ReleaseUpdateService` pubblica versione, note, APK, schede e
-selezione nello stesso stato. Refresh invalida prima dell'IO; errori e cancellazione
-non ripristinano asset precedenti. Click da selezioni obsolete vengono rifiutati.
-Home e Updates consumano lo stesso snapshot; il progresso del download è separato.
-Refresh bloccato durante download/installer e flash; immagine compatibile richiesta
-prima di prendere la porta USB. Nessuna modifica a protocollo, firmware o versione.
+Completed by the coordinator on 2026-11-01. `AppUpdater.fetchSnapshot()` reads
+`/latest` once; `ReleaseUpdateService` publishes version, notes, APK, boards and
+selection in the same state. Refresh invalidates before the IO; errors and cancellation
+do not restore previous assets. Clicks from stale selections are rejected.
+Home and Updates consume the same snapshot; the download progress is separate.
+Refresh blocked during download/installer and flash; a compatible image is required
+before taking the USB port. No change to protocol, firmware or version.
 
-Nove regressioni sintetiche; compilazione completa con cache: 156 file Kotlin,
-533 test / 86 suite non-Paparazzi. Gradle/lint bloccati dal lock globale; OTA live,
-permessi Android e flash fisico non verificati. Per l'evidenza vedere TESTS.md.
-S03 è stato successivamente completato (vedi sotto); S04 completato sotto; prossimo S06, S02 resta bloccato.
-Nessun worker da lanciare automaticamente. Il lifecycle completo di APK/flash resta
-in S06/S10; questa integrazione copre lo snapshot e i suoi punti di consumo.
+Nine synthetic regressions; full cached compilation: 156 Kotlin files,
+533 tests / 86 non-Paparazzi suites. Gradle/lint blocked by the global lock; live OTA,
+Android permissions and physical flash not verified. For the evidence see TESTS.md.
+S03 was subsequently completed (see below); S04 completed below; next S06, S02 remains blocked.
+No worker to launch automatically. The full APK/flash lifecycle stays
+in S06/S10; this integration covers the snapshot and its consumption points.
 
 ## S03 — coordinator capability/lifecycle matrix, completed 2026-11-04
 

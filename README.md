@@ -2,14 +2,30 @@
 
 **WPA/WPA2 dictionary checks on your phone. MITM inspection with a GUI. GPS wardriving. PCAP analysis.**
 
+<p align="center">
+  <a href="https://1vcian.me/Brucia/"><img alt="Live web flasher at 1vcian.me/Brucia" src="https://img.shields.io/badge/Live-1vcian.me%2FBrucia-ff5a1f?style=for-the-badge&logo=googlechrome&logoColor=white"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/1vcian/Brucia/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/1vcian/Brucia?logo=github&logoColor=white&label=release&color=ff5a1f"></a>
+  <a href="https://github.com/1vcian/Brucia/releases/latest"><img alt="Download APK and firmware" src="https://img.shields.io/github/downloads/1vcian/Brucia/total?logo=android&logoColor=white&label=downloads&color=3ddc84"></a>
+  <a href="https://1vcian.me/Brucia/wiki/"><img alt="Wiki" src="https://img.shields.io/badge/docs-wiki-2088ff?logo=readthedocs&logoColor=white"></a>
+  <a href="CHANGELOG.md"><img alt="Changelog" src="https://img.shields.io/badge/changelog-keep%20a%20changelog-f25d30?logo=keepachangelog&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-2088ff"></a>
+  <a href="https://github.com/BruceDevices/firmware"><img alt="Built on Bruce" src="https://img.shields.io/badge/built%20on-Bruce-8a2be2?logo=espressif&logoColor=white"></a>
+</p>
+
 Brucia pairs a native Android app with Bruce-derived ESP32 firmware. The phone runs
 password-candidate checks, the HTTP/HTTPS inspection proxy, maps and capture analysis;
 the ESP32 handles its radios and peripherals. Use a **LilyGO T-Embed CC1101**, an
 Android phone with USB host/OTG and a USB data cable. The firmware also works standalone.
 
-**[Download the latest APK + firmware](https://github.com/1vcian/Brucia/releases/latest)** ·
-[Get started](wiki/Getting-Started.md) · [Wiki](https://1vcian.me/Brucia/wiki/) ·
-[Tutorials](wiki/Tutorials.md) · [Changelog](CHANGELOG.md)
+**Live at [1vcian.me/Brucia](https://1vcian.me/Brucia/)** &nbsp;·&nbsp;
+**[Download the latest APK + firmware](https://github.com/1vcian/Brucia/releases/latest)** &nbsp;·&nbsp;
+[Get started](wiki/Getting-Started.md) &nbsp;·&nbsp;
+[Wiki](https://1vcian.me/Brucia/wiki/) &nbsp;·&nbsp;
+[Tutorials](wiki/Tutorials.md) &nbsp;·&nbsp;
+[Changelog](CHANGELOG.md)
 
 > **Authorized security research only:** use Brucia on equipment you own or have explicit
 > permission to test. See [SECURITY.md](SECURITY.md) for scope, limitations and reporting.
