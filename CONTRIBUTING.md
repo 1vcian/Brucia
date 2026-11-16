@@ -207,6 +207,18 @@ repository root.
 
 Companion contributions should follow the [service ownership map](src/companion/README.md).
 
+### Firmware CI coverage
+
+The normal push/PR workflow builds T-Embed CC1101, Cardputer and Core4MB.
+`PR_All_envs.yml` discovers every configured real board and builds the full matrix
+weekly (Monday 03:23 UTC) or through **Run workflow**, optionally against a PR.
+It uses isolated runners, at most four in parallel; it does not publish releases.
+Run `python3 tools/firmware_matrix.py` in the PlatformIO environment to inspect
+the selected boards (currently 69). Only `NewDeviceModel` is excluded: it is a
+contribution template, whose LiteLED dependency is not compatible with Arduino 3.x.
+New real board environments are included automatically. A successful matrix proves
+compilation, not physical compatibility; hardware results stay in `TESTS.md`.
+
 ### Release signing
 Release builds are signed from a keystore that is **never committed**. Create
 `android/keystore.properties` (git-ignored) with:

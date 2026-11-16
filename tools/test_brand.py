@@ -26,6 +26,7 @@ ALLOWLIST = [
     ("docs/COMPARISON.md", {"upstream"}, "primary-source citations for the comparison with Bruce and its official apps"),
     ("CHANGELOG.md", {"own", "upstream"}, "historical release records and published tag links; upstream credit"),
     ("TESTS.md", {"own"}, "evidence log quoting what devices displayed at the time"),
+    ("docs/dictionary-sources.json", {"own"}, "frozen source URLs of release assets downloaded and hashed for provenance; not runtime configuration"),
     ("skills/brucia-maintenance/references/*.md", {"own"}, "task history and release evidence"),
     ("NOTICE", {"upstream"}, "AGPL attribution to Bruce"),
     ("THIRD_PARTY.md", {"upstream"}, "third-party/upstream component credits (mquickjs, BruceHAL)"),

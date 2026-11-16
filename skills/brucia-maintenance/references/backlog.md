@@ -1,5 +1,26 @@
 # Work queue — single operational ledger
 
+## Current software queue — 2026-11-16, base `6f3c4025` (0.1.15)
+
+This section is the current queue. Older dated findings below describe their original
+checkpoint; the correction/release outcome supersedes them. Hardware gates stay separate.
+
+| Item | State | Next action / boundary |
+|---|---|---|
+| F42 — remaining dictionary integrity pins | IMPLEMENTED, unreleased; validation recorded in TESTS.md | RockYou and all three top-* assets downloaded from the existing wordlists release; local size/SHA-256 match GitHub metadata. All eight Wi-Fi/NFC catalog entries pinned and recorded. This identifies hosted bytes, not previously unrecorded upstream provenance. No asset replaced or release published. |
+| F45 — current release records | UPDATED | CHANGELOG now separates 0.1.14 (2026-11-12) and 0.1.15 (2026-11-13); correct stale unpublished/private/brand statuses. Retain original evidence and physical limits. |
+| F53 — full firmware CI matrix | IMPLEMENTED, remote execution pending | Weekly/manual discovery of configured boards, exact template exclusion (`NewDeviceModel`), pinned Actions matching build.yml, max four isolated runners. Current selection: 69 environments. Local selection/workflow regressions; no new 69-board compile or remote CI PASS claimed. Template LiteLED compatibility remains a contributor-template follow-up, not a supported-board gate. |
+| Integration coverage | OPEN | Add targeted emulator/fake-transport tests for UI/VM Stop, leave, rotation, reconnect and late replies where only isolated services/source wiring are checked. Preserve separate physical checks. |
+| E01–E03 continuation | OPEN, incremental | Extract one responsibility at a time from MainActivity/WardriveViewModel, beginning with imports/target selection; no general rewrite or plugin SDK yet. |
+| F35 store downstream downloads | OPEN | Bootstrap hardening shipped in 0.1.13; decide and implement authenticated catalog/app delivery for the external store script. Do not redo completed installer sync/rollback/date/budget fixes. |
+| F50 Android decoder profiling | OPEN | Measure allocation/GC under realistic and fragmented input before considering a buffer refactor. Host measurements alone are not an Android bottleneck. |
+
+The USB failure/send-result fixes (F48/F49) and README refresh shipped in 0.1.14;
+firmware build recovery and the six real-board build fixes shipped in 0.1.15.
+NRF24 Stop, FM ownership and saved-RF replay guards are already fixed in software.
+The owner authorized commit/push on 2026-11-16; these changes remain unreleased.
+No new hardware acceptance is implied by the changes above.
+
 ## Public review follow-up — 2026-11-11, base `942287e5`
 
 Released in 0.1.14 (batch commit `87f79ac8`, release commit `ea3c7dc4`, tag `v0.1.14`, 2026-11-12);
@@ -19,8 +40,8 @@ under tools/benchmarks and docs/benchmarks. Secret scan details stay redacted in
 
 ## Operational audit — 2026-11-10, base `78ef13dc`
 
-This is the current queue; the batches and tables further below preserve the history and do
-not constitute a new acceptance. Local audit of code, contracts, pipeline and
+This is the historical 2026-11-10 audit; the current queue is at the top of this file.
+Its findings and test counts do not constitute a new acceptance. Local audit of code, contracts, pipeline and
 coverage: **52 functional descriptors, 52 distinct IDs and tabs**. It is not an end-to-end
 certification of all the tools. No app/firmware change, flash,
 transmission, tag read or new release during this audit.
@@ -54,7 +75,7 @@ independent review on `b4dcaecc` reopens F38 for the two cases described below.
 | F39 | DONE (JVM) | `2859a3c1`, `2f500af2` | `NusConsoleCore` + session token; 13 tests, 11 failing on the base logic. Physical PIN/connect/`info` NOT RUN. |
 | F40 | DONE (harness) | `fbe42f21`, `1752c918` | Bundle `.release-staging/`, `./release.sh resume`, tag/release preflight, draft until asset verification; 16 tests with real git + bare remote + fake gh. Recovery on failure verified in the harness; normal 0.1.13 publication succeeded on GitHub, assets re-downloaded and hashes verified. |
 | F41 | DONE (JVM) | `10a72366`, `087361c7` | TransferWatch closes the connection on Cancel/deadline; a single reader after Cancel/retry. Phone NOT RUN. |
-| F42 | DONE (JVM) | `10a72366`, `362275db` | Validation of every byte; four hosted snapshots with pinned size+SHA and a catalog↔manifest test. rockyou/top-* remain unpinned (no digest recorded). |
+| F42 | DONE (JVM) | `10a72366`, `362275db` | Validation of every byte; four hosted snapshots with pinned size+SHA and a catalog↔manifest test. The four legacy assets were still unpinned at this release; their pins are added by the unreleased 2026-11-16 follow-up above. |
 | F43 | DONE (host) | `2f20f1c9`, `318f2fa4` | `--require-events`; coverage separated from the link verdict; zero events = gate NOT MET (exit 3). F23 remains OPEN. |
 | F44 | DONE (local) | `f5b12eb0`, `0a4e5cf0` | `verifyPaparazziDebug` in CI and release.sh (altered baseline → exit 1, tested on the final tree); emulator job `connectedDebugAndroidTest`; new `CompanionLinkFlowTest`. 0.1.13 push done; remote CI outcome separate from the local verifications. |
 | F45 | DONE (doc) | `091e4018`, `dc8ba5ea` | CHANGELOG split into 0.1.6–0.1.12; F03/F21/F22/F35/A3/A5/DT07/E01–E03 states with review and evidence type. |
@@ -231,12 +252,10 @@ Cancel tested, digests compared and honest notes. Do not overwrite the APK under
 
 ### Existing tasks to complete, without duplicating them
 
-- **F35, P1 — installer trust:** sync/read-back/rollback are already implemented and
-  covered by tests; do not redo those fixes. What remains are the certificate dates (local S3 SDK
-  without HAVE_TIME_DATE), a reliable cold-start time policy and an overall download timeout
-  (`HttpBody.read` limits a single read, not the whole operation). Separate the mbedtls test from the
-  Python ssl test. The subsequent catalog/store script still uses HTTP: decide and verify
-  an authenticated distribution before declaring the full path secure. Not run.
+- **F35 — installer trust:** sync/read-back/rollback plus the certificate-date policy
+  and 60 s overall budget are implemented (residual fixes shipped in 0.1.13).
+  Cold-start/device mbedTLS checks remain physical acceptance. The subsequent store
+  script's HTTP catalog/downloads remain an independent software distribution task.
 - **F23/F24/F32/F34 and cross-feature checklist:** phone+T-Embed, radio events actually
   present, Stop/leave/Remote/reconnect and a subsequent harmless command; logs with the exact
   app/firmware. None of the fresh tests of this audit close these physical gates.
@@ -254,8 +273,8 @@ Dictionary hosting 2026-11-10: four new dictionaries mirrored as unchanged asset
 in Brucia's wordlists release, with pinned revisions/SHA-256 manifest and full
 license archive. All six new assets downloaded back and compared byte-for-byte.
 App Wi-Fi/NFC catalogs use Brucia download URLs; 12 focused JVM tests pass.
-Already-published 0.1.12 APK retains old upstream URLs: new APK publication is
-still needed to deliver the catalog switch. Manual download/import is available now.
+The catalog switch shipped in 0.1.13; older 0.1.12 installations retain upstream URLs.
+Manual download/import is also available.
 No firmware or physical acceptance changes. Details: TESTS.md / THIRD_PARTY.md.
 
 App media correction 2026-11-10: six slide videos replaced with actual released-APK
@@ -264,8 +283,8 @@ NFC import yields 2,038 + 473 = 2,511 unique keys. No board/tag or physical acce
 Site/Tutorials use recordings, provenance hashes preserved; still renderer cannot
 regenerate slides. The initial release links were subsequently replaced by hosted
 dictionary assets (see the hosting update above).
-Open copy issue observed in released Crack screen: remove overbroad Flipper claim
-and clarify that synthetic input is selected by Demo, not every Run. TESTS.md records
+The Crack-screen copy issue observed here was fixed by F46 and shipped in 0.1.13:
+no overbroad Flipper claim, and only Demo selects synthetic input. TESTS.md records
 capture context; physical media and device gates remain open.
 
 Dictionary alternatives 2026-11-10: Probable WPA 4,800/204k added alongside existing
@@ -623,11 +642,11 @@ software. Status:
 | W01 | P1 | DONE | 2026-11-04 RecordingBuffer reviewed, unchanged. `AudioExport.saveInto`: exclusive folder creation (`rec_<stamp>`, `_1`..`_99`) so same-second saves never overwrite; failure deletes the partial folder and rethrows (samples kept for retry). AudioExportTest 3. Open: IO read loop vs Main Stop race on `_recording`/`_recordingReady` (stale state or false limit text); firmware `mic.pcm` has no sequence/drop count (needs additive protocol change). Batch 2: both open items addressed in software. `RecordingBuffer.append` returns APPENDED/LIMIT_REACHED/INACTIVE/REJECTED and publishes its own state under its lock; VM `_recording`/`_recordingReady` removed, limit text only from a real LIMIT_REACHED (latch-ordered two-thread test). Firmware `mic.pcm` adds `seq` (restarts per SUB) and, when the I2S driver accepts the overflow callback, cumulative `dropped` samples; app reports "gaps detected: N (M samples dropped on device)" or "unknown" for old firmware, no filler inserted. RecordingBufferTest +10. Hardware: overflow callback firing and sample-unit conversion (assumes 16-bit mono channel data) on the T-Embed mic. |
 | W04 | Later | HOLD | Codec follow-up only if first worker reviews reveal a concrete need. |
 | COV | P1 | DONE (software) | 2026-11-05 worker agent15/COVERAGE: opt-in JaCoCo (`-Pbrucia.coverage :app:createDebugUnitTestCoverageReport`, TESTS.md "Unit-test coverage"). Risk-ranked gaps closed with 37 tests: EspFlasher against a scripted ROM/stub (0% -> 75% lines), HandshakeParser/PMKID, PcapReader/Dot11Frame, FirmwareImage rule-by-rule, FrameBudget vs real wire bytes, TftProtocol vs `tftLogger.h`, `.sub` transmit, command-reply edges, macro store. Bugs fixed (failing then passing): ROM 4-byte status read from reserved zeros (ROM errors looked like success), M3/M4 taken as handshake M2, pcap Int overflow (OOM crash) and ns timestamps, `.sub` values reaching throwing firmware conversions, TFT rotation byte, logcat LinkageError off-device. Remaining: Room/service/MITM/USB need instrumentation or a device; EspFlasher reset/timeout paths are real-time; flash fix needs S05 hardware confirmation. 2026-11-05 batch 16 (FLASHREAD): the flasher's reply reader dropped the rest of a USB read after the reply it waited for, losing the stub "OHAI" when it shared a read with the MEM_END reply; fixed with a persistent receive buffer (`SlipCodec.Receiver`, frames taken one at a time, partial frames and split escapes kept across reads, OHAI seen during the MEM_END wait remembered). `SlipReceiverTest` 12 (also in `tools/test_android_logic.py`), `EspFlasherTest` +8 (one read for everything, 1..24-byte reads, OHAI before/without the MEM_END reply, boot text, partial SYNC at a timeout, the byte-exact S3 session at every read size); the old reader fails 6 of them, the byte-exact per-reply session and ROM-error tests pass on both. Phone flash recheck: TESTS.md "Batch 16 (FLASHREAD)". |
-| BRAND | P1 | IN_PROGRESS | 2026-11-06 worker agent17/BRAND: `brand.json` is the single source of the public links (name, `1vcian/BruciaDev`, site, upstream credit) with the future `Brucia` values in its `launch` block; `tools/brand.py` generates `include/brucia_brand.h` and `docs/brand.js`, rewrites links in managed docs/site/WebUI files, and feeds `release.sh`; Gradle reads it into `BuildConfig.BRAND_*` (`BrandLinks.kt`: updater API, accepted asset prefixes for both BruciaDev and Brucia, wordlists, wiki, About footer, beacon SSID). `tools/test_brand.py`: sync, launch switch on a copy, firmware macro/include hygiene, link scanner with reasoned allowlist; app `BrandLinksTest`; site and release tests derive URLs from brand. Firmware user-facing names now Brucia (BLE/AP defaults, serial banner, Device Info/`info` source + upstream lines, NFC default URL, GPX, AP-mode WebUI shows the configured SSID); formats, folders, JS API and the Bruce-app BLE API name unchanged. Next: coordinator firmware build, hardware checks in `docs/LAUNCH.md`, then a bridge release before the rename. Launch procedure and docs regeneration list: `docs/LAUNCH.md`. |
+| BRAND | P1 | DONE (software/public launch 2026-11-09); physical checks OPEN | 2026-11-06 worker agent17/BRAND: `brand.json` is the single source of the public links (name, `1vcian/BruciaDev`, site, upstream credit) with the future `Brucia` values in its `launch` block; `tools/brand.py` generates `include/brucia_brand.h` and `docs/brand.js`, rewrites links in managed docs/site/WebUI files, and feeds `release.sh`; Gradle reads it into `BuildConfig.BRAND_*` (`BrandLinks.kt`: updater API, accepted asset prefixes for both BruciaDev and Brucia, wordlists, wiki, About footer, beacon SSID). `tools/test_brand.py`: sync, launch switch on a copy, firmware macro/include hygiene, link scanner with reasoned allowlist; app `BrandLinksTest`; site and release tests derive URLs from brand. Firmware user-facing names now Brucia (BLE/AP defaults, serial banner, Device Info/`info` source + upstream lines, NFC default URL, GPX, AP-mode WebUI shows the configured SSID); formats, folders, JS API and the Bruce-app BLE API name unchanged. Public launch completed (see `docs/LAUNCH.md`); hardware checks there remain separate. Launch procedure and docs regeneration list: `docs/LAUNCH.md`. |
 
-Current batch launch is explicitly authorized (see above and workers.md). Four
-prepared packets are running locally under the user-requested isolation exception;
-other packets do not become accepted or launchable merely by being prepared.
+Historical batch authorization (see workers.md): four prepared packets ran locally
+under the user-requested isolation exception. This record does not authorize new
+workers or mean that any worker is currently running.
 
 Coordinator review notes for the local batch:
 - S06-S10a's proposed `UsbLinkOwner` states are useful design input, not an implemented

@@ -1,6 +1,9 @@
-name: Verify all configured firmware boards
+name: Verify all supported firmware boards
 
 on:
+  # Full matrix once a week, without compiling every board on each push.
+  schedule:
+    - cron: '23 3 * * 1'
   workflow_dispatch:
     inputs:
       pr_number:
@@ -17,34 +20,27 @@ concurrency:
 
 jobs:
   discover:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       boards: ${{ steps.boards.outputs.boards }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || github.ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.11'
       - run: pip install platformio==6.2.0
       - id: boards
-        name: Read the actual PlatformIO environment matrix
+        name: Read supported boards from PlatformIO (exclude contributor template)
         run: |
-          python - <<'PY'
-          import json, os
-          from platformio.project.config import ProjectConfig
-          boards = sorted(ProjectConfig.get_instance().envs())
-          if not boards:
-              raise SystemExit('No board environments found')
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('boards=' + json.dumps(boards) + '\n')
-          print('Configured environments:', len(boards))
-          PY
+          boards=$(python3 tools/firmware_matrix.py)
+          echo "boards=$boards" >> "$GITHUB_OUTPUT"
 
   firmware:
     needs: discover
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -52,10 +48,10 @@ jobs:
       matrix:
         board: ${{ fromJSON(needs.discover.outputs.boards) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || github.ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.11'
       - name: Install build dependencies
@@ -65,7 +61,7 @@ jobs:
           pip install platformio==6.2.0
       - name: Build firmware
         run: python3 tools/build_firmware.py -e '${{ matrix.board }}'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: firmware-${{ matrix.board }}
           path: Bruce-${{ matrix.board }}.bin

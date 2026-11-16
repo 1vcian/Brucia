@@ -9,6 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (ROOT / '.github/workflows/build.yml').read_text()
+ALL_BOARDS = (ROOT / '.github/workflows/PR_All_envs.yml').read_text()
 RELEASE = (ROOT / 'release.sh').read_text()
 
 
@@ -35,11 +36,19 @@ class CiGatesTest(unittest.TestCase):
         self.assertRegex(body, r'if: always\(\)\n\s+uses: actions/upload-artifact@')
 
     def test_every_action_is_pinned_to_a_full_commit(self):
-        for line in WORKFLOW.splitlines():
+        for line in (WORKFLOW + ALL_BOARDS).splitlines():
             match = re.search(r'uses:\s*(\S+)', line)
             if match and not match.group(1).startswith('./'):
                 with self.subTest(action=match.group(1)):
                     self.assertRegex(match.group(1), r'@[0-9a-f]{40}$')
+
+    def test_full_board_matrix_is_discovered_and_runs_weekly_or_manually(self):
+        self.assertIn('workflow_dispatch:', ALL_BOARDS)
+        self.assertIn("cron: '23 3 * * 1'", ALL_BOARDS)
+        self.assertIn('python3 tools/firmware_matrix.py', ALL_BOARDS)
+        self.assertIn('fromJSON(needs.discover.outputs.boards)', ALL_BOARDS)
+        self.assertIn('fail-fast: false', ALL_BOARDS)
+        self.assertIn('max-parallel: 4', ALL_BOARDS)
 
 
 if __name__ == '__main__':

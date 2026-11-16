@@ -17,13 +17,18 @@ header pointing back to this document.
 Brucia hosts byte-identical snapshots of these data sources as assets in the
 wordlists release (see [dictionary downloads](wiki/Tutorials.md#add-the-nfc-dictionaries)).
 The app catalog uses Brucia-hosted downloads; dictionaries are not bundled in the APK.
-The already-published 0.1.12 APK still uses upstream URLs for the four new lists;
-the catalog change takes effect in the next app build.
+Apps from 0.1.13 onward use the hosted catalog; older 0.1.12 builds retain upstream URLs.
 
 [Snapshot metadata](docs/dictionary-sources.json) records pinned upstream revisions,
 paths, sizes and SHA-256 digests. Release asset `dictionary-licenses.zip` includes
-all three complete license texts, attribution notices and the same metadata.
-Original dictionary contents and headers are unchanged; only asset filenames differ.
+all three complete license texts, attribution notices and the 2026-11-10 metadata.
+For those four upstream snapshots, contents and headers are unchanged; only asset filenames differ.
+
+The repository manifest additionally records size/SHA-256 for the legacy RockYou and
+SecLists `top-*` assets, downloaded from the existing Brucia release on 2026-11-16.
+Their exact upstream revisions and transformations were not established by this check;
+a hash identifies the hosted bytes, not their provenance or redistribution rights.
+The previously published license archive/manifest was not replaced by this local update.
 
 - [Probable-Wordlists](https://github.com/berzerk0/Probable-Wordlists), by berzerk0
   and contributors: WPA-Length top 4,800 and top 204k, CC BY-SA 4.0. These are

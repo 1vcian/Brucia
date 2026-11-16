@@ -4,6 +4,39 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Dictionary pins, release records and full-board CI — 2026-11-16
+
+Base `6f3c4025` (0.1.15). Changes for the next release; the checks below ran locally
+before commit/push. No new release or hardware acceptance.
+
+- Downloaded the four existing `wordlists` release assets into ignored
+  `.codex_tmp/maintenance-20261116/wordlists/`. Computed size and SHA-256 locally;
+  all four match GitHub's asset metadata. Exact values are in `docs/dictionary-sources.json`
+  and `WordlistCatalog`; RockYou is 139,921,497 B (the previous approximate label was 10 B larger).
+  No remote asset/manifest was replaced, no dictionary content printed, and no upstream
+  revision/license provenance was inferred for the legacy assets from their hashes.
+- `cd android && ./gradlew --offline testDebugUnitTest lintDebug`: BUILD SUCCESSFUL;
+  **1,200 tests, 0 failures/errors/skips**. Includes the two catalog/manifest checks, now
+  requiring all eight Wi-Fi/NFC entries to have a pin, and all six DictionaryDownload tests
+  (same-length alteration, wrong size, truncation, failure preservation and cancellation).
+  Lint: **0 errors, 1 OldTargetApi warning**. Existing Kotlin compiler warnings remain.
+  No screenshot baselines changed; this run did not invoke `verifyPaparazziDebug`.
+- Python: `test_firmware_matrix.py` **3/3**, `test_ci_gates.py` **5/5**,
+  `test_dependency_pins.py` **10/10**, `test_brand.py` **12 tests, 1 skipped, OK**.
+  The matrix tests protect exact template exclusion, inclusion of future real boards,
+  rejection of an empty/invalid selection and retention of all configured non-template envs.
+- Ran `tools/firmware_matrix.py` with the installed PlatformIO Python: **69 unique
+  environments**, excluding only `NewDeviceModel`. Workflow YAML syntax parsed locally;
+  action-pin and weekly/manual/discovery wiring checks passed. The workflow uses isolated
+  runners with max-parallel 4. **No new firmware build or remote CI run** in this task;
+  weekly execution becomes available after the workflow reaches the default branch.
+- Release records now distinguish 0.1.14 and 0.1.15 from today's Unreleased changes.
+  Corrected stale private/unpublished/brand statuses. The old all-board report has an
+  inconsistent aggregate count; retained its per-board evidence without inventing a total.
+
+No APK installation, flash, device action or new physical acceptance. Existing hardware
+gates (including F23 with actual radio events) remain OPEN.
+
 ## Shared pioarduino build script guard — 2026-11-12
 
 Base `ea3c7dc4`, macOS, pioarduino 55.03.39, arduino-esp32 3.3.9, `~/.platformio/penv/bin/pio`.
@@ -19,8 +52,10 @@ Sequential batch of all 70 envs on one `~/.platformio`, checking after each env 
 `pioarduino-build.py.<chip>` backup remained and every chip's `pioarduino-build.py` matched
 its pre-batch hash: no leftover backup and no change after any env. This includes
 `lilygo-t-display-s3-mmc` (`lib_ignore = SD`), which failed to compile, the case that used to
-corrupt the file. 64 envs built. 6 failed for reasons unrelated to this fix, and not covered
-by the 3-board `build` CI. 5 are now fixed and build on macOS:
+corrupt the file. The original record says 64 built / 6 failed, but lists six real boards plus the template
+as failures; that count is inconsistent and is not used as an aggregate PASS. The listed
+failures were unrelated to this fix and were not covered
+by the 3-board `build` CI. All six real-board failures are now fixed and build on macOS:
 - `lilygo-t-display-s3`, `-touch`, `-mmc`, `-touch-mmc`, and `lilygo-t-hmi` (parallel
   displays) failed in `Extensions/Touch.cpp` with "no declaration matches". Brucia's
   `precompiler_flags.h` always defines `TOUCH_CS`, and `TFT_eSPI.cpp` included the touch
@@ -30,7 +65,8 @@ by the 3-board `build` CI. 5 are now fixed and build on macOS:
   had no spaces, so SCons passed them unquoted and macOS `/bin/sh` (bash) brace-expanded them
   into several `-D`. Linux CI uses dash, so it never failed there. The values now have spaces,
   like every other board.
-- `NewDeviceModel` still fails: template env, not in any CI matrix. LiteLED rejects
+- `NewDeviceModel` still fails: contributor template. The former dynamic all-env workflow
+  included it; the 2026-11-16 matrix selection explicitly excludes it. LiteLED rejects
   arduino-esp32 3.x.
 
 16 envs were rebuilt in a second pass after the first ran out of disk space. Keeping all 70
@@ -40,7 +76,8 @@ one core dir (documented as unsupported).
 
 ## Public review follow-up — 2026-11-11
 
-Base `942287e5`, production changes not committed/released yet. Review corrections:
+Base `942287e5`; subsequently committed as `87f79ac8` and released in 0.1.14
+(`ea3c7dc4`, 2026-11-12). Review corrections:
 UsbTransport.write no longer swallows driver failures; CompanionClient outgoing APIs return
 Result instead of throwing for size rejection. Session, HELLO/PING, teardown and direct-stop
 callers consume the result. Existing CommandSession already checked isOpen after writes;
@@ -60,7 +97,7 @@ Fresh verification:
 - `python3 tools/test_brand.py`: **12 tests, 1 skipped, OK**.
 - README relative links/image paths resolve. Three PNGs inspected visually; metadata and hashes
   are in docs/media/manifest.json. These are unedited screenshots of the released 0.1.13 APK
-  on the API 36.1 arm64 emulator, not the unreleased transport changes. Built-in synthetic WPA
+  on the API 36.1 arm64 emulator, not the transport changes subsequently released in 0.1.14. Built-in synthetic WPA
   demo only; proxy left stopped, no board or radio actions. Screens are not hardware acceptance.
 
 Decoder measurement (no implementation rewrite):
@@ -96,7 +133,8 @@ Credential/branding audit:
   Markdown/HTML/SVG/JSON. GitHub About had an empty description and HTTP homepage; updated
   to an authorized-research description and the existing HTTPS site.
 
-No new firmware build, flash, hardware acceptance, commit, push or release in this task.
+At this review checkpoint no firmware build, flash or hardware acceptance was performed.
+The subsequent commit/publication is recorded above; it does not add physical acceptance.
 
 ## Project audit — 2026-11-10
 

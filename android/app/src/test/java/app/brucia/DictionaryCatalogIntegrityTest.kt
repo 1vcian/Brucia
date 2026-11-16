@@ -32,25 +32,25 @@ class DictionaryCatalogIntegrityTest {
             }
 
     @Test fun everyHostedSnapshotIsPinnedWithTheRecordedSizeAndDigest() {
-        assertEquals(4, manifest.size)
+        assertEquals(8, manifest.size)
         for ((name, entry) in manifest) {
             val pinned = app.singleOrNull { it.name == name } ?: error("$name is in the manifest but not in the app")
             assertEquals("${BrandLinks.DOWNLOAD_PREFIX}wordlists/$name", pinned.url)
             assertEquals(name, entry.getLong("bytes"), pinned.size)
             assertEquals(name, entry.getString("sha256"), pinned.sha256)
+            if (entry.has("verification_date")) assertEquals(name, pinned.url, entry.getString("source_url"))
         }
     }
 
-    @Test fun pinsExistOnlyForRecordedSnapshotsAndUnpinnedListsAreExplicit() {
+    @Test fun everyCatalogEntryHasAPinAndAManifestRecord() {
         for (entry in app) {
             assertTrue(entry.name, entry.url.startsWith("${BrandLinks.DOWNLOAD_PREFIX}wordlists/"))
             assertEquals(entry.name, entry.url.substringAfterLast('/'))
-            if (entry.sha256 != null) assertTrue("${entry.name} pinned without a manifest record", entry.name in manifest)
+            assertNotNull("${entry.name} has no integrity pin", entry.sha256)
+            assertTrue("${entry.name} pinned without a manifest record", entry.name in manifest)
             assertEquals(entry.name, entry.size == null, entry.sha256 == null)
         }
-        // Older release assets with no recorded digest in the repository: deliberately unpinned.
-        assertEquals(setOf("rockyou.txt", "top-1M.txt", "top-100k.txt", "top-10k.txt"),
-            app.filter { it.sha256 == null }.map { it.name }.toSet())
+        assertEquals(manifest.keys, app.map { it.name }.toSet())
         for (list in WordlistCatalog.all) list.integrity?.size?.let { assertEquals(list.name, it, list.approxBytes) }
     }
 }

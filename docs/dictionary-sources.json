@@ -1,6 +1,6 @@
 {
   "snapshot_date": "2026-11-10",
-  "modifications": "None; byte-identical source files with release asset filenames.",
+  "modifications": "The 2026-11-10 upstream snapshots are byte-identical source files with release asset filenames. Legacy assets recorded on 2026-11-16 are pinned to the existing Brucia-hosted bytes; their upstream revision and transformations were not established.",
   "files": [
     {
       "name": "probable-wpa-4800.txt",
@@ -85,6 +85,39 @@
       "license_file": "proxmark3-LICENSE.txt",
       "attribution": "RfidResearchGroup / Iceman and community contributors",
       "license": "GPL-3.0 (repository license; original headers retained)"
+    },
+    {
+      "name": "rockyou.txt",
+      "source_url": "https://github.com/1vcian/Brucia/releases/download/wordlists/rockyou.txt",
+      "bytes": 139921497,
+      "sha256": "6dfa76aa0e02303994fd1062d0ac983f0b69ece5474d85a5bba36362e19c1076",
+      "verification_date": "2026-11-16",
+      "provenance": "Existing Brucia wordlists release asset, downloaded and hashed locally; size and SHA-256 match GitHub asset metadata. Upstream revision and transformations not established."
+    },
+    {
+      "name": "top-1M.txt",
+      "source_url": "https://github.com/1vcian/Brucia/releases/download/wordlists/top-1M.txt",
+      "bytes": 8755171,
+      "sha256": "e9a88f67aafe65496682dc374559ee714e978bee50314767494c3e37a18c9fc8",
+      "verification_date": "2026-11-16",
+      "provenance": "Existing Brucia wordlists release asset, downloaded and hashed locally; size and SHA-256 match GitHub asset metadata. Upstream revision and transformations not established."
+    },
+    {
+      "name": "top-100k.txt",
+      "source_url": "https://github.com/1vcian/Brucia/releases/download/wordlists/top-100k.txt",
+      "bytes": 828498,
+      "sha256": "07f876a616f08fb2cc5c3e0ce04e4a6d1123380580472b0997baebc4e8226977",
+      "verification_date": "2026-11-16",
+      "provenance": "Existing Brucia wordlists release asset, downloaded and hashed locally; size and SHA-256 match GitHub asset metadata. Upstream revision and transformations not established."
+    },
+    {
+      "name": "top-10k.txt",
+      "source_url": "https://github.com/1vcian/Brucia/releases/download/wordlists/top-10k.txt",
+      "bytes": 80456,
+      "sha256": "d9a018818f2357ac34c0534bdfd67826811859ae858bfd6398559085c7f4e925",
+      "verification_date": "2026-11-16",
+      "provenance": "Existing Brucia wordlists release asset, downloaded and hashed locally; size and SHA-256 match GitHub asset metadata. Upstream revision and transformations not established."
     }
-  ]
+  ],
+  "legacy_assets_verified_date": "2026-11-16"
 }

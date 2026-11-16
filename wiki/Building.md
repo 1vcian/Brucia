@@ -101,9 +101,12 @@ and `gen_mfcodes.py`.
 
 ## Continuous integration
 
-CI runs the firmware build, the Android unit and Paparazzi screenshot tests, and the
-protocol end-to-end test. For a contribution, run the checks relevant to your change
-and include the results in your pull request.
+On pushes and PRs, CI builds three firmware boards and runs the Android unit,
+Paparazzi, emulator and protocol tests. The full board matrix runs weekly and on
+demand; it excludes only the `NewDeviceModel` contributor template and does not
+publish releases. See [CI coverage](../CONTRIBUTING.md#firmware-ci-coverage).
+For a contribution, run the checks relevant to your change and include the results
+in your pull request. Compilation is separate from hardware acceptance.
 
 ---
 

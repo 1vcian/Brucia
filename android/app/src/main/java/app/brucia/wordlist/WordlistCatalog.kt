@@ -53,9 +53,10 @@ object WordlistCatalog {
             name = "rockyou.txt",
             title = "rockyou.txt",
             url = "${BrandLinks.DOWNLOAD_PREFIX}wordlists/rockyou.txt",
-            approxBytes = 139_921_507L,
+            approxBytes = 139_921_497L,
             entries = "14.3M",
             description = "General password corpus; not Wi-Fi-specific. No guaranteed match.",
+            integrity = AssetIntegrity(139_921_497L, "6dfa76aa0e02303994fd1062d0ac983f0b69ece5474d85a5bba36362e19c1076"),
         ),
         DownloadableWordlist(
             name = "top-1M.txt",
@@ -64,6 +65,7 @@ object WordlistCatalog {
             approxBytes = 8_755_171L,
             entries = "1M",
             description = "Common-password corpus; usefulness depends on the tested password.",
+            integrity = AssetIntegrity(8_755_171L, "e9a88f67aafe65496682dc374559ee714e978bee50314767494c3e37a18c9fc8"),
         ),
         DownloadableWordlist(
             name = "top-100k.txt",
@@ -72,6 +74,7 @@ object WordlistCatalog {
             approxBytes = 828_498L,
             entries = "100k",
             description = "Quick pass of the 100k most common passwords",
+            integrity = AssetIntegrity(828_498L, "07f876a616f08fb2cc5c3e0ce04e4a6d1123380580472b0997baebc4e8226977"),
         ),
         DownloadableWordlist(
             name = "top-10k.txt",
@@ -80,6 +83,7 @@ object WordlistCatalog {
             approxBytes = 80_456L,
             entries = "10k",
             description = "The 10k most common passwords for a very fast first try",
+            integrity = AssetIntegrity(80_456L, "d9a018818f2357ac34c0534bdfd67826811859ae858bfd6398559085c7f4e925"),
         ),
     )
 }

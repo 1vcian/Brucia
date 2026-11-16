@@ -17,7 +17,7 @@ operation, Bruce attribution and AGPL/third-party licenses. No device is assumed
 connected: discover it before claiming physical results.
 
 Priority: existing functionality correct and stable, then new features. The repo
-stays private until the base is accepted. Keep the site's Three.js visuals and
+is public (launched 2026-11-09); physical acceptance remains tracked separately. Keep the site's Three.js visuals and
 infinite-battery joke; use concrete, verifiable copy. Do not add demos presented as
 current until their app/firmware pair has passed acceptance.
 
