@@ -18,3 +18,4 @@
 #define BRUCIA_UPSTREAM_REPO_DISPLAY "github.com/BruceDevices/firmware"
 #define BRUCIA_UPSTREAM_SITE_URL "https://bruce.computer"
 #define BRUCIA_UPSTREAM_APP_STORE_URL "https://ghp.iceis.co.uk/service/appstore/"
+#define BRUCIA_UPSTREAM_APP_STORE_ORIGIN "https://appstore.bruce.computer"

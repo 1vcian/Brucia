@@ -56,9 +56,7 @@ import app.brucia.wifi.Dot11Info
 import app.brucia.wifi.Handshake
 import app.brucia.wifi.HandshakeParser
 import app.brucia.wifi.PcapWriter
-import app.brucia.wifi.Hc22000
 import app.brucia.wifi.WordlistRules
-import app.brucia.wifi.Pmkid
 import app.brucia.wifi.PmkidTarget
 import app.brucia.wifi.WpaCracker
 import app.brucia.wordlist.BundledWordlists
@@ -3223,6 +3221,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // The latest import/pull/capture owns the slot; a slow or failed one cannot relabel or revive
     // a target set by a newer operation. Run and export read it; the screen shows wifiTarget.info.
     private val wifiTarget = WifiTargetStore()
+    private val targetImports = WifiTargetImportService(viewModelScope, wifiTarget)
 
     private val fileTransfers by lazy { FileTransferService(viewModelScope, { fileLink() }) }
 
@@ -3363,47 +3362,11 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** Export the loaded target to hashcat 22000, or null if nothing is loaded. */
     fun exportHashcat(): String? = wifiTarget.export()
 
-    /** Load a PMKID (hashcat 16800) or a full hashcat 22000 line (WPA*01/WPA*02). */
-    fun importPmkid(line: String) {
-        if (line.trim().startsWith("WPA*")) {
-            val r = Hc22000.parse(line)
-            if (r != null) {
-                val (hs, pm) = r
-                when {
-                    hs != null -> wifiTarget.set(WifiTargetStore.Target(handshake = hs), "${hs.ssid} (WPA${hs.keyVersion}) [22000]")
-                    pm != null -> wifiTarget.set(WifiTargetStore.Target(pmkid = pm), "${pm.ssid} (PMKID) [22000]")
-                    else -> wifiTarget.set(null, "invalid 22000 line")
-                }
-                return
-            }
-            wifiTarget.set(null, "invalid 22000 line")
-            return
-        }
-        val t = Pmkid.parse(line)
-        if (t != null) wifiTarget.set(WifiTargetStore.Target(pmkid = t), "${t.ssid} (PMKID)")
-        else wifiTarget.set(null, "invalid PMKID line")
-    }
+    /** Android boundary only; parsing and selection ownership live in the import service. */
+    fun importPmkid(line: String) = targetImports.importText(line)
 
-    /** Import a .pcap captured by the device and extract the WPA handshake. */
     fun importPcap(uri: Uri) {
-        // Claim the slot now, synchronously: a later import/pull/capture gets a higher token and
-        // this background parse, however slow, is dropped if it is no longer the latest (F38).
-        val token = wifiTarget.begin()
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val bytes = getApplication<Application>().contentResolver.openInputStream(uri)!!
-                    .use { app.brucia.BoundedImport.read(it, app.brucia.wifi.PcapDissector.MAX_CAPTURE_BYTES.toLong()) }
-                val hs = HandshakeParser.parse(bytes)
-                // No handshake is a failed import: commit no target, so a previously loaded PMKID
-                // is cleared instead of silently surviving under a "no handshake" label.
-                wifiTarget.commit(token, hs?.let { WifiTargetStore.Target(handshake = it) },
-                    hs?.let { "${it.ssid} (WPA${it.keyVersion})" } ?: "no handshake found in file")
-            } catch (e: app.brucia.ImportTooLargeException) {
-                wifiTarget.commit(token, null, "file too large (max 32 MiB)")
-            } catch (e: Exception) {
-                wifiTarget.commit(token, null, "read error")
-            }
-        }
+        targetImports.importPcap { getApplication<Application>().contentResolver.openInputStream(uri) }
     }
 
     fun refreshWordlists() {

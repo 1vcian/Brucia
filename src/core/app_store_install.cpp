@@ -24,7 +24,7 @@ std::string recovery(const std::string &what, const std::string &dest) {
 }
 } // namespace
 
-std::string install(Body &body, Files &fs, const std::string &dest, Clock &clock, uint32_t budgetMs) {
+std::string install(Body &body, Files &fs, const std::string &dest, Clock &clock, uint32_t budgetMs, long maxBytes) {
     const std::string staging = dest + ".part";
     const std::string backup = dest + ".bak";
 
@@ -36,7 +36,7 @@ std::string install(Body &body, Files &fs, const std::string &dest, Clock &clock
     const long len = body.length();
     if (len < 0) return "no Content-Length; download cannot be verified";
     if (len == 0) return "empty download";
-    if (len > MAX_SCRIPT_BYTES) return "download too large";
+    if (len > maxBytes) return "download too large";
 
     if (fs.exists(staging) && !fs.remove(staging)) return "cannot clear staging file";
     if (!fs.beginWrite(staging)) return "cannot create staging file";

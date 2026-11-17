@@ -4,6 +4,140 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Store downstream HTTPS delivery — 2026-11-17
+
+Base `f4a6e155` plus the local app integration/extraction work below. The current
+Bruce store script was downloaded as source and inspected, never executed. Its
+catalog/metadata/assets use the authority now configured in `brand.json` as
+`upstream.app_store_origin`. `wifi.httpFetch` routes that authority to the new
+store adapter before the generic client can open a socket, upgrading HTTP to HTTPS.
+This also covers the existing installed store script. Other JS networking is unchanged.
+
+The adapter uses the bootstrap's CA roots, hostname check and extracted date/body
+helpers. It refuses redirects, non-200 replies and missing/zero/oversized Content-Length.
+Catalog/metadata bodies are completed within a 60 s body budget before JSON-only parsing
+(256 KiB bound). Asset saves stream through the real installer (2 MiB bound), preserving
+sync/readback/backup recovery; the bootstrap retains its 64 KiB bound. Paths are limited
+to BruceJS/Themes, with traversal, reserved staging/backup suffixes and append/seek refused.
+A save failure throws instead of returning status 200, which the upstream installer uses
+as its success condition. Existing cached catalogs may still be displayed by that script.
+
+Verified:
+- `python3 tools/test_app_store_delivery.py`: portable C++ routing, destination, complete
+  catalog and binary-asset fault matrix; mutations removing HTTPS routing or the final
+  read deadline fail. Wiring checks cover dispatch-before-network, trust, redirect refusal,
+  checked saves and success-after-error checks.
+- `BRUCIA_NET_TESTS=1 python3 tools/test_app_store_delivery.py`: **4/4 PASS** including
+  HTTPS catalog -> Device Info metadata -> asset read, exact Content-Length, trusted roots,
+  no redirects; bytes inspected as data, no installation or execution. The server returned
+  HTTP 403 for Python's default User-Agent; the probe now uses the actual firmware's
+  `ESP32HTTPClient` User-Agent. This is a host probe, not the device HTTP/TLS stack.
+- `BRUCIA_NET_TESTS=1 python3 tools/test_app_store_install.py`: **12/12 PASS**, including
+  both store TLS hosts, local untrusted certificate, expired/wrong-host/untrusted remote
+  certificates, original storage/recovery/date/budget cases. The TLS probes use Python ssl;
+  the date/fault tests compile the portable firmware modules, not device mbedTLS.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: **364 tests OK, 2 skipped**
+  before addition of the separately executed optional live delivery probe above.
+- `python3 tools/test_brand.py`: **12 tests OK, 1 skipped** (existing optional launch test).
+- `python3 tools/build_firmware.py -e lilygo-t-embed-cc1101 -e m5stack-cardputer
+  --pio /Users/lucian/.platformio/penv/bin/pio`: **both SUCCESS**. T-Embed 4,377,456 /
+  4,653,056 B (**94.08%**, existing warning tier >92%, failure >98%); Cardputer
+  4,285,488 / 5,111,808 B (**83.84%**). Logs under
+  `.codex_tmp/integration-20261117/store-build.log` and `store-host-tests.log` (ignored).
+
+Physical acceptance **NOT RUN**: no flash, device installation or new release.
+On the new firmware, test cold boot with/without NTP, browse the store using the
+previously installed script, install a benign reviewed app, and interrupt an update
+with Wi-Fi loss/full storage. Confirm the old file survives or recovery is explicit;
+confirm no HTTP catalog/app connection and no success for a refused certificate.
+
+Limits: TLS authenticates the configured third-party store, not authors or an independent
+content hash/signature. The body time budget excludes connection/handshake/header/NTP
+and filesystem work (their existing limits still apply). Unsynced certificate-date
+policy is unchanged. Per-file replacement does not make a multi-file app transaction
+atomic or certify power-loss durability. Non-store requests made by installed scripts
+are outside this adapter; future upstream endpoint/API changes require compatibility
+review. Host tests/builds do not certify script UI, mbedTLS, storage or memory on device.
+
+## Target import service extraction — 2026-11-17
+
+Base `f4a6e155` plus the preceding uncommitted integration tests. First incremental
+E01–E03 extraction: `WifiTargetImportService` owns pasted 16800/22000 text and PCAP
+document IO/parsing/labels. WardriveViewModel now supplies only the Uri/InputStream
+adapter and retains the same WifiTargetStore used by capture, pull, Run and export.
+No format, UI, capture command, cryptography or firmware change. Cancellation is
+checked between document reads and before committing a result; it cannot interrupt
+a provider blocked inside a read. No claim that the full ViewModel is modularized.
+
+- `python3 tools/test_android_logic.py`: **288 PASS**, up from 270 by including
+  nine existing WifiTargetStore tests and nine new import-service tests. Real parsers,
+  synthetic PCAP frames, virtual coroutine scheduling; no mocked parser or live capture.
+- `cd android && ./gradlew --offline testDebugUnitTest lintDebug`: **BUILD SUCCESSFUL,
+  1,209 tests, 0 failures/errors/skips**. The nine added tests cover text formats and
+  error labels, deferred IO and stream closure, empty/malformed/unreadable documents,
+  the real 32 MiB limit, a later pasted target or device pull winning over queued IO,
+  an old capture losing to the document reservation, unrelated pulls, and cancellation
+  during read followed by a successful import under a new owner.
+- The ViewModel drops 37 lines (4,120 -> 4,083); its public import method signatures
+  stay the same. File-transfer/capture ownership and previous uncommitted integration
+  tests are preserved. No screenshot baseline or firmware changes.
+- Final `ANDROID_SERIAL=emulator-5554 ./gradlew --offline :app:connectedDebugAndroidTest
+  :app:lintDebug`: **BUILD SUCCESSFUL; 20/20 instrumentation tests PASS**, 0 failures,
+  errors or skips; lint 0 errors / 1 existing OldTargetApi warning. New
+  `WifiTargetImportFlowTest` executes the real ViewModel/service/ContentResolver with
+  synthetic local file URIs: pasted target/export, empty PCAP clearing both, then a
+  missing document clearing both with the existing read-error message, all offline.
+  This does not test the SAF picker, external providers or their permission grants.
+  The isolated API 36.1 arm64 AVD and all five link-flow tests from the previous step
+  are retained. XML reports: `.codex_tmp/integration-20261117/import-reports/`.
+  Brand sync and `git diff --check` also pass.
+
+No hardware, release or commit in this step. Device/cloud document providers and the
+system document-picker UI remain separate from the synthetic file-based tests.
+
+## UI/session integration over a simulated link — 2026-11-17
+
+Base `f4a6e155` (0.1.15 plus the unreleased dictionary/CI changes). Test-only changes;
+no production app or firmware behavior changed. Four new `CompanionLinkFlowTest`
+scenarios execute the real MainActivity, composables, WardriveViewModel, CommandSession
+and read loop against `SimulatedDevice`:
+
+- Channels starts its own scan, rotates portrait -> landscape with SUB ON still awaiting
+  its ACK, then returns to portrait after the ACK. Same ViewModel, no extra ON/OFF;
+  leaving sends exactly one OFF and keeps the link connected.
+- A scan started using Wardrive's switch is borrowed by Channels. Entering/leaving
+  Channels sends no SUB and preserves the scan; Wardrive's switch can still stop it.
+- Disconnect with Channels open closes link A and sends its cleanup. Connecting link B
+  restarts the scan without navigation; leaving sends OFF only to B, with no further A writes.
+- The actual Cmds -> Stop button supersedes an unanswered SUB ON. A delayed success cannot
+  restart the stopped scan; a delayed error from the old start cannot disable a new run.
+  The switch and transmitted frames are both checked. An ensuing PONG with a persistent
+  battery value is a read barrier, so the assertions cannot pass before the delayed reply
+  has actually been consumed by the application's read loop.
+
+Focused run: `:app:connectedDebugAndroidTest
+-Pandroid.testInstrumentationRunnerArguments.class=app.brucia.CompanionLinkFlowTest`:
+**5/5 PASS**, including the pre-existing reconnect/service/wake-lock flow.
+
+Final full run (same isolated emulator):
+`ANDROID_SERIAL=emulator-5554 ./gradlew --offline :app:connectedDebugAndroidTest :app:lintDebug`:
+**BUILD SUCCESSFUL; 19 tests, 0 failures/errors/skips**. Lint passes with the existing
+OldTargetApi warning and no errors. This runs all instrumentation tests, including Room,
+receiver/service lifecycle and MITM UI, after the new test cases; the 1,200 JVM tests
+were not rerun (no main/test source changed). CI already runs this suite unfiltered.
+`tools/test_ci_gates.py`: **5/5 PASS**; brand sync and `git diff --check` pass.
+JUnit and lint XML are preserved in ignored `.codex_tmp/integration-20261117/reports/`.
+
+Environment: local API 36.1 Google Play arm64 emulator, isolated AVD `BruciaIntegration`
+under ignored `.codex_tmp/integration-20261117/avds/`, debug APK and instrumentation APK.
+The first attempt on the pre-existing AVD ran **0 tests**: installation was refused with
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE` (existing APK uses a different signing key).
+That install/data was preserved; verification moved to the fresh isolated AVD.
+
+No board, actual USB transport, radio events or RF transmission. These scenarios cover
+the Channels/Wardrive ownership path and global Stop for SUB requests, not every feature,
+Remote raw-mode handover, blocked device operations or physical acceptance.
+
 ## Dictionary pins, release records and full-board CI — 2026-11-16
 
 Base `6f3c4025` (0.1.15). Changes for the next release; the checks below ran locally

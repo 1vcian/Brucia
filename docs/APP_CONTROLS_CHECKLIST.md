@@ -30,7 +30,11 @@ above 0.1.6 (`354a32db`). **No physical checkbox was completed in this review.**
 HOST means actual service code with simulated replies; CODE means a source trace,
 not an on-device reproduction. Full details/status belong to backlog F25-F31 and TESTS.md.
 Software fixes for F25-F31 landed 2026-11-06 with host/source regressions; every physical
-check below is still to perform.
+check below is still to perform. Update 2026-11-17: real UI/VM emulator tests now cover
+Channels/Wardrive owned vs borrowed scans, rotation with a pending SUB, replacement-link
+reconnect and the Cmds -> Stop button with delayed ACK/ERR. This adds evidence for the
+Channels path; RF Fingerprint/Timeline/Portal/BLE and Remote retain their own checks.
+See TESTS.md, "UI/session integration over a simulated link". No checkbox is marked physical PASS.
 
 | ID | Reproduction / evidence | Regression and physical acceptance to perform |
 |---|---|---|
@@ -38,7 +42,7 @@ check below is still to perform.
 | F26 | **HOST component + CODE integration:** LoRa global hook only cancels locally. Another service's `_stop` can be consumed by LoRa's generic stop poll without ACK, leaving that service's stop unexecuted. | Test receive + simulated active background service through the lifecycle inventory, both stop-frame orders, missed ACK and late result. Require termination of both operations with honest status and bounded waits. Then verify receive-only Stop on an equipped board; never infer that global Stop always leaves LoRa running. Disconnect cleanup must not send to a replacement device. |
 | F27 | **HOST:** BLE HID end with ERR/timeout reports off; portal stop failure clears active. | Inject stop rejection, lost ACK, exception, success, delayed old ACK and disconnect. Failure must not claim inactive. Verify successful retry/state refresh restores an accurate state. Use fake drivers for portal lifecycle and a benign HID fixture for physical cessation; no payload/rate changes. |
 | F28 | **CODE:** Start Wardrive, visit RF Fingerprint / RF Timeline / Evil Portal without starting a separate target scan, then Back: each can stop the prior Wi-Fi scan. | Test prior scan ON and OFF, pending SUB ON, two rotations, Stop all, reconnect and screen exit. Borrowed scans remain active; screen-owned scans stop once; stale callbacks cannot resurrect a stopped scan. Include BLE ownership as a control. |
-| F29 | **CODE:** Open Channels disconnected -> connect without leaving; also disconnect/reconnect while staying there. Its Unit-keyed effect does not start again. | Expect one appropriate SUB after CAPS, updated channel samples and no duplicate SUB on rotation. Previously running Wardrive must remain owned by its original user after leaving Channels. |
+| F29 | **FIXED; EMULATOR PASS 2026-11-17:** Connected-keyed effect; real UI/VM rotation, reconnect while open and owned/borrowed scan cleanup exercised through simulated protocol frames. | On phone, check initial connect and reconnect without leaving, actual channel samples and no duplicate SUB on rotation. Previously running Wardrive must remain active after leaving Channels. Emulator evidence does not verify radio samples or USB. |
 | F30 | **HOST:** Files receives ERR/timeout/SD read failure and shows empty results with no error. | Service regression for each failure, successful empty directory, ordinary listing, truncated listing and retry. Phone check: absent/unreadable storage must say why; no error string becomes a filename and no failed listing is called empty success. |
 | F31 | **CODE, extends DT07:** unguarded writes in Wardrive CSV/KML/GPX, NDEF, hc22000, RF CSV/.sub, station/probe exports. | Fault-inject file open/write/close failure and unavailable external directory. No uncaught exception, success toast or share of a partial file; preserve the source for retry. Then export each format on phone and reopen with an independent reader. |
 

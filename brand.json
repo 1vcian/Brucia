@@ -18,6 +18,7 @@
     "repo_url": "https://github.com/BruceDevices/firmware",
     "site_url": "https://bruce.computer",
     "legacy_repo_url": "https://github.com/pr3y/Bruce",
-    "app_store_url": "https://ghp.iceis.co.uk/service/appstore/"
+    "app_store_url": "https://ghp.iceis.co.uk/service/appstore/",
+    "app_store_origin": "https://appstore.bruce.computer"
   }
 }

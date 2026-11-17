@@ -418,7 +418,7 @@ class AdapterSourceTest(unittest.TestCase):
         text = SETTINGS.read_text()
         self.fn = text[text.index("void installAppStoreJS() {"):]
         self.fn = self.fn[:self.fn.index("\n}\n")]
-        self.file = text
+        self.file = text + (CORE / "app_store_http.h").read_text() + (CORE / "app_store_http.cpp").read_text()
 
     def test_download_is_authenticated_with_the_pinned_roots(self):
         self.assertIn("tls.setCACert(BRUCIA_APP_STORE_ROOTS)", self.fn)
@@ -531,10 +531,14 @@ class PinnedRootsTest(unittest.TestCase):
     def test_live_store_host_validates_only_against_the_pinned_roots(self):
         _, bundle = pinned_pems()
         ctx = ssl.create_default_context(cadata=bundle)
-        host = "ghp.iceis.co.uk"
-        with socket.create_connection((host, 443), timeout=15) as sock:
-            with ctx.wrap_socket(sock, server_hostname=host) as tls:
-                self.assertTrue(tls.getpeercert())
+        import json
+        from urllib.parse import urlparse
+        upstream = json.loads((ROOT / "brand.json").read_text())["upstream"]
+        for key in ("app_store_url", "app_store_origin"):
+            host = urlparse(upstream[key]).hostname
+            with socket.create_connection((host, 443), timeout=15) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host) as tls:
+                    self.assertTrue(tls.getpeercert())
         for bad in ("self-signed.badssl.com", "expired.badssl.com", "wrong.host.badssl.com", "untrusted-root.badssl.com"):
             with self.assertRaises(ssl.SSLError, msg=bad):
                 with socket.create_connection((bad, 443), timeout=15) as sock:

@@ -1713,107 +1713,17 @@ bool appStoreInstalled() {
     return fs->exists("/BruceJS/Tools/App Store.js");
 }
 
-#include "app_store_cert_time.h"
-#include "app_store_install.h"
+#include "app_store_http.h"
 #include "app_store_roots.h"
-#include <HTTPClient.h>
-#include <NetworkClientSecure.h>
-#if __has_include("brucia_build_info.h")
-#include "brucia_build_info.h"
-#endif
-#ifndef BRUCIA_BUILD_TIME
-#define BRUCIA_BUILD_TIME "unknown" // no provenance header: the core falls back to SOURCE_TIME_FLOOR
-#endif
-
-namespace {
-/** Response body over the authenticated stream; idle-bounded so a stalled server cannot hang the UI. */
-struct HttpBody : app_store::Body {
-    HTTPClient &http;
-    NetworkClient *stream;
-    explicit HttpBody(HTTPClient &h) : http(h), stream(h.getStreamPtr()) {}
-    long length() override { return http.getSize(); }
-    long read(uint8_t *buf, size_t cap, uint32_t maxWaitMs) override {
-        if (!stream) return -1;
-        // 10 s of idle per read, never past the rest of the overall download budget.
-        const uint32_t wait = maxWaitMs < 10000 ? maxWaitMs : 10000;
-        const uint32_t start = millis();
-        while (millis() - start < wait) {
-            const int avail = stream->available();
-            if (avail > 0) {
-                const int n = stream->read(buf, cap < (size_t)avail ? cap : (size_t)avail);
-                return n > 0 ? n : -1;
-            }
-            if (!stream->connected()) return 0;
-            delay(5);
-        }
-        return -1;
-    }
-};
-
-struct MillisClock : app_store::Clock {
-    uint32_t nowMs() override { return millis(); }
-};
-
-/**
- * One UTC reading from the NTP server Bruce already uses (own UDP socket and zero offset, so the
- * shared timeClient and its time-zone offset are untouched). The system clock is not used: at cold
- * boot it holds a default date and Bruce sets it to local time. NTP is unauthenticated, so the
- * core only lets this reading raise "now" above the build floor and enable the notBefore check.
- */
-bool utcFromNtp(int64_t &utc) {
-    WiFiUDP udp;
-    NTPClient ntp(udp, ntpServer, 0, 0);
-    ntp.begin(49152 + (esp_random() % 16384)); // not the shared client's port
-    bool ok = ntp.forceUpdate(); // one request, at most about 1 s; the library checks no reply field
-    if (ok) {
-        const unsigned long epoch = ntp.getEpochTime();
-        // A zero transmit timestamp (Kiss-o'-Death or garbage) comes out as 2036-02-07T06:28:16Z
-        // (+ the seconds since the reply), which would make every certificate look expired.
-        ok = epoch - 2085978496UL > 60UL;
-        utc = (int64_t)epoch;
-    }
-    ntp.end();
-    return ok;
-}
-
-/**
- * Validity dates of every certificate the server presented (mbedTLS here does not check them,
- * see app_store_cert_time.h). Empty error: accepted; [notBeforeChecked] says whether start dates
- * were compared with a synced clock.
- */
-app_store::DateCheck checkPeerCertificateDates(NetworkClientSecure &tls) {
-    constexpr size_t MAX_CHAIN = 8;
-    app_store::CertValidity chain[MAX_CHAIN];
-    size_t n = 0;
-    const mbedtls_x509_crt *crt = tls.getPeerCertificate();
-    for (; crt && n < MAX_CHAIN; crt = crt->next, n++) {
-        const mbedtls_x509_time &f = crt->valid_from, &t = crt->valid_to;
-        chain[n] = {
-            {f.year, f.mon, f.day, f.hour, f.min, f.sec},
-            {t.year, t.mon, t.day, t.hour, t.min, t.sec}
-        };
-    }
-    if (crt) {
-        app_store::DateCheck tooLong;
-        tooLong.error = "certificate chain too long to check";
-        return tooLong;
-    }
-    int64_t utc = 0;
-    const bool synced = utcFromNtp(utc);
-    return app_store::checkCertificateDates(
-        chain, n, app_store::timePolicy(BRUCIA_BUILD_TIME, synced, utc)
-    );
-}
-
-} // namespace
 
 // Installs the Bruce community App Store script (third-party host, BRUCIA_UPSTREAM_APP_STORE_URL in
 // brand.json). Brucia has no store of its own; the Bruce JS apps run unchanged on the same interpreter.
 // The bootstrap download is authenticated against the pinned roots and installed only when complete
-// (F35); the store script's own catalog/app downloads are plain HTTP and are not covered by this.
+// (F35). The interpreter upgrades this store's catalog/app downloads to verified HTTPS too.
 // Certificate dates are checked here, not by mbedTLS (see app_store_cert_time.h for the time policy).
 void installAppStoreJS() {
-    displayInfo("Bruce community App Store: third-party host, apps download over plain HTTP", true);
+    using namespace app_store;
+    displayInfo("Bruce community App Store: third-party code. Store downloads use verified HTTPS", true);
 
     if (!WiFi.isConnected()) { wifiConnectMenu(WIFI_STA); }
     if (!WiFi.isConnected()) {

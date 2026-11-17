@@ -39,10 +39,12 @@ Keep app data and required device files backed up. See [Getting Started](Getting
 
 ## Is the community App Store part of Brucia?
 
-It is a third-party Bruce community service. Its script downloads catalog/apps over
-plain HTTP. Those downloads are outside the bootstrap installer's checks. Review code
-before running it. This build also does not enforce TLS certificate validity dates;
-see the F35 evidence in TESTS.md for the exact limits.
+It is a third-party Bruce community service. The unreleased firmware routes its
+catalog/app downloads through verified HTTPS and checked file replacement; releases
+through 0.1.15 still use HTTP downstream. This authenticates the server, not the app
+author. Review scripts before running them. Certificate start dates need a synced
+clock; without one, expiry is checked against the firmware build/source-time floor.
+Device acceptance remains separate; see F35 in TESTS.md and SECURITY.md.
 
 ## What may I publish in a bug report?
 

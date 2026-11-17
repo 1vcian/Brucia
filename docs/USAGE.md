@@ -30,6 +30,16 @@ before connecting an untrusted network. The selected IP is shown by the device.
 ## Scripts and the community store
 
 Brucia retains the Bruce JavaScript API and `/BruceJS` paths. Scripts execute on the
-device. The Bruce community store is hosted by a third party: its later catalog/app
-downloads use plain HTTP. The installer improvements do not authenticate those
-later downloads. Install and run only scripts you have reviewed and trust.
+device. The Bruce community store is hosted by a third party. The unreleased firmware
+upgrades requests to its configured host to verified HTTPS, including from an already
+installed store script. Releases through 0.1.15 still use HTTP for those downloads.
+Install and run only scripts you have reviewed and trust; TLS authenticates the store,
+not the individual author, and installed apps can make their own network requests.
+
+Store responses require Content-Length: up to 256 KiB for catalogs/metadata and 2 MiB
+per downloaded asset, with a 60-second body budget. Redirects and incomplete downloads
+fail visibly. Files are staged and read back before replacement; a failed update
+preserves the previous file or reports backup recovery required. Multi-file apps are
+not installed as one transaction, and power-loss durability is not certified. Store
+save destinations are confined to `/BruceJS` and `/Themes`; append/seek is refused.
+See [SECURITY.md](../SECURITY.md) for the clock/certificate-date limits.

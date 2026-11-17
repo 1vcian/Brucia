@@ -232,11 +232,12 @@ class FirmwareMacroTest(unittest.TestCase):
 
     def test_app_store_endpoint_comes_only_from_brand_json(self):
         # The Bruce community store host is third-party; its URL lives in brand.json only.
-        host = brand.load()["upstream"]["app_store_url"].split("/")[2]
+        upstream = brand.load()["upstream"]
+        hosts = [upstream[key].split("/")[2] for key in ("app_store_url", "app_store_origin")]
         settings = (ROOT / "src/core/settings.cpp").read_text()
         self.assertIn("http.begin(tls, BRUCIA_UPSTREAM_APP_STORE_URL)", settings)
         hits = [str(p.relative_to(ROOT)) for p in (ROOT / "src").rglob("*")
-                if p.is_file() and host in p.read_text(errors="ignore")]
+                if p.is_file() and any(host in p.read_text(errors="ignore") for host in hosts)]
         self.assertEqual([], hits)
         self.assertIn("Install Bruce App Store", (ROOT / "src/core/menu_items/ConfigMenu.cpp").read_text())
 

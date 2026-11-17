@@ -96,6 +96,17 @@ accept testable byte/JSON/state inputs without requiring live hardware.
 `protocol/AwaitReply.kt` owns bounded callback lifetime; `StreamPolicy.kt` records
 shared-peripheral exclusion groups. The ViewModel remains the integration owner.
 
+`wardrive/WifiTargetImportService.kt` owns the phone-only text/PCAP import path:
+bounded document IO, existing parsers, result labels and reservation of the shared
+`WifiTargetStore` before background work starts. Its inputs are text or a deferred
+InputStream opener, with an explicit scope/dispatcher; it has no Android or transport
+dependency. The ViewModel supplies ContentResolver/Uri access. Device capture/pull
+and Run/export still use the same store, preventing late results from replacing a
+newer selection. Cancellation is checked between reads and before publishing;
+a blocked provider read itself is not interrupted. This is a logical extraction,
+not a separate Gradle module or a plugin API; wordlist and device-file orchestration
+remain in their existing services/ViewModel.
+
 Managed transfers require `CAPS.features.verified_files`; hardware capabilities
 remain a separate map. See the protocol document for correlation, size/CRC and
 failure semantics. The cached Kotlin test runner does not regenerate KSP/Android

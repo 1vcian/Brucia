@@ -1,5 +1,7 @@
 #if !defined(LITE_VERSION) && !defined(DISABLE_INTERPRETER)
 #include "wifi_js.h"
+#include "app_store_js.h"
+#include <brucia_brand.h>
 
 #include "core/sd_functions.h"
 #include "core/wifi/wifi_common.h"
@@ -115,6 +117,9 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
         return JS_ThrowTypeError(ctx, "httpFetch(url:string, options?:object|headers?:array)");
 
     const char *url = JS_ToCString(ctx, argv[0], &stringBuffer);
+    if (!url) return JS_ThrowTypeError(ctx, "httpFetch: invalid URL");
+    const auto store = app_store::storeRoute(url, BRUCIA_UPSTREAM_APP_STORE_ORIGIN);
+    if (store.handled) return storeHttpFetch(ctx, argc, argv, store);
     http.begin(url);
 
     // handle headers if a simple array of pairs was passed as second arg

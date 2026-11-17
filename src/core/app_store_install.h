@@ -101,6 +101,7 @@ constexpr const char *TOO_SLOW = "download took too long";
  * Download [body] to `<dest>.part` within [budgetMs] of [clock] (else [TOO_SLOW]), verify it is complete (exactly Content-Length bytes, all
  * written, flushed and synced, size re-read, and the bytes read back equal to the download), then
  * replace [dest] keeping the previous file in `<dest>.bak` until the new one is in place.
+ * [maxBytes] defaults to the 64 KiB bootstrap bound; store assets pass their explicit bound.
  * Returns "" on success, else the reason; on failure the staging file is removed and an existing
  * [dest] is kept, so file existence still means a complete script. The one exception is a storage
  * that refuses both the new file and putting the old one back: the old script then stays only in
@@ -108,7 +109,8 @@ constexpr const char *TOO_SLOW = "download took too long";
  * it first).
  */
 std::string install(
-    Body &body, Files &fs, const std::string &dest, Clock &clock, uint32_t budgetMs = DOWNLOAD_BUDGET_MS
+    Body &body, Files &fs, const std::string &dest, Clock &clock, uint32_t budgetMs = DOWNLOAD_BUDGET_MS,
+    long maxBytes = MAX_SCRIPT_BYTES
 );
 
 } // namespace app_store

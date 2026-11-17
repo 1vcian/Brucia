@@ -1,6 +1,8 @@
 package app.brucia
 
 import android.Manifest
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.os.Build
 import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.assertIsOff
@@ -22,6 +24,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -34,6 +37,10 @@ import org.junit.runner.RunWith
  * tool, a stream started from its switch, the device leaving companion mode and the app
  * re-negotiating on the same transport, the global Stop (the entry point behind the command log's
  * Stop button) turning the stream off, and Disconnect releasing transport, service and wake lock.
+ * Also exercises Channels owning/borrowing the Wardrive scan, real Activity rotation with a
+ * pending SUB reply, replacement-link reconnect, and the actual command-log Stop button with
+ * delayed success/error replies. A subsequent PONG is an observable read barrier: assertions
+ * about stale replies run only after the real read loop has processed them.
  *
  * Not covered: the USB permission/driver path, a real board, radio behaviour, timing on hardware.
  */
@@ -62,6 +69,136 @@ class CompanionLinkFlowTest {
     private fun awaitUi(what: String, timeoutMs: Long = 15_000, cond: () -> Boolean) {
         compose.waitUntil(timeoutMs) { cond() }
         assertTrue(what, cond())
+    }
+
+    private fun connect(device: SimulatedDevice = SimulatedDevice()): SimulatedDevice {
+        onMain {
+            if (!::vm.isInitialized) vm = ViewModelProvider(compose.activity)[WardriveViewModel::class.java]
+            val token = vm.beginCompanionLink()
+            assertNotNull("companion token", token)
+            assertTrue("transport adopted", vm.connect(requireNotNull(token), device))
+        }
+        awaitUi("connected") { vm.status.value == "Connected" && compose.shows("Connected") }
+        return device
+    }
+
+    private fun openWifiTool(name: String) {
+        compose.onNodeWithText("Wi-Fi", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText(name, useUnmergedTree = true).performScrollTo().performClick()
+    }
+
+    private fun wardriveSwitch() = compose.onNode(
+        isToggleable() and hasAnySibling(hasText("Wardriving") or androidx.compose.ui.test.hasAnyDescendant(hasText("Wardriving"))),
+        useUnmergedTree = true,
+    )
+
+    private fun rotate(orientation: Int, expected: Int) {
+        val previous = compose.activity
+        onMain { previous.requestedOrientation = orientation }
+        awaitUi("Activity recreated after rotation") {
+            compose.activity !== previous && compose.activity.resources.configuration.orientation == expected
+        }
+        compose.waitForIdle()
+        onMain { assertSame("rotation retains VM", vm, ViewModelProvider(compose.activity)[WardriveViewModel::class.java]) }
+    }
+
+    private fun readBarrier(device: SimulatedDevice, battery: Int) {
+        device.reportBattery(battery)
+        awaitUi("read loop passed delayed frames") { vm.device.value?.battery == battery }
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun channelsOwnScanSurvivesRotationWithPendingAckAndStopsOnceOnLeave() {
+        val device = connect(SimulatedDevice().apply { holdSubscriptionStarts = true })
+        openWifiTool("Channels")
+        awaitUi("Channels requested scan") { device.heldStarts.size == 1 && vm.wardriving.value }
+        rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, Configuration.ORIENTATION_LANDSCAPE)
+        assertTrue(compose.shows("Channel Analyzer"))
+        assertEquals("rotation sends neither duplicate ON nor OFF", listOf("wifi.ap" to true), device.subs.toList())
+        assertTrue(vm.wardriving.value)
+        device.releaseSubscriptionStarts()
+        readBarrier(device, 61)
+        rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
+        assertEquals(listOf("wifi.ap" to true), device.subs.toList())
+
+        Espresso.pressBack()
+        awaitUi("owned scan stopped on leave") { device.lastSub("wifi.ap") == false && !vm.wardriving.value }
+        readBarrier(device, 62)
+        assertEquals(listOf("wifi.ap" to true, "wifi.ap" to false), device.subs.toList())
+        assertFalse(compose.shows("Channel Analyzer"))
+        assertEquals("Connected", vm.status.value)
+    }
+
+    @Test
+    fun leavingChannelsPreservesTheScanStartedFromWardrive() {
+        val device = connect()
+        openWifiTool("Wardrive")
+        wardriveSwitch().assertIsOff().performClick()
+        awaitUi("Wardrive owns scan") { device.lastSub("wifi.ap") == true && vm.wardriving.value }
+        Espresso.pressBack()
+        compose.onNodeWithText("Channels", useUnmergedTree = true).performScrollTo().performClick()
+        awaitUi("Channels borrows scan") { compose.shows("Channel Analyzer") }
+        Espresso.pressBack()
+        awaitUi("left Channels") { !compose.shows("Channel Analyzer") }
+        readBarrier(device, 63)
+        assertEquals("borrower must not restart or stop Wardrive", listOf("wifi.ap" to true), device.subs.toList())
+        assertTrue(vm.wardriving.value)
+        compose.onNodeWithText("Wardrive", useUnmergedTree = true).performScrollTo().performClick()
+        wardriveSwitch().assertIsOn().performClick()
+        awaitUi("owner stops scan") { device.lastSub("wifi.ap") == false && !vm.wardriving.value }
+    }
+
+    @Test
+    fun channelsReconnectsWhileOpenAndReleasesOnlyTheNewLinkOnLeave() {
+        val first = connect()
+        openWifiTool("Channels")
+        awaitUi("first scan") { first.lastSub("wifi.ap") == true && vm.wardriving.value }
+        onMain { vm.disconnect() }
+        awaitUi("disconnected in Channels") { vm.status.value == "Disconnected" && !vm.wardriving.value }
+        assertTrue(compose.shows("Channel Analyzer"))
+        assertFalse(first.isOpen)
+        assertEquals(listOf("wifi.ap" to true, "wifi.ap" to false), first.subs.toList())
+        val firstWrites = first.subs.toList()
+
+        val second = connect()
+        awaitUi("Channels restarts on replacement link") { second.lastSub("wifi.ap") == true && vm.wardriving.value }
+        Espresso.pressBack()
+        awaitUi("replacement link stopped on leave") { second.lastSub("wifi.ap") == false && !vm.wardriving.value }
+        readBarrier(second, 64)
+        assertEquals(listOf("wifi.ap" to true, "wifi.ap" to false), second.subs.toList())
+        assertEquals("no cleanup sent to old transport", firstWrites, first.subs.toList())
+    }
+
+    @Test
+    fun globalStopFromCommandLogFencesLateStartRepliesAcrossRestart() {
+        val device = connect(SimulatedDevice().apply { holdSubscriptionStarts = true })
+        openWifiTool("Wardrive")
+        // Exercise both a delayed success after Stop and a delayed error after a new run starts.
+        for (lateSuccess in listOf(true, false)) {
+            device.holdSubscriptionStarts = true
+            wardriveSwitch().assertIsOff().performClick()
+            awaitUi("pending start") { device.heldStarts.size == 1 && vm.wardriving.value }
+            compose.onNodeWithText("Cmds", useUnmergedTree = true).performClick()
+            compose.onNodeWithText("Stop", useUnmergedTree = true).performClick()
+            awaitUi("global Stop wrote OFF") { device.lastSub("wifi.ap") == false && !vm.wardriving.value }
+            compose.onNodeWithText("Close", useUnmergedTree = true).performClick()
+            wardriveSwitch().assertIsOff()
+
+            if (!lateSuccess) {
+                device.holdSubscriptionStarts = false
+                wardriveSwitch().performClick()
+                awaitUi("new start") { device.lastSub("wifi.ap") == true && vm.wardriving.value }
+            }
+            val writes = device.subs.toList()
+            device.releaseSubscriptionStarts(ok = lateSuccess)
+            readBarrier(device, if (lateSuccess) 65 else 66)
+            assertEquals("late reply cannot send another SUB", writes, device.subs.toList())
+            assertEquals("late reply cannot change the current run", !lateSuccess, vm.wardriving.value)
+            if (lateSuccess) wardriveSwitch().assertIsOff() else wardriveSwitch().assertIsOn()
+        }
+        wardriveSwitch().performClick()
+        awaitUi("final cleanup") { device.lastSub("wifi.ap") == false && !vm.wardriving.value }
     }
 
     @After

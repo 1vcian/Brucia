@@ -69,6 +69,8 @@ def validate(raw: dict) -> None:
     if not up.get("name") or not all(_UPSTREAM.fullmatch(str(up.get(k, "")))
                                      for k in ("repo_url", "site_url", "legacy_repo_url")):
         raise ValueError("brand.json: upstream needs name, repo_url, site_url, legacy_repo_url")
+    if not re.fullmatch(r"https://[a-z0-9.-]+", str(up.get("app_store_origin", ""))):
+        raise ValueError("brand.json: upstream needs an HTTPS app_store_origin without a path")
     # Installer endpoint of the Bruce community App Store (third-party host); it needs its trailing slash.
     if not _UPSTREAM.fullmatch(str(up.get("app_store_url", "")).removesuffix("/")):
         raise ValueError("brand.json: upstream needs app_store_url")
@@ -111,6 +113,7 @@ def derive(raw: dict) -> dict:
         "upstream_site_url": up["site_url"],
         "upstream_legacy_repo_url": up["legacy_repo_url"],
         "upstream_app_store_url": up["app_store_url"],
+        "upstream_app_store_origin": up["app_store_origin"],
     }
 
 
@@ -135,6 +138,7 @@ def render_header(d: dict) -> str:
         ("BRUCIA_UPSTREAM_REPO_DISPLAY", "upstream_repo_display"),
         ("BRUCIA_UPSTREAM_SITE_URL", "upstream_site_url"),
         ("BRUCIA_UPSTREAM_APP_STORE_URL", "upstream_app_store_url"),
+        ("BRUCIA_UPSTREAM_APP_STORE_ORIGIN", "upstream_app_store_origin"),
     ]
     lines = [
         "#pragma once",

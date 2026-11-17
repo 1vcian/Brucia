@@ -29,6 +29,9 @@ internal class SimulatedDevice : Transport {
     /** Every SUB body the app sent, in order: stream to on/off. */
     val subs = CopyOnWriteArrayList<Pair<String, Boolean>>()
     val commands = CopyOnWriteArrayList<String>()
+    @Volatile var holdSubscriptionStarts = false
+    val heldStarts = CopyOnWriteArrayList<Int>()
+    @Volatile private var battery = 77
 
     override val isOpen: Boolean get() = open
     override val kind: String get() = "usb"
@@ -57,14 +60,15 @@ internal class SimulatedDevice : Transport {
         val d = msg.optJSONObject("d") ?: JSONObject()
         when (msg.optInt("t")) {
             Kind.HELLO -> { hellos.incrementAndGet(); send(Kind.CAPS, id, caps()) }
-            Kind.PING -> { pings.incrementAndGet(); send(Kind.PONG, id, JSONObject().put("battery", 77)) }
+            Kind.PING -> { pings.incrementAndGet(); send(Kind.PONG, id, JSONObject().put("battery", battery)) }
             Kind.CMD -> {
                 commands += d.optString("cmd")
                 send(Kind.ACK, id, JSONObject().put("ok", true).put("out", ""))
             }
             Kind.SUB -> {
                 subs += d.optString("stream") to d.optBoolean("on")
-                send(Kind.ACK, id, JSONObject().put("ok", true))
+                if (holdSubscriptionStarts && d.optBoolean("on")) heldStarts += id
+                else send(Kind.ACK, id, JSONObject().put("ok", true))
             }
         }
     }
@@ -76,6 +80,22 @@ internal class SimulatedDevice : Transport {
     }
 
     fun lastSub(stream: String): Boolean? = subs.lastOrNull { it.first == stream }?.second
+
+    /** Release old ON replies after Stop or a newer start, without delaying unrelated frames. */
+    fun releaseSubscriptionStarts(ok: Boolean = true) {
+        for (id in heldStarts.toList()) {
+            if (heldStarts.remove(id)) send(
+                if (ok) Kind.ACK else Kind.ERR, id,
+                JSONObject().put("ok", ok).put("msg", if (ok) "" else "delayed start rejected"),
+            )
+        }
+    }
+
+    /** A frame after the delayed replies: observing this value proves the app read past them. */
+    fun reportBattery(value: Int) {
+        battery = value
+        send(Kind.PONG, 0, JSONObject().put("battery", value))
+    }
 
     override fun read(buf: ByteArray, timeoutMs: Int): Int {
         val deadline = System.currentTimeMillis() + timeoutMs

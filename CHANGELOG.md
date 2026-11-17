@@ -7,6 +7,24 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- The interpreter now routes the Bruce store's configured catalog/app requests through
+  CA- and hostname-verified HTTPS, including requests from an existing store script.
+  Redirects, incomplete bodies and failed writes cannot report a successful install.
+  Asset saves reuse the installer's staging, sync/readback and backup recovery;
+  catalog/asset bounds are 256 KiB/2 MiB. Certificate date policy is shared with the
+  bootstrap installer. Third-party code is not author-signed or sandboxed by this change;
+  multi-file installs are not atomic. Physical store acceptance remains pending.
+
+- Moved manual Wi-Fi target imports into an Android-independent service using the
+  existing shared selection store. Existing formats, labels and the 32 MiB PCAP
+  limit are retained; cancelled document work checks cancellation before publishing.
+  Added parser/IO/selection regressions and an offline Android ViewModel import test.
+
+- Added emulator integration regressions for Channels/Wardrive scan ownership,
+  Activity rotation with a pending subscription, replacement-link reconnect and
+  global Stop with late replies. They use the real app and a simulated transport;
+  no new hardware acceptance or radio behavior change.
+
 - All downloadable Wi-Fi/NFC dictionaries now have recorded size and SHA-256 pins,
   including the existing RockYou and SecLists release assets. Downloads that do not
   match the pinned snapshot preserve the previous list and report an error.

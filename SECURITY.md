@@ -57,14 +57,20 @@ When reporting a release issue, include app/firmware versions, board and redacte
 reproduction steps. Public guides and illustrated videos do not certify every
 physical operation. Consult [TESTS.md](TESTS.md) for the exact evidence and limits.
 
-The Bruce community App Store is a third-party service. Its later catalog/app
-downloads use plain HTTP; the bootstrap installer's checks do not authenticate
-those downloads. Scripts run on the device. Review them before execution.
-The App Store bootstrap installer checks the TLS chain and hostname and applies a separate
-certificate-date policy: expiry is checked against the firmware source-time floor or a newer
-synced clock; notBefore is checked only with a synced clock. A cold, unsynced device therefore
-does not establish full current-date validity. This is specific to the installer, not a claim
-about every firmware TLS client. Host tests do not replace mbedTLS/device acceptance.
+The Bruce community App Store is a third-party service. In the unreleased firmware,
+`wifi.httpFetch` requests to its configured catalog/app host are upgraded to HTTPS
+before connecting, with CA/hostname checks and no redirects or HTTP fallback. Complete
+responses are required; asset saves use staging, sync, readback and backup recovery.
+TLS authenticates the store server; there is no independent author signature or
+pinned content hash. Scripts still run with the device's JS APIs: review them before
+execution. This does not secure arbitrary network requests made by installed apps.
+
+The bootstrap installer and store delivery share a certificate-date policy: expiry
+is checked against the firmware source-time floor or a newer synced clock; notBefore
+is checked only with a synced clock. A cold, unsynced device therefore does not
+establish full current-date validity. This is not a claim about every firmware TLS
+client. Host tests do not replace mbedTLS/device acceptance. Releases through 0.1.15
+still have the previous downstream HTTP behavior.
 
 The phone-hosted MITM proxy is for a single-user lab. Its bounded worker pool can be occupied
 by slow clients or idle tunnels; it is not a production or high-concurrency proxy. Stop closes
