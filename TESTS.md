@@ -4,6 +4,47 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Wardrive beacon loop cleanup (F21 follow-up) — 2026-11-18
+
+Base `86dff10d` plus F50 (committed as `13032751`). Wardrive now registers
+`LeaveEffect { vm.stopBeaconSpam() }` at screen scope, outside its lazy header:
+navigation stops subsequent beacon bursts; rotation preserves the loop. The existing
+Stop implementation is reused. No protocol/firmware changes; an already-sent burst
+may finish its bounded window, so this does not promise immediate physical cessation.
+
+New `CompanionLinkFlowTest.wardriveBeaconLoopSurvivesRotationButStopsOnLeaveBeforeLateReply`
+uses the real Activity/ViewModel/session and a simulated device with held burst replies.
+It starts one synthetic SSID, rotates with a pending burst, releases its reply and
+observes the next burst, then leaves Wardrive. The loop must stop immediately on the
+app side. A subsequent delayed ACK and PONG read barrier cannot restart it; reopening
+Wardrive shows Start and preserves the connection. No radio emission or real USB.
+
+- Before the production fix: **1/1 FAIL**, specifically
+  `leaving Wardrive cancels further bursts immediately`.
+- After the fix: **6/6 CompanionLinkFlowTest scenarios PASS**, including the existing
+  Channels/Wardrive ownership, rotation, reconnect and global Stop regressions.
+- Focused JVM suites: **37/37 PASS** (`BeaconSpamTest` 5, `BurstLoopTest` 18,
+  `StreamRotationTest` 11, `StreamLeaveHooksTest` 3).
+- Lint: **0 errors / 1 existing OldTargetApi warning**; `git diff --check` PASS.
+  Kotlin compilation also reports the existing Compose test-rule deprecation and
+  `java.lang.Object` monitor warning in the touched instrumentation fixtures.
+
+Command from `android/`:
+
+```sh
+ANDROID_SERIAL=emulator-5554 ./gradlew --offline :app:testDebugUnitTest \
+  --tests app.brucia.BeaconSpamTest --tests app.brucia.BurstLoopTest \
+  --tests app.brucia.StreamRotationTest --tests app.brucia.StreamLeaveHooksTest \
+  :app:lintDebug :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=app.brucia.CompanionLinkFlowTest
+```
+
+API 36.1 arm64 isolated `BruciaIntegration` AVD; before/after XML, unit results and
+lint evidence retained in ignored `.codex_tmp/beacon-leave-20261118/`.
+No full JVM/instrumentation suite, firmware build, hardware acceptance or release
+in this step. F50 source hashes still match its previously collected 36 samples;
+the decoder benchmark was not rerun for this screen-only change.
+
 ## Android decoder allocation/GC probe (F50) — 2026-11-18
 
 Base `86dff10d`, with a new opt-in instrumentation benchmark and report collector.

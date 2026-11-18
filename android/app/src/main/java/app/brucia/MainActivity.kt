@@ -554,6 +554,9 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit, onGoCrack: () -> Unit = {}) {
+    // Stop further beacon bursts on navigation, while retaining the loop across rotation.
+    // Keep this on the screen: disposing the lazy header during scrolling is not leaving.
+    LeaveEffect { vm.stopBeaconSpam() }
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val list by vm.aps.collectAsState()

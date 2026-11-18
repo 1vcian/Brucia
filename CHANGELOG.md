@@ -7,6 +7,10 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Leaving Wardrive now stops its Wi-Fi beacon loop, matching the Spam hub. Rotation
+  preserves the running loop, and a late reply cannot schedule another burst after
+  leaving. A burst already sent to the device may finish its bounded window.
+
 - The interpreter now routes the Bruce store's configured catalog/app requests through
   CA- and hostname-verified HTTPS, including requests from an existing store script.
   Redirects, incomplete bodies and failed writes cannot report a successful install.

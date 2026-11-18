@@ -31,6 +31,8 @@ internal class SimulatedDevice : Transport {
     val commands = CopyOnWriteArrayList<String>()
     @Volatile var holdSubscriptionStarts = false
     val heldStarts = CopyOnWriteArrayList<Int>()
+    @Volatile var holdBeaconReplies = false
+    val heldBeacons = CopyOnWriteArrayList<Int>()
     @Volatile private var battery = 77
 
     override val isOpen: Boolean get() = open
@@ -62,8 +64,10 @@ internal class SimulatedDevice : Transport {
             Kind.HELLO -> { hellos.incrementAndGet(); send(Kind.CAPS, id, caps()) }
             Kind.PING -> { pings.incrementAndGet(); send(Kind.PONG, id, JSONObject().put("battery", battery)) }
             Kind.CMD -> {
-                commands += d.optString("cmd")
-                send(Kind.ACK, id, JSONObject().put("ok", true).put("out", ""))
+                val command = d.optString("cmd")
+                commands += command
+                if (holdBeaconReplies && command.startsWith("wifi_beacon_spam ")) heldBeacons += id
+                else send(Kind.ACK, id, JSONObject().put("ok", true).put("out", ""))
             }
             Kind.SUB -> {
                 subs += d.optString("stream") to d.optBoolean("on")
@@ -80,6 +84,15 @@ internal class SimulatedDevice : Transport {
     }
 
     fun lastSub(stream: String): Boolean? = subs.lastOrNull { it.first == stream }?.second
+
+    /** Complete only the bursts already pending, so a continued loop parks on its next burst. */
+    fun releaseBeaconReplies() {
+        for (id in heldBeacons.toList()) {
+            if (heldBeacons.remove(id)) send(
+                Kind.ACK, id, JSONObject().put("ok", true).put("out", "beacon spam done (8s, 1 ssids)"),
+            )
+        }
+    }
 
     /** Release old ON replies after Stop or a newer start, without delaying unrelated frames. */
     fun releaseSubscriptionStarts(ok: Boolean = true) {

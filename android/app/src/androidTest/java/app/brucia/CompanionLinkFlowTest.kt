@@ -41,6 +41,7 @@ import org.junit.runner.RunWith
  * pending SUB reply, replacement-link reconnect, and the actual command-log Stop button with
  * delayed success/error replies. A subsequent PONG is an observable read barrier: assertions
  * about stale replies run only after the real read loop has processed them.
+ * Wardrive's beacon loop survives rotation, stops on leave, and ignores a late burst reply.
  *
  * Not covered: the USB permission/driver path, a real board, radio behaviour, timing on hardware.
  */
@@ -106,6 +107,38 @@ class CompanionLinkFlowTest {
         device.reportBattery(battery)
         awaitUi("read loop passed delayed frames") { vm.device.value?.battery == battery }
         compose.waitForIdle()
+    }
+
+    @Test
+    fun wardriveBeaconLoopSurvivesRotationButStopsOnLeaveBeforeLateReply() {
+        val device = connect(SimulatedDevice().apply { holdBeaconReplies = true })
+        openWifiTool("Wardrive")
+        // One synthetic SSID, simulated transport only: no radio or actual beacon emission.
+        onMain { vm.startBeaconSpam(listOf("Lifecycle fixture")) }
+        awaitUi("first beacon burst waiting") { device.heldBeacons.size == 1 && vm.beaconActive.value }
+        rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, Configuration.ORIENTATION_LANDSCAPE)
+        assertTrue("rotation preserves the loop", vm.beaconActive.value)
+        assertEquals(1, device.commands.count { it.startsWith("wifi_beacon_spam ") })
+
+        device.releaseBeaconReplies()
+        awaitUi("rotation preserved the next burst") {
+            device.commands.count { it.startsWith("wifi_beacon_spam ") } == 2 && device.heldBeacons.size == 1
+        }
+        Espresso.pressBack()
+        compose.waitForIdle()
+        assertFalse("leaving Wardrive cancels further bursts immediately", vm.beaconActive.value)
+        assertEquals("Stopped.", vm.beaconStatus.value)
+
+        device.releaseBeaconReplies()
+        readBarrier(device, 67)
+        assertEquals("late ACK cannot schedule another burst", 2,
+            device.commands.count { it.startsWith("wifi_beacon_spam ") })
+        assertFalse(vm.beaconActive.value)
+        assertEquals("Stopped.", vm.beaconStatus.value)
+        compose.onNodeWithText("Wardrive", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("Start beacon spam", useUnmergedTree = true).performScrollTo()
+        assertFalse("returning does not restart", vm.beaconActive.value)
+        assertEquals("Connected", vm.status.value)
     }
 
     @Test
