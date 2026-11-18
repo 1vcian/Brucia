@@ -4,6 +4,75 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Android decoder allocation/GC probe (F50) — 2026-11-18
+
+Base `86dff10d`, with a new opt-in instrumentation benchmark and report collector.
+Production app/firmware code is unchanged. The real `CompanionClient` and Android
+JSON parser ran on the instrumentation worker in the isolated API 36.1 arm64 AVD
+`BruciaIntegration`; no Activity, USB, radio or physical phone was involved.
+
+`CompanionDecoderBenchmark` covers 128/1024/8192-byte JSON payloads at 1/64/4096-byte
+reads, coalescing frames where possible, plus the firmware's `wifi.ap` event shape
+at mixed 64/512/4096-byte reads. The Wi-Fi case runs both saturated and paced at a
+chosen synthetic 50 frames/s; a second paced case uses one-byte reads. This is not
+a recorded device traffic distribution. Each case has two warmup trials and three
+measured trials, with no forced GC. The transport bulk-copies prebuilt bytes; every
+decoded envelope is checked and receive/error counters must match.
+
+Report: [`docs/benchmarks/2026-11-18-decoder-android.json`](docs/benchmarks/2026-11-18-decoder-android.json).
+It retains all 36 samples, runtime/build identity, source/APK hashes at collection
+time and the instrumentation log hash. Allocation/GC deltas use `Debug.getRuntimeStats`:
+approximate **process-wide** values, including parser, harness, observer and other
+thread allocations. They are not isolated decoder allocation counts. GC milliseconds
+measure collector duration, not stopped-UI time; zero blocking-GC counts do not prove
+absence of pauses. Short trials, JIT/heap history and emulator scheduling affect timing.
+
+For 8 KiB payloads, medians of the three trials:
+
+| Read size | Frames/trial | Synthetic throughput | Allocated/frame | GC runs/trial | GC duration/trial |
+|---|---|---|---|---|---|
+| 1 byte | 20 | 0.662 MiB/s | 35.6 MiB | 39 | 217 ms |
+| 64 bytes | 200 | 28.858 MiB/s | 615.4 KiB | 11 | 57 ms |
+| 4096 bytes | 200 | 77.789 MiB/s | 63.7 KiB | 5 | 20 ms |
+
+The paced Wi-Fi cases allocate approximately **2.9 KiB/frame** with mixed reads and
+**24.3 KiB/frame** with one-byte reads. Across their three 100-frame trials, GC counts
+are `[0, 0, 1]` and `[4, 3, 4]`, respectively; all measured blocking-GC counts are zero.
+Their readMessage p95 values include the 20 ms transport pacing and emulator scheduling,
+so they must not be interpreted as decoder CPU cost or UI latency.
+
+Verification: focused benchmark **1/1 PASS**, all 12 scenarios completed; lint **0
+errors / 1 existing OldTargetApi warning**. Without `decoderBenchmark=true`, the
+focused test is skipped, keeping this measurement out of normal CI performance gates.
+The collector refuses missing-report and failed-run logs (both rejection probes PASS).
+No full instrumentation/JVM/firmware rerun: production code is unchanged. Raw test
+outputs and lint evidence are in ignored `.codex_tmp/decoder-20261118/`.
+
+Reproduce on a dedicated emulator with compatible debug signing (from `android/`):
+
+```sh
+ANDROID_SERIAL=emulator-5554 ./gradlew --offline :app:connectedDebugAndroidTest :app:lintDebug \
+  -Pandroid.testInstrumentationRunnerArguments.class=app.brucia.CompanionDecoderBenchmark \
+  -Pandroid.testInstrumentationRunnerArguments.decoderBenchmark=true
+```
+
+Immediately afterward, from the repository root, before editing sources or rebuilding:
+
+```sh
+python3 tools/collect_android_decoder_benchmark.py \
+  --log 'android/app/build/outputs/androidTest-results/connected/debug/BruciaIntegration(AVD) - 16/testlog/test-results.log' \
+  --output docs/benchmarks/2026-11-18-decoder-android.json
+```
+
+Adjust the serial/log directory for another AVD. The report is embedded in instrumentation
+results because Gradle uninstalls the test app afterward and removes its internal files.
+Decision: retain the current decoder. Extreme fragmentation creates allocation/GC
+pressure on ART, but these data do not establish a USB or UI bottleneck on a phone.
+F50 physical follow-up remains OPEN: collect actual read sizes/rates and phone allocation,
+GC and UI traces during representative receive-only traffic before a buffer refactor.
+The older host report uses a different runtime/parser/transport harness and is not a
+controlled cross-platform speed comparison. No release or new hardware acceptance.
+
 ## Store downstream HTTPS delivery — 2026-11-17
 
 Base `f4a6e155` plus the local app integration/extraction work below. The current

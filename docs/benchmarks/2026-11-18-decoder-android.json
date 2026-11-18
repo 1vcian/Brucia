@@ -1,0 +1,627 @@
+{
+  "scope": "Synthetic Android ART decoder/JSON/harness probe; no USB, UI, radio or phone throughput claim",
+  "allocation_scope": "Approximate process-wide ART counters; includes observers and other threads",
+  "latency_scope": "readMessage wall time, including transport pacing; GC duration is not UI pause time",
+  "build_fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BP41.250916.009.A1/14246511:user/release-keys",
+  "model": "sdk_gphone64_arm64",
+  "sdk_int": 36,
+  "abis": [
+    "arm64-v8a"
+  ],
+  "vm_version": "2.1.0",
+  "app_version": "0.1.15",
+  "build_type": "debug",
+  "warmup_trials": 2,
+  "measured_trials": 3,
+  "rows": [
+    {
+      "workload": "padding_128",
+      "payload_bytes": 128,
+      "read_chunks": [
+        1
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 20,
+          "elapsed_ns": 9888792,
+          "wire_bytes_per_second": 266968.90783019806,
+          "read_message_p50_ns": 426917,
+          "read_message_p95_ns": 736667,
+          "read_message_max_ns": 772875,
+          "art.gc.bytes-allocated": 360448,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 20,
+          "elapsed_ns": 8420333,
+          "wire_bytes_per_second": 313526.7928239893,
+          "read_message_p50_ns": 407834,
+          "read_message_p95_ns": 497542,
+          "read_message_max_ns": 501666,
+          "art.gc.bytes-allocated": 360448,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 20,
+          "elapsed_ns": 13831833,
+          "wire_bytes_per_second": 190864.07419754128,
+          "read_message_p50_ns": 702833,
+          "read_message_p95_ns": 1054917,
+          "read_message_max_ns": 1078916,
+          "art.gc.bytes-allocated": 360448,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "padding_128",
+      "payload_bytes": 128,
+      "read_chunks": [
+        64
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 200,
+          "elapsed_ns": 10622416,
+          "wire_bytes_per_second": 2485310.3098202893,
+          "read_message_p50_ns": 33208,
+          "read_message_p95_ns": 148833,
+          "read_message_max_ns": 393208,
+          "art.gc.bytes-allocated": 327680,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 2882333,
+          "wire_bytes_per_second": 9159247.040505035,
+          "read_message_p50_ns": 6542,
+          "read_message_p95_ns": 29000,
+          "read_message_max_ns": 204333,
+          "art.gc.bytes-allocated": 327680,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 1308250,
+          "wire_bytes_per_second": 20179629.27575005,
+          "read_message_p50_ns": 5667,
+          "read_message_p95_ns": 6917,
+          "read_message_max_ns": 12750,
+          "art.gc.bytes-allocated": 360448,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "padding_128",
+      "payload_bytes": 128,
+      "read_chunks": [
+        4096
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 200,
+          "elapsed_ns": 1201834,
+          "wire_bytes_per_second": 21966427.97591015,
+          "read_message_p50_ns": 4250,
+          "read_message_p95_ns": 10917,
+          "read_message_max_ns": 25000,
+          "art.gc.bytes-allocated": 696320,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 1275166,
+          "wire_bytes_per_second": 20703186.879198473,
+          "read_message_p50_ns": 4416,
+          "read_message_p95_ns": 10208,
+          "read_message_max_ns": 119667,
+          "art.gc.bytes-allocated": 663552,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 1212958,
+          "wire_bytes_per_second": 21764974.549819533,
+          "read_message_p50_ns": 4583,
+          "read_message_p95_ns": 10417,
+          "read_message_max_ns": 74292,
+          "art.gc.bytes-allocated": 663552,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "padding_1024",
+      "payload_bytes": 1024,
+      "read_chunks": [
+        1
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 20,
+          "elapsed_ns": 9216958,
+          "wire_bytes_per_second": 2230670.900312229,
+          "read_message_p50_ns": 447166,
+          "read_message_p95_ns": 552167,
+          "read_message_max_ns": 625750,
+          "art.gc.bytes-allocated": 12058624,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 20,
+          "elapsed_ns": 9021208,
+          "wire_bytes_per_second": 2279073.9333357573,
+          "read_message_p50_ns": 431542,
+          "read_message_p95_ns": 610125,
+          "read_message_max_ns": 977042,
+          "art.gc.bytes-allocated": 12091392,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 20,
+          "elapsed_ns": 19297541,
+          "wire_bytes_per_second": 1065420.718629384,
+          "read_message_p50_ns": 504041,
+          "read_message_p95_ns": 3505833,
+          "read_message_max_ns": 4676250,
+          "art.gc.bytes-allocated": 12091392,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "padding_1024",
+      "payload_bytes": 1024,
+      "read_chunks": [
+        64
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 200,
+          "elapsed_ns": 4527625,
+          "wire_bytes_per_second": 45410121.2004086,
+          "read_message_p50_ns": 18416,
+          "read_message_p95_ns": 26959,
+          "read_message_max_ns": 356041,
+          "art.gc.bytes-allocated": 3080192,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 4297458,
+          "wire_bytes_per_second": 47842236.038141616,
+          "read_message_p50_ns": 19000,
+          "read_message_p95_ns": 27375,
+          "read_message_max_ns": 213333,
+          "art.gc.bytes-allocated": 3080192,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 4769333,
+          "wire_bytes_per_second": 43108753.362367444,
+          "read_message_p50_ns": 21666,
+          "read_message_p95_ns": 30459,
+          "read_message_max_ns": 159625,
+          "art.gc.bytes-allocated": 3080192,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "padding_1024",
+      "payload_bytes": 1024,
+      "read_chunks": [
+        4096
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 200,
+          "elapsed_ns": 2668167,
+          "wire_bytes_per_second": 77056646.0045417,
+          "read_message_p50_ns": 10875,
+          "read_message_p95_ns": 20750,
+          "read_message_max_ns": 54417,
+          "art.gc.bytes-allocated": 1732608,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 6484208,
+          "wire_bytes_per_second": 31707804.561482295,
+          "read_message_p50_ns": 11000,
+          "read_message_p95_ns": 29459,
+          "read_message_max_ns": 3187542,
+          "art.gc.bytes-allocated": 1732608,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 2853833,
+          "wire_bytes_per_second": 72043458.7447829,
+          "read_message_p50_ns": 10792,
+          "read_message_p95_ns": 23167,
+          "read_message_max_ns": 101709,
+          "art.gc.bytes-allocated": 1732608,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "padding_8192",
+      "payload_bytes": 8192,
+      "read_chunks": [
+        1
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 20,
+          "elapsed_ns": 219277292,
+          "wire_bytes_per_second": 747546.6269439337,
+          "read_message_p50_ns": 10876750,
+          "read_message_p95_ns": 12406292,
+          "read_message_max_ns": 12574000,
+          "art.gc.bytes-allocated": 745955328,
+          "art.gc.gc-count": 46,
+          "art.gc.gc-time": 217,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 20,
+          "elapsed_ns": 236294750,
+          "wire_bytes_per_second": 693709.8687126988,
+          "read_message_p50_ns": 11256875,
+          "read_message_p95_ns": 15146417,
+          "read_message_max_ns": 15894667,
+          "art.gc.bytes-allocated": 764551168,
+          "art.gc.gc-count": 38,
+          "art.gc.gc-time": 205,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 20,
+          "elapsed_ns": 240040042,
+          "wire_bytes_per_second": 682886.06615058,
+          "read_message_p50_ns": 11627375,
+          "read_message_p95_ns": 14163125,
+          "read_message_max_ns": 14427958,
+          "art.gc.bytes-allocated": 728313856,
+          "art.gc.gc-count": 39,
+          "art.gc.gc-time": 238,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "padding_8192",
+      "payload_bytes": 8192,
+      "read_chunks": [
+        64
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 200,
+          "elapsed_ns": 53714042,
+          "wire_bytes_per_second": 30517159.7400918,
+          "read_message_p50_ns": 202000,
+          "read_message_p95_ns": 483000,
+          "read_message_max_ns": 1439708,
+          "art.gc.bytes-allocated": 137551872,
+          "art.gc.gc-count": 11,
+          "art.gc.gc-time": 57,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 54170542,
+          "wire_bytes_per_second": 30259988.90688596,
+          "read_message_p50_ns": 202375,
+          "read_message_p95_ns": 897916,
+          "read_message_max_ns": 1134708,
+          "art.gc.bytes-allocated": 126029824,
+          "art.gc.gc-count": 11,
+          "art.gc.gc-time": 53,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 59706167,
+          "wire_bytes_per_second": 27454450.392034043,
+          "read_message_p50_ns": 215250,
+          "read_message_p95_ns": 933125,
+          "read_message_max_ns": 1516791,
+          "art.gc.bytes-allocated": 125997056,
+          "art.gc.gc-count": 11,
+          "art.gc.gc-time": 57,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "padding_8192",
+      "payload_bytes": 8192,
+      "read_chunks": [
+        4096
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 200,
+          "elapsed_ns": 20096084,
+          "wire_bytes_per_second": 81568130.38799001,
+          "read_message_p50_ns": 72625,
+          "read_message_p95_ns": 148584,
+          "read_message_max_ns": 724958,
+          "art.gc.bytes-allocated": 13037568,
+          "art.gc.gc-count": 5,
+          "art.gc.gc-time": 21,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 18498542,
+          "wire_bytes_per_second": 88612389.01963192,
+          "read_message_p50_ns": 68959,
+          "read_message_p95_ns": 133000,
+          "read_message_max_ns": 797375,
+          "art.gc.bytes-allocated": 15175680,
+          "art.gc.gc-count": 5,
+          "art.gc.gc-time": 20,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 200,
+          "elapsed_ns": 20683000,
+          "wire_bytes_per_second": 79253493.20698158,
+          "read_message_p50_ns": 73541,
+          "read_message_p95_ns": 175292,
+          "read_message_max_ns": 874167,
+          "art.gc.bytes-allocated": 12840960,
+          "art.gc.gc-count": 5,
+          "art.gc.gc-time": 20,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "wifi_ap_saturated",
+      "payload_bytes": 143,
+      "read_chunks": [
+        64,
+        512,
+        4096
+      ],
+      "interval_ns": 0,
+      "samples": [
+        {
+          "frames": 1000,
+          "elapsed_ns": 13833500,
+          "wire_bytes_per_second": 10626377.995445838,
+          "read_message_p50_ns": 7458,
+          "read_message_p95_ns": 15709,
+          "read_message_max_ns": 688083,
+          "art.gc.bytes-allocated": 3096576,
+          "art.gc.gc-count": 3,
+          "art.gc.gc-time": 12,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 1000,
+          "elapsed_ns": 12904542,
+          "wire_bytes_per_second": 11391338.0265646,
+          "read_message_p50_ns": 7458,
+          "read_message_p95_ns": 15833,
+          "read_message_max_ns": 655875,
+          "art.gc.bytes-allocated": 5410816,
+          "art.gc.gc-count": 4,
+          "art.gc.gc-time": 15,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 1000,
+          "elapsed_ns": 13832000,
+          "wire_bytes_per_second": 10627530.36437247,
+          "read_message_p50_ns": 7416,
+          "read_message_p95_ns": 14875,
+          "read_message_max_ns": 782209,
+          "art.gc.bytes-allocated": 2949120,
+          "art.gc.gc-count": 3,
+          "art.gc.gc-time": 11,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "wifi_ap_50fps",
+      "payload_bytes": 143,
+      "read_chunks": [
+        64,
+        512,
+        4096
+      ],
+      "interval_ns": 20000000,
+      "samples": [
+        {
+          "frames": 100,
+          "elapsed_ns": 1982649376,
+          "wire_bytes_per_second": 7414.321552738329,
+          "read_message_p50_ns": 20028625,
+          "read_message_p95_ns": 22185666,
+          "read_message_max_ns": 25160458,
+          "art.gc.bytes-allocated": 196608,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 100,
+          "elapsed_ns": 1980954209,
+          "wire_bytes_per_second": 7420.6662290395225,
+          "read_message_p50_ns": 19967958,
+          "read_message_p95_ns": 22481458,
+          "read_message_max_ns": 24416500,
+          "art.gc.bytes-allocated": 295008,
+          "art.gc.gc-count": 0,
+          "art.gc.gc-time": 0,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 100,
+          "elapsed_ns": 1981324959,
+          "wire_bytes_per_second": 7419.277657219479,
+          "read_message_p50_ns": 20082709,
+          "read_message_p95_ns": 23231625,
+          "read_message_max_ns": 25228375,
+          "art.gc.bytes-allocated": 327680,
+          "art.gc.gc-count": 1,
+          "art.gc.gc-time": 21,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    },
+    {
+      "workload": "wifi_ap_50fps_fragmented",
+      "payload_bytes": 143,
+      "read_chunks": [
+        1
+      ],
+      "interval_ns": 20000000,
+      "samples": [
+        {
+          "frames": 100,
+          "elapsed_ns": 1981015043,
+          "wire_bytes_per_second": 7420.438351512306,
+          "read_message_p50_ns": 19814083,
+          "read_message_p95_ns": 22531708,
+          "read_message_max_ns": 24791458,
+          "art.gc.bytes-allocated": 2490368,
+          "art.gc.gc-count": 4,
+          "art.gc.gc-time": 43,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 100,
+          "elapsed_ns": 1984170792,
+          "wire_bytes_per_second": 7408.636423471755,
+          "read_message_p50_ns": 19999792,
+          "read_message_p95_ns": 22783542,
+          "read_message_max_ns": 25857375,
+          "art.gc.bytes-allocated": 2424832,
+          "art.gc.gc-count": 3,
+          "art.gc.gc-time": 46,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        },
+        {
+          "frames": 100,
+          "elapsed_ns": 1982759793,
+          "wire_bytes_per_second": 7413.908659988649,
+          "read_message_p50_ns": 20221792,
+          "read_message_p95_ns": 23218084,
+          "read_message_max_ns": 23887125,
+          "art.gc.bytes-allocated": 2490368,
+          "art.gc.gc-count": 4,
+          "art.gc.gc-time": 60,
+          "art.gc.blocking-gc-count": 0,
+          "art.gc.blocking-gc-time": 0
+        }
+      ]
+    }
+  ],
+  "collected_utc": "2026-11-18T11:00:19.494794+00:00",
+  "revision": "86dff10d6cffa06c3d06b631e662edc125bbe3dc",
+  "provenance_scope": "Source/APK hashes at collection time, immediately after the run; includes uncommitted benchmark",
+  "source_sha256": {
+    "android/app/src/main/java/app/brucia/protocol/CompanionClient.kt": "176be956aad6a980c53f1569e9061d65bbfc190d7b9d70a7f3be6b05795ecfb6",
+    "android/app/src/main/java/app/brucia/protocol/FrameBudget.kt": "68e459ac758c879175e3c3057d9118be1ec529230b39dd1ac7aa8e2826926ecb",
+    "android/app/src/main/java/app/brucia/protocol/Protocol.kt": "998a22876aa2cd4ec023ab6447dfaf4c6ff46c31b671b2b68e10b016eeb8ac8d",
+    "android/app/src/main/java/app/brucia/protocol/LinkCounters.kt": "dca0e3383c3f310686ffe536a949bb08f689f71270b17410aa0140f00ecf1510",
+    "android/app/src/main/java/app/brucia/transport/Transport.kt": "25c68113752b1b40129d1a3875fe2fe28bfb0527c0ab6709fffc570d7f2bca83",
+    "android/app/src/androidTest/java/app/brucia/CompanionDecoderBenchmark.kt": "c32a31489519ef372b08fc57661d76cae471034e39ad27dd5ad5cd1d1ca96623",
+    "tools/collect_android_decoder_benchmark.py": "b7931ee6054d65c099a056f17ad7108ee0fe95ae1744a1bf7ffe3fe13f2d9a75"
+  },
+  "apk_sha256": {
+    "android/app/build/outputs/apk/debug/app-debug.apk": "0809dc5335957e9e94b5a6a0785939adb59ab440438841f3f5eaa61a45984f2f",
+    "android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk": "f44dad78557aa82db0fec7ae3fe1e9996ab4534a8bbe139a6e4a3f4ef8a61f7a"
+  },
+  "instrumentation_log_sha256": "db0f901993c3e642a888567e2bdfc5d34f9a8e68a5db1106dee413b5cad4e47f"
+}
