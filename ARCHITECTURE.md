@@ -107,6 +107,14 @@ a blocked provider read itself is not interrupted. This is a logical extraction,
 not a separate Gradle module or a plugin API; wordlist and device-file orchestration
 remain in their existing services/ViewModel.
 
+`wardrive/CommandHistory.kt` owns the bounded command-log state, local IDs,
+dispatch/completion timestamps and shortened results. It has no Android or transport
+dependency and uses atomic state updates for UI/worker concurrency. The ViewModel
+still chooses which commands to record and delegates start, completion and Clear;
+`CommandSession` retains protocol request/reply correlation. The UI model/package and
+60-entry/600-character limits are preserved. A cleared or evicted entry cannot be
+recreated by its late completion because local IDs are not reused.
+
 Managed transfers require `CAPS.features.verified_files`; hardware capabilities
 remain a separate map. See the protocol document for correlation, size/CRC and
 failure semantics. The cached Kotlin test runner does not regenerate KSP/Android

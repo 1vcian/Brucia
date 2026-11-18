@@ -4,6 +4,69 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Command history extraction — 2026-11-18 (unreleased)
+
+Base `9b2392c9` / v0.1.16. `wardrive/CommandHistory` now owns local IDs, bounded
+history, timestamps, result trimming and atomic state updates. The ViewModel keeps
+the same command/subscription/upload adapters and delegates start, complete and Clear.
+`CmdStatus` and `CommandLogEntry` keep their package, fields and UI usage. Limits
+remain 60 entries, 600 result characters plus the existing ellipsis; the default
+clock remains wall time. No protocol, firmware, UI layout or wire correlation change.
+WardriveViewModel drops **55 lines (4,083 -> 4,028)**. This completes one more logical
+extraction, not the full ViewModel modularization or a public SDK.
+
+- Seven new `CommandHistoryTest` cases cover ordering/timestamps, out-of-order
+  success/failure, trimmed result boundaries, eviction, Clear followed by late
+  completion and a new command, unknown IDs, and concurrent updates from eight
+  real workers. The focused draft and final production class pass.
+- `python3 tools/test_android_logic.py`: **295 PASS**, including the new component
+  and seven tests (previously 288).
+- `ANDROID_SERIAL=emulator-5554 ./gradlew --offline :app:testDebugUnitTest
+  :app:lintDebug :app:connectedDebugAndroidTest`: **BUILD SUCCESSFUL**;
+  **1,216 JVM tests PASS**, **22 instrumentation tests PASS / 1 intentionally
+  skipped** (the opt-in decoder benchmark); lint **0 errors / 1 OldTargetApi warning**.
+- New link-flow test executes the actual Activity/ViewModel/session: log a pending
+  SUB as RUNNING, clear it, receive a late ERR, then send benign `info` and observe
+  DONE under a fresh local ID. The cleared row does not return. All seven link-flow
+  tests pass, including the released Wardrive beacon rotation/leave regression.
+
+Reports/logs retained in ignored `.codex_tmp/command-history-draft/`. Emulator is
+the isolated API 36.1 arm64 `BruciaIntegration` AVD with simulated transport. No real
+USB, RF operation or physical acceptance; no firmware rebuild for this extraction.
+The 0.1.16 APK/firmware below remain unchanged and do not contain this refactoring.
+
+## Release 0.1.16 — 2026-11-18
+
+Published [v0.1.16](https://github.com/1vcian/Brucia/releases/tag/v0.1.16), tag/release
+commit `9b2392c9`, from source base `1e29fb26`. The subsequent CommandHistory
+extraction is not part of these artifacts. GitHub confirms published, non-draft,
+non-prerelease status and exactly two assets; the release procedure re-downloaded
+both and verified their SHA-256 hashes before publication.
+
+- `Brucia-0.1.16.apk`: 19,081,547 B,
+  SHA-256 `92647fa435792770a38d9e48239fc2bd9e0164c179ad90159868398143ee9b9b`.
+  `check_apk_identity.py`: `app.brucia`, versionCode **1000116**, minSdk 26,
+  targetSdk 36, not debuggable. `apksigner verify` PASS; certificate SHA-256
+  `deac265d4ab251c3bdc73bd54c067f55ade2f5060d01058cf11790f20140c84b`,
+  identical to the locally retained published 0.1.15 APK.
+- `brucia-t-embed-cc1101.bin`: 4,442,992 B,
+  SHA-256 `fa89f6d524f752e47c9d0459970925d1391962fda22425c3ef217b265c74fb81`.
+  Fresh T-Embed build SUCCESS; actual app-slot use 4,377,456 / 4,653,056 B
+  (**94.08%**, existing warning tier, below the 98% failure threshold).
+- Release gates: host discovery **365 tests OK, 3 skipped**; website **17/17 PASS**;
+  codec/storage/framing/protocol E2E and actual dependency AAC SBR noise check PASS.
+  Android **1,209 JVM tests PASS**, Paparazzi baseline verification and lint PASS;
+  clean signed `assembleRelease` SUCCESS.
+
+Executed the inspected `release.sh patch` with explicit notes and
+`PIO_BIN=/Users/lucian/.platformio/penv/bin/pio`. Local bundle, hashes and retained
+Android reports: `.release-staging/v0.1.16/`; full log:
+`.codex_tmp/release-20261118/release.log` (both ignored).
+Only the APK and T-Embed firmware were published in this version. Other board
+artifacts remain in 0.1.15; no 69-board build or physical store/USB/radio acceptance
+is claimed. The Wardrive emulator regression from the preceding step remains its
+scoped UI evidence; the release script itself does not run instrumentation.
+
 ## Wardrive beacon loop cleanup (F21 follow-up) — 2026-11-18
 
 Base `86dff10d` plus F50 (committed as `13032751`). Wardrive now registers

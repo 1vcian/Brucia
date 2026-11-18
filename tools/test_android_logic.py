@@ -32,7 +32,7 @@ TESTS = [
     "ProtocolTest", "DeviceFilesTest", "FileListTest", "CapsTest", "CapsEvidenceTest", "AudioDspTest",
     "TftProtocolTest", "SubGhzDecoderTest", "SubGhzEncoderTest", "NdefBuilderTest", "DeviceFileReaderTest", "DownloadIOTest", "ReleaseCatalogTest", "AwaitReplyTest", "FirmwareImageTest", "UpdateHttpTest", "HttpWireTest", "RecordingBufferTest",
     "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
-    "WifiTargetStoreTest", "WifiTargetImportServiceTest",
+    "WifiTargetStoreTest", "WifiTargetImportServiceTest", "CommandHistoryTest",
     "StreamRotationTest", "ParkedLeavesTest", "DeviceOutputsTest",
     "FrameBudgetTest", "HandshakeParserTest", "PcapReaderTest", "SubFileTest", "DeBruijnTxTest",
     "SlipReceiverTest", "CliReplyLimitTest",
@@ -42,7 +42,7 @@ TEST_HELPERS = ["DeviceJson", "VirtualTime"]
 SOURCES = [
     "protocol/Protocol.kt", "protocol/CompanionClient.kt", "protocol/CommandReply.kt", "protocol/LinkCounters.kt",
     "protocol/FrameBudget.kt",
-    "session/CommandSession.kt", "wardrive/DeviceDiagnostics.kt",
+    "session/CommandSession.kt", "wardrive/DeviceDiagnostics.kt", "wardrive/CommandHistory.kt",
     "transport/Transport.kt", "wardrive/DeviceInfo.kt", "wardrive/CapabilityEvidence.kt",
     "files/DeviceFilePush.kt", "files/FileKinds.kt", "files/FileTemplates.kt",
     "files/DeviceFileReader.kt",

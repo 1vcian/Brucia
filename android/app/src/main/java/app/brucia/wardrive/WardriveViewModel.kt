@@ -187,14 +187,6 @@ private const val NRF24_STOP = "nrf24_stop"
 /** Refusal for framed commands while Remote control owns USB (F25). */
 private const val REMOTE_OWNS_LINK = "Remote control owns the device: stop Remote first."
 
-// Command log: how many of the most recent commands to retain (newest-first), and the
-// max length of a stored result string before it is truncated for display.
-private const val MAX_CMD_LOG = 60
-private const val MAX_CMD_RESULT_LEN = 600
-
-/** Lifecycle of a single device command on the single-threaded companion link. */
-enum class CmdStatus { RUNNING, DONE, FAILED }
-
 /** A credential captured by the Evil Portal: [ap] is the portal name, [pass] what the victim typed. */
 data class EvilCred(val ap: String, val pass: String, val at: Long = System.currentTimeMillis())
 
@@ -214,20 +206,6 @@ data class RfSighting(val key: String, val type: String, val label: String, val 
 /** A saved signal (RF or IR) pinned to a GPS location, for geofenced replay. [payload] is the
  *  device replay command (e.g. "rf tx ..." or "ir tx ..."). */
 data class GeoSignal(val name: String, val type: String, val payload: String, val lat: Double, val lon: Double, val at: Long)
-
-/**
- * One entry in the command log shown by the Cmds viewer. [id] is a monotonic local id (not the
- * protocol frame id). RUNNING when dispatched; DONE/FAILED once the ACK/result arrives.
- */
-data class CommandLogEntry(
-    val id: Long,
-    val text: String,
-    val status: CmdStatus,
-    val sentAtMs: Long,
-    val doneAtMs: Long? = null,
-    val result: String? = null,
-    val ok: Boolean? = null,
-)
 
 /**
  * A Wi-Fi station (client) seen by the device's station sniffer (SUB stream "wifi.sta").
@@ -923,47 +901,14 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     // here (RUNNING on dispatch, DONE/FAILED on ACK) by the central dispatch helpers below, so
     // the user can see what was sent, what is still running, and what finished. High-frequency
     // streaming (fm_audio_data / spkr_pcm_data / EVENT streams) is intentionally NOT logged.
-    private val cmdLogIdGen = java.util.concurrent.atomic.AtomicLong(0L)
-    private val _commandLog = MutableStateFlow<List<CommandLogEntry>>(emptyList())
-    val commandLog: StateFlow<List<CommandLogEntry>> = _commandLog.asStateFlow()
+    private val commandHistory = CommandHistory()
+    val commandLog: StateFlow<List<CommandLogEntry>> = commandHistory.entries
 
-    /** Record a dispatched command as RUNNING and return its local log id. Thread-safe. */
-    private fun logCmdStart(cmd: String): Long {
-        val id = cmdLogIdGen.incrementAndGet()
-        val entry = CommandLogEntry(
-            id = id,
-            text = cmd,
-            status = CmdStatus.RUNNING,
-            sentAtMs = System.currentTimeMillis(),
-        )
-        _commandLog.update { (listOf(entry) + it).take(MAX_CMD_LOG) }
-        return id
-    }
+    private fun logCmdStart(cmd: String): Long = commandHistory.start(cmd)
+    private fun logCmdDone(logId: Long, ok: Boolean, result: String) = commandHistory.complete(logId, ok, result)
 
-    /** Resolve the RUNNING entry [logId] to DONE/FAILED with a short result. Thread-safe. */
-    private fun logCmdDone(logId: Long, ok: Boolean, result: String) {
-        val now = System.currentTimeMillis()
-        val short = result.trim().let {
-            if (it.length > MAX_CMD_RESULT_LEN) it.take(MAX_CMD_RESULT_LEN) + "..." else it
-        }
-        _commandLog.update { list ->
-            list.map { e ->
-                if (e.id == logId) {
-                    e.copy(
-                        status = if (ok) CmdStatus.DONE else CmdStatus.FAILED,
-                        doneAtMs = now,
-                        result = short,
-                        ok = ok,
-                    )
-                } else {
-                    e
-                }
-            }
-        }
-    }
-
-    /** Empty the command log. */
-    fun clearCommandLog() { _commandLog.value = emptyList() }
+    /** Empty the command log without reusing ids of pending operations. */
+    fun clearCommandLog() = commandHistory.clear()
 
     private val callbackCommands by lazy { CommandTasks(viewModelScope) }
 

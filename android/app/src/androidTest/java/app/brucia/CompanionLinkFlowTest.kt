@@ -24,6 +24,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -232,6 +233,39 @@ class CompanionLinkFlowTest {
         }
         wardriveSwitch().performClick()
         awaitUi("final cleanup") { device.lastSub("wifi.ap") == false && !vm.wardriving.value }
+    }
+
+    @Test
+    fun commandHistoryClearIgnoresLateSubscriptionResultAndKeepsNewCliEntry() {
+        val device = connect(SimulatedDevice().apply { holdSubscriptionStarts = true })
+        openWifiTool("Wardrive")
+        onMain {
+            vm.clearCommandLog()
+            vm.setWardriving(true)
+        }
+        awaitUi("pending subscription logged") {
+            device.heldStarts.size == 1 &&
+                vm.commandLog.value.singleOrNull()?.status == app.brucia.wardrive.CmdStatus.RUNNING
+        }
+        val pending = vm.commandLog.value.single()
+        assertEquals("SUB wifi.ap on", pending.text)
+        assertNull(pending.doneAtMs)
+        onMain { vm.clearCommandLog() }
+        device.releaseSubscriptionStarts(ok = false)
+        readBarrier(device, 68)
+        assertTrue("late result must not resurrect a cleared row", vm.commandLog.value.isEmpty())
+
+        onMain { vm.sendCommand("info") }
+        awaitUi("CLI result recorded") {
+            vm.commandLog.value.singleOrNull()?.let {
+                it.text == "info" && it.status == app.brucia.wardrive.CmdStatus.DONE
+            } == true
+        }
+        val finished = vm.commandLog.value.single()
+        assertTrue("clear does not reuse an id", finished.id > pending.id)
+        assertEquals(true, finished.ok)
+        assertNotNull(finished.doneAtMs)
+        assertEquals("Connected", vm.status.value)
     }
 
     @After

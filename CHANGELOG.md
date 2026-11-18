@@ -7,6 +7,15 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Extracted the bounded command history from WardriveViewModel into an Android-independent
+  component. Existing IDs, statuses, timestamps, result limits and Clear behavior are
+  preserved, with focused concurrency and late-result regressions.
+
+## [0.1.16] - 2026-11-18
+
+- Published a signed Android APK and freshly built T-Embed CC1101 firmware. Other board
+  binaries remain available in 0.1.15; no older binary is relabeled as 0.1.16.
+
 - Leaving Wardrive now stops its Wi-Fi beacon loop, matching the Spam hub. Rotation
   preserves the running loop, and a late reply cannot schedule another burst after
   leaving. A burst already sent to the device may finish its bounded window.
@@ -35,6 +44,8 @@ that offloads computation to the phone. Format loosely follows
 - The full firmware CI matrix runs weekly and on demand, selects configured boards
   automatically and excludes the contributor template `NewDeviceModel`. Its Actions
   are pinned to the same commits as the main build workflow.
+- Added an opt-in Android decoder allocation/GC benchmark; production decoder behavior
+  is unchanged. Emulator measurements do not establish real-phone USB/UI performance.
 
 ## [0.1.15] - 2026-11-13
 
