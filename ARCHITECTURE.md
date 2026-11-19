@@ -115,6 +115,15 @@ still chooses which commands to record and delegates start, completion and Clear
 60-entry/600-character limits are preserved. A cleared or evicted entry cannot be
 recreated by its late completion because local IDs are not reused.
 
+`ui/ConsoleScreen.kt` receives connection state, console lines and explicit callbacks
+for Connect, Send, Clear and Export. It owns only presentation state (draft, palette
+selection and scrolling); MainActivity collects the flows and wires the existing
+ViewModel and Android diagnostic export. `ui/CommandLogDialog.kt` similarly takes
+entries and Clear/Stop/Close callbacks. Shared status controls and dialog sizing live
+in `ui/` so neither screen imports MainActivity or WardriveViewModel. This is one
+incremental screen extraction; the other screens and navigation router remain in
+MainActivity and the extension SDK below remains proposed.
+
 Managed transfers require `CAPS.features.verified_files`; hardware capabilities
 remain a separate map. See the protocol document for correlation, size/CRC and
 failure semantics. The cached Kotlin test runner does not regenerate KSP/Android

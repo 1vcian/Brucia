@@ -69,14 +69,14 @@ static const uint8_t ADC2 = 8;
 #define BTN_PIN 0
 #define BTN_ACT LOW
 
-#define IR_TX_PINS '{{"M5 IR Mod", GROVE_SDA}, {"Pin 1", 1}, {"Pin 2", 2}}'
-#define IR_RX_PINS '{{"M5 IR Mod", GROVE_SCL}, {"Pin 1", 1}, {"Pin 2", 2}}'
+#define IR_TX_PINS {{"M5 IR Mod", GROVE_SDA}, {"Pin 1", 1}, {"Pin 2", 2}}
+#define IR_RX_PINS {{"M5 IR Mod", GROVE_SCL}, {"Pin 1", 1}, {"Pin 2", 2}}
 #define TXLED -1
 #define LED_ON HIGH
 #define LED_OFF LOW
 
-#define RF_TX_PINS '{{"M5 RF433T", GROVE_SDA}, {"Pin 1", 1}, {"Pin 2", 2}}'
-#define RF_RX_PINS '{{"M5 FR433R", GROVE_SCL}, {"Pin 1", 1}, {"Pin 2", 2}}'
+#define RF_TX_PINS {{"M5 RF433T", GROVE_SDA}, {"Pin 1", 1}, {"Pin 2", 2}}
+#define RF_RX_PINS {{"M5 FR433R", GROVE_SCL}, {"Pin 1", 1}, {"Pin 2", 2}}
 
 #define CC1101_GDO0_PIN 9
 #define CC1101_SS_PIN 10

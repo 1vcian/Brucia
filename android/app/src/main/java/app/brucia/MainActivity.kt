@@ -1,5 +1,10 @@
 package app.brucia
 
+import app.brucia.ui.CommandLogDialog
+import app.brucia.ui.ConsoleScreen
+import app.brucia.ui.SegButton
+import app.brucia.ui.StatusPill
+import app.brucia.ui.windowHeightDp
 import app.brucia.ui.LeaveEffect
 import app.brucia.ui.rememberRetained
 import app.brucia.R
@@ -101,8 +106,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -156,7 +159,6 @@ import app.brucia.ir.IrParser
 import app.brucia.ir.IrRemoteMap
 import app.brucia.ir.RemoteKey
 import app.brucia.ir.CatalogDevice
-import app.brucia.device.CliCatalog
 import app.brucia.device.CliParse
 import app.brucia.wardrive.ApObservation
 import app.brucia.wardrive.RiskScore
@@ -174,7 +176,6 @@ import app.brucia.wardrive.SpectrumSweep
 import app.brucia.wardrive.OuiResolver
 import app.brucia.wardrive.WardriveStats
 import app.brucia.wardrive.WardriveViewModel
-import app.brucia.wardrive.CommandLogEntry
 import app.brucia.wardrive.CmdStatus
 import app.brucia.wardrive.WigleCsv
 import app.brucia.wardrive.WigleUploadStatus
@@ -899,36 +900,6 @@ private fun SegmentedView(current: View, onSelect: (View) -> Unit) {
 }
 
 @Composable
-private fun SegButton(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    if (selected) {
-        Button(onClick = onClick, modifier = modifier) { Text(label) }
-    } else {
-        OutlinedButton(onClick = onClick, modifier = modifier) { Text(label) }
-    }
-}
-
-@Composable
-private fun StatusPill(connected: Boolean) {
-    val cs = MaterialTheme.colorScheme
-    val color = if (connected) Color(0xFF4CAF50) else cs.onSurfaceVariant
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(color.copy(alpha = 0.15f))
-            .padding(horizontal = 10.dp, vertical = 5.dp)
-    ) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-        Spacer(Modifier.size(6.dp))
-        Text(
-            if (connected) "Connected" else "Disconnected",
-            style = MaterialTheme.typography.labelMedium,
-            color = color,
-        )
-    }
-}
-
-@Composable
 private fun DeviceCard(device: DeviceInfo?) {
     val cs = MaterialTheme.colorScheme
     Card(
@@ -1606,7 +1577,17 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
                         5 -> BleScreen(vm, onConnect)
                         6 -> DeviceScreen(vm, onConnect, updateLabel = updateLabel, onOpenUpdates = { tab = 12 })
                         7 -> CrackScreen(vm)
-                        8 -> ConsoleScreen(vm, onConnect)
+                        8 -> {
+                            val console by vm.console.collectAsState()
+                            ConsoleScreen(
+                                connected = status == "Connected",
+                                log = console,
+                                onConnect = onConnect,
+                                onSend = vm::sendConsole,
+                                onClear = vm::clearConsole,
+                                onExportLog = { exportConsoleLog(context) },
+                            )
+                        }
                         9 -> RemoteScreen(vm, onConnect)
                         10 -> FilesScreen(vm, onConnect)
                         11 -> StationSnifferScreen(vm, onConnect)
@@ -1751,145 +1732,6 @@ private fun TopStatusBar(
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(cs.surfaceVariant))
-    }
-}
-
-/**
- * Height of the activity window in dp, for capping dialog heights. Read it before
- * `Dialog { }`: inside the dialog content LocalWindowInfo describes the dialog window.
- * (Replaces Configuration.screenHeightDp, which Compose lint discourages.)
- */
-@Composable
-private fun windowHeightDp(): androidx.compose.ui.unit.Dp =
-    with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
-
-@Composable
-private fun CommandLogDialog(
-    entries: List<CommandLogEntry>,
-    onClear: () -> Unit,
-    onStopRunning: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val cs = MaterialTheme.colorScheme
-    val maxH = windowHeightDp() * 0.6f
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .heightIn(max = maxH),
-            shape = RoundedCornerShape(14.dp),
-            color = cs.surface,
-            tonalElevation = 4.dp,
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Command log",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = cs.primary,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    if (entries.any { it.status == CmdStatus.RUNNING }) {
-                        TextButton(onClick = onStopRunning) { Text("Stop", color = cs.error) }
-                    }
-                    if (entries.isNotEmpty()) {
-                        TextButton(onClick = onClear) { Text("Clear") }
-                    }
-                    TextButton(onClick = onDismiss) { Text("Close") }
-                }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(cs.surfaceVariant))
-                if (entries.isEmpty()) {
-                    Text(
-                        "No commands yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = cs.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                        items(entries, key = { it.id }) { e -> CommandLogRow(e) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CommandLogRow(e: CommandLogEntry) {
-    val cs = MaterialTheme.colorScheme
-    val chipColor = when (e.status) {
-        CmdStatus.RUNNING -> Amber
-        CmdStatus.DONE -> Color(0xFF4CAF50)
-        CmdStatus.FAILED -> cs.error
-    }
-    // Elapsed while running; true duration once finished.
-    val timeLabel = when (e.status) {
-        CmdStatus.RUNNING -> {
-            val secs = ((System.currentTimeMillis() - e.sentAtMs) / 1000L).coerceAtLeast(0)
-            "running ${secs}s"
-        }
-        else -> {
-            val ms = ((e.doneAtMs ?: e.sentAtMs) - e.sentAtMs).coerceAtLeast(0)
-            if (ms < 1000) "${ms}ms" else String.format(java.util.Locale.ROOT, "%.1fs", ms / 1000f)
-        }
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                e.text,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = cs.onSurface,
-            )
-            Spacer(Modifier.size(8.dp))
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(chipColor.copy(alpha = 0.18f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            ) {
-                Text(
-                    e.status.name,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = chipColor,
-                )
-            }
-            Spacer(Modifier.size(8.dp))
-            Text(
-                timeLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = cs.onSurfaceVariant,
-            )
-        }
-        val result = e.result
-        if (e.status != CmdStatus.RUNNING && !result.isNullOrBlank()) {
-            Text(
-                result,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = cs.onSurfaceVariant,
-                maxLines = 8,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        Box(Modifier.fillMaxWidth().padding(top = 8.dp).height(1.dp).background(cs.surfaceVariant.copy(alpha = 0.5f)))
     }
 }
 
@@ -4601,122 +4443,6 @@ private fun SignalCard(sig: DecodedSignal) {
                 Spacer(Modifier.height(4.dp))
                 Text(sig.note, style = MaterialTheme.typography.bodySmall, color = Amber)
             }
-        }
-    }
-}
-
-@Composable
-private fun ConsoleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
-    val status by vm.status.collectAsState()
-    val log by vm.console.collectAsState()
-    val connected = status == "Connected"
-    val cs = MaterialTheme.colorScheme
-    val context = LocalContext.current
-    var cmd by rememberSaveable { mutableStateOf("") }
-    val listState = rememberLazyListState()
-    LaunchedEffect(log.size) { if (log.isNotEmpty()) listState.animateScrollToItem(log.size - 1) }
-
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Image(
-                painter = painterResource(R.drawable.ic_flame), colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.primary), 
-                contentDescription = null,
-                modifier = Modifier.size(26.dp),
-            )
-            Spacer(Modifier.size(8.dp))
-            Text(
-                "Brucia",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.ExtraBold,
-                color = cs.primary,
-            )
-            Spacer(Modifier.weight(1f))
-            StatusPill(connected)
-        }
-        Text(
-            "Console - run any Bruce CLI command, output on the phone",
-            color = cs.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Spacer(Modifier.height(8.dp))
-        if (!connected) {
-            Button(onClick = onConnect, modifier = Modifier.fillMaxWidth()) { Text("Connect over USB") }
-            Spacer(Modifier.height(8.dp))
-        }
-        // Command palette: every device CLI group, so all the device's choices are here.
-        var group by rememberSaveable { mutableIntStateOf(0) }
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            CliCatalog.groups.forEachIndexed { i, g ->
-                SegButton(g.name, group == i, Modifier) { group = i }
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            CliCatalog.groups[group].commands.forEach { c ->
-                OutlinedButton(
-                    enabled = connected,
-                    onClick = {
-                        if (c.template.contains("<")) cmd = c.template // needs args: fill the input
-                        else vm.sendConsole(c.template)               // no args: run now
-                    },
-                ) { Text(c.template.substringBefore(" <").let { if (it.length > 22) it.take(22) else it }) }
-            }
-        }
-        CliCatalog.groups[group].commands.getOrNull(0)?.let {
-            Text(
-                "Tap a command to run it or fill the console; <...> are arguments to replace.",
-                style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth()
-        ) {
-            items(log) { line ->
-                Text(
-                    line,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = if (line.startsWith("> ")) cs.primary else cs.onSurface,
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = cmd,
-                onValueChange = { cmd = it },
-                modifier = Modifier.weight(1f),
-                label = { Text("command") },
-                singleLine = true,
-            )
-            Button(
-                enabled = connected && cmd.isNotBlank(),
-                onClick = { vm.sendConsole(cmd.trim()); cmd = "" }
-            ) { Text("Run") }
-        }
-        Spacer(Modifier.height(4.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { vm.clearConsole() }, modifier = Modifier.weight(1f)) { Text("Clear") }
-            // Export the app log (logcat + swallowed errors across ROMs) for GitHub issues: save a
-            // copy into the public Download/Brucia folder (easy to find) and open the share sheet.
-            OutlinedButton(
-                onClick = {
-                    val path = app.brucia.BruciaLog.exportToDownloads(context, 2000)
-                    val f = app.brucia.BruciaLog.exportTail(context, 2000)
-                    val msg = if (path != null) "Saved to $path" else "No log yet"
-                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
-                    if (f != null) shareFile(context, f, "text/plain")
-                },
-                modifier = Modifier.weight(1f),
-            ) { Text("Export log") }
         }
     }
 }
@@ -8945,4 +8671,13 @@ private fun WordlistRow(wl: WordlistInfo, onRun: () -> Unit, onDelete: () -> Uni
             OutlinedButton(onClick = onDelete) { Text("Del") }
         }
     }
+}
+
+/** Save a diagnostic copy to Downloads and open the existing share sheet. */
+private fun exportConsoleLog(context: Context) {
+    val path = BruciaLog.exportToDownloads(context, 2000)
+    val file = BruciaLog.exportTail(context, 2000)
+    val message = if (path != null) "Saved to $path" else "No log yet"
+    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+    if (file != null) shareFile(context, file, "text/plain")
 }

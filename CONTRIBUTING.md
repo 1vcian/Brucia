@@ -215,9 +215,14 @@ weekly (Monday 03:23 UTC) or through **Run workflow**, optionally against a PR.
 It uses isolated runners, at most four in parallel; it does not publish releases.
 Run `python3 tools/firmware_matrix.py` in the PlatformIO environment to inspect
 the selected boards (currently 69). Only `NewDeviceModel` is excluded: it is a
-contribution template, whose LiteLED dependency is not compatible with Arduino 3.x.
+contribution template with placeholder pins and board callbacks, not a supported device.
 New real board environments are included automatically. A successful matrix proves
 compilation, not physical compatibility; hardware results stay in `TESTS.md`.
+
+The template inherits the pinned shared libraries from `[env]`. Do not add LiteLED:
+its old RMT driver is incompatible with this project's Arduino ESP32 3.x framework,
+and no Brucia source uses it. For RGB hardware, configure the existing
+`src/core/led_control.cpp` implementation and the board's LED flags/pins instead.
 
 ### Release signing
 Release builds are signed from a keystore that is **never committed**. Create

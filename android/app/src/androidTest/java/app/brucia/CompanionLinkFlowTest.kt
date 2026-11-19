@@ -7,13 +7,18 @@ import android.os.Build
 import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasAnySibling
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -250,7 +255,10 @@ class CompanionLinkFlowTest {
         val pending = vm.commandLog.value.single()
         assertEquals("SUB wifi.ap on", pending.text)
         assertNull(pending.doneAtMs)
-        onMain { vm.clearCommandLog() }
+        compose.onNodeWithText("Cmds", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("SUB wifi.ap on", useUnmergedTree = true).assertExists()
+        compose.onNode(hasText("Clear") and hasAnyAncestor(isDialog()), useUnmergedTree = true).performClick()
+        compose.onNodeWithText("No commands yet.", useUnmergedTree = true).assertExists()
         device.releaseSubscriptionStarts(ok = false)
         readBarrier(device, 68)
         assertTrue("late result must not resurrect a cleared row", vm.commandLog.value.isEmpty())
@@ -265,7 +273,45 @@ class CompanionLinkFlowTest {
         assertTrue("clear does not reuse an id", finished.id > pending.id)
         assertEquals(true, finished.ok)
         assertNotNull(finished.doneAtMs)
+        compose.onNodeWithText("info", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("DONE", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("Close", useUnmergedTree = true).performClick()
         assertEquals("Connected", vm.status.value)
+    }
+
+    @Test
+    fun consoleDraftSurvivesRotationAndCallbacksReachTheCurrentSession() {
+        onMain { vm = ViewModelProvider(compose.activity)[WardriveViewModel::class.java] }
+        compose.onNodeWithText("Search tools").performTextReplacement("serial")
+        compose.onNodeWithText("Console", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("Connect over USB", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("wifi on").assertIsNotEnabled()
+        compose.onNodeWithText("command").performTextReplacement("  info  ")
+        compose.onNodeWithText("Run").assertIsNotEnabled()
+
+        val device = connect()
+        rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, Configuration.ORIENTATION_LANDSCAPE)
+        rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
+        compose.onNodeWithText("command").assertTextContains("  info  ")
+        compose.onNodeWithText("Run", useUnmergedTree = true).performClick()
+        awaitUi("trimmed console command sent once") { device.commands.count { it == "info" } == 1 }
+        compose.onNodeWithText("> info", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("Run").assertIsNotEnabled()
+
+        compose.onNodeWithText("wifi add", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("command").assertTextContains("wifi add <ssid> <password>")
+        assertFalse("argument templates only fill the input", device.commands.any { it.startsWith("wifi add") })
+        compose.onNodeWithText("System", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("uptime", useUnmergedTree = true).performClick()
+        awaitUi("palette command sent once") { device.commands.count { it == "uptime" } == 1 }
+        compose.onNodeWithText("Clear", useUnmergedTree = true).performClick()
+        awaitUi("console cleared") { vm.console.value.isEmpty() }
+        assertTrue("console Clear preserves command history", vm.commandLog.value.any { it.text == "info" })
+
+        onMain { vm.disconnect() }
+        awaitUi("console shows disconnect") { compose.shows("Connect over USB") }
+        compose.onNodeWithText("Run").assertIsNotEnabled()
+        compose.onNodeWithText("uptime").assertIsNotEnabled()
     }
 
     @After

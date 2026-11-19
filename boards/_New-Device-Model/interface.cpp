@@ -61,7 +61,8 @@ END:
 ** location: mykeyboard.cpp
 ** Starts keyboard to type data
 **********************************************************************/
-String keyboard(String mytext, int maxSize, String msg) {}
+// Placeholder until this board supplies input: preserve the caller's text.
+String keyboard(String mytext, int maxSize, String msg) { return mytext; }
 
 /*********************************************************************
 ** Function: powerOff

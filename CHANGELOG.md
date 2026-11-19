@@ -7,6 +7,15 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Separated the Console screen and command-log dialog from MainActivity. They receive
+  state and callbacks; connection, command execution and diagnostic export stay in
+  the application shell. Existing navigation, draft retention and controls are preserved.
+- Removed the unused LiteLED dependency from the contributor board template: its
+  legacy driver rejects Arduino ESP32 3.x. Also repaired the pin-list C++ syntax,
+  supplied a placeholder device name and included the board interface in the build.
+  The placeholder keyboard returns its input. The template remains excluded from the
+  supported-board matrix because its hardware setup is still a placeholder.
+
 - Extracted the bounded command history from WardriveViewModel into an Android-independent
   component. Existing IDs, statuses, timestamps, result limits and Clear behavior are
   preserved, with focused concurrency and late-result regressions.

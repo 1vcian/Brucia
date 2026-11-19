@@ -4,6 +4,56 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Console/UI extraction and contributor template — 2026-11-18/19 (unreleased)
+
+Base `d85695b5`. `ui/ConsoleScreen.kt` receives connection state, console lines and
+Connect/Send/Clear/Export callbacks; collection, session commands and Android export
+remain wired in MainActivity. The screen retains its saveable draft and palette.
+`ui/CommandLogDialog.kt` receives entries and Clear/Stop/Close callbacks; shared
+status controls and activity-window dialog sizing also move to `ui/`. Dialog/control
+bodies are unchanged. MainActivity drops **265 lines (8,948 -> 8,683)**; other screens
+and the navigation router remain there. No wire, command or visual redesign.
+
+The contributor template declared LiteLED 1.2.1 even though no Brucia source uses
+it. Before the fix, a real `NewDeviceModel` build fails at `LiteLED.h:18`: the library
+requires Arduino ESP32 < 3. The template now inherits shared pinned dependencies
+without LiteLED. Subsequent real builds exposed malformed pin-list literals, missing
+`DEVICE_NAME`, and the omitted board interface (`InputHandler` undefined at link).
+The four lists now use C++ initializer syntax with the same pin numbers, the name
+is explicitly a placeholder, and `build_src_filter` includes the template's interface.
+Its placeholder keyboard returns the caller's text. LED code and pin assignments
+are unchanged. The matrix still excludes this placeholder board and selects 69
+supported environments.
+
+- `python3 tools/build_firmware.py -e NewDeviceModel --pio
+  /Users/lucian/.platformio/penv/bin/pio`: **SUCCESS** after the fixes; app binary
+  **3,918,448 / 5,111,808 B (76.65%)**, below the unchanged 98% failure threshold.
+  Complete merged image **3,983,984 B**. Existing compiler/deprecation warnings
+  remain; no dependency compatibility check or budget gate was bypassed.
+- `PYTHONPATH=tools /Users/lucian/.platformio/penv/bin/python -m unittest
+  tools.test_dependency_pins tools.test_firmware_matrix`: **13 PASS**.
+- Android JVM suite: **1,216 PASS**, lint **0 errors / 1 existing OldTargetApi warning**.
+  The first draft needed explicit Brucia button imports to satisfy the repository's
+  styling guard; the final UI uses those wrappers.
+- Final `./gradlew --offline :app:connectedDebugAndroidTest`: **BUILD SUCCESSFUL**,
+  XML **24 tests: 23 PASS, 1 intentionally skipped** (opt-in decoder benchmark),
+  zero failures/errors. All eight `CompanionLinkFlowTest` scenarios pass. The new
+  Console case covers navigation via search, disabled controls while disconnected,
+  draft retention across two real Activity rotations, trimmed `info` execution,
+  argument-template fill without sending, palette `uptime`, Clear and disconnect.
+  The history scenario now presses the actual dialog Clear/Close buttons and checks
+  empty/DONE presentation around a late reply. Existing global Stop regressions pass.
+- The isolated API 36.1 arm64 AVD initially showed a `com.android.systemui` ANR
+  stealing window focus. The final run uses a cold boot with normal focus; test
+  selectors were also corrected to distinguish dialog controls, search text and
+  the enabled state of a button from its child label. Production behavior was not
+  changed to accommodate those fixture/environment failures.
+
+Logs and final XML/lint reports are retained in ignored `.codex_tmp/ui-template-20261118/`. These changes are
+not included in the published 0.1.16 artifacts. No physical USB/LED/board acceptance
+or new supported-board matrix build is implied. Android diagnostic export/share
+keeps the existing implementation; the system share sheet is not exercised here.
+
 ## Command history extraction — 2026-11-18 (unreleased)
 
 Base `9b2392c9` / v0.1.16. `wardrive/CommandHistory` now owns local IDs, bounded
@@ -372,9 +422,9 @@ by the 3-board `build` CI. All six real-board failures are now fixed and build o
   had no spaces, so SCons passed them unquoted and macOS `/bin/sh` (bash) brace-expanded them
   into several `-D`. Linux CI uses dash, so it never failed there. The values now have spaces,
   like every other board.
-- `NewDeviceModel` still fails: contributor template. The former dynamic all-env workflow
-  included it; the 2026-11-16 matrix selection explicitly excludes it. LiteLED rejects
-  arduino-esp32 3.x.
+- `NewDeviceModel` failed at this checkpoint because LiteLED rejects Arduino ESP32 3.x.
+  Its build is repaired in the unreleased 2026-11-18/19 follow-up above. The matrix
+  still excludes it as a contributor template, not a supported physical board.
 
 16 envs were rebuilt in a second pass after the first ran out of disk space. Keeping all 70
 `.pio/build` dirs needs about 15 GB or more. A run killed with SIGTERM skips the exit restore;

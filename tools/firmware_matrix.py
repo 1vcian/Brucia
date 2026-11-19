@@ -10,7 +10,7 @@ import re
 import sys
 
 
-TEMPLATES = {"NewDeviceModel": "Contributor template, not a supported board (LiteLED/Arduino 3.x)."}
+TEMPLATES = {"NewDeviceModel": "Contributor template with placeholder hardware, not a supported board."}
 
 
 def supported_environments(environments):
