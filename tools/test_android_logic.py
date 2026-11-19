@@ -33,6 +33,7 @@ TESTS = [
     "TftProtocolTest", "SubGhzDecoderTest", "SubGhzEncoderTest", "NdefBuilderTest", "DeviceFileReaderTest", "DownloadIOTest", "ReleaseCatalogTest", "AwaitReplyTest", "FirmwareImageTest", "UpdateHttpTest", "HttpWireTest", "RecordingBufferTest",
     "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
     "WifiTargetStoreTest", "WifiTargetImportServiceTest", "CommandHistoryTest",
+    "FeatureRegistryTest", "FeatureScreenRegistryTest",
     "StreamRotationTest", "ParkedLeavesTest", "DeviceOutputsTest",
     "FrameBudgetTest", "HandshakeParserTest", "PcapReaderTest", "SubFileTest", "DeBruijnTxTest",
     "SlipReceiverTest", "CliReplyLimitTest",
@@ -40,6 +41,7 @@ TESTS = [
 # Test-only files without a test class (compiled, not run).
 TEST_HELPERS = ["DeviceJson", "VirtualTime"]
 SOURCES = [
+    "features/FeatureRegistry.kt", "features/BuiltinFeatures.kt", "features/FeatureScreenRegistry.kt",
     "protocol/Protocol.kt", "protocol/CompanionClient.kt", "protocol/CommandReply.kt", "protocol/LinkCounters.kt",
     "protocol/FrameBudget.kt",
     "session/CommandSession.kt", "wardrive/DeviceDiagnostics.kt", "wardrive/CommandHistory.kt",

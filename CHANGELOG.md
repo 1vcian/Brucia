@@ -7,6 +7,12 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Connected the feature catalog to a validated screen registry, replacing MainActivity's
+  numeric screen switch. All 54 existing routes retain their IDs and capability behavior;
+  Theme and the legacy Spam hub remain outside the 52-tool grid. Unknown routes now
+  offer a return to Home instead of opening the station scanner. Screen state/lifecycle
+  is keyed by stable feature ID, including tools sharing the same composable.
+
 - Separated the Console screen and command-log dialog from MainActivity. They receive
   state and callbacks; connection, command execution and diagnostic export stay in
   the application shell. Existing navigation, draft retention and controls are preserved.

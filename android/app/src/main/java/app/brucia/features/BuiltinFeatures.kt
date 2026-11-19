@@ -12,7 +12,7 @@ package app.brucia.features
  * are frozen constants here, NOT computed from localized labels at runtime. The full
  * legacy-tab -> stable-id mapping below was reviewed and frozen by the coordinator (W06).
  *
- * Source inventory: 50 tools across 11 categories (navigation order preserved).
+ * Source inventory: 52 tools across 11 categories (navigation order preserved).
  */
 object BuiltinFeatures {
 
@@ -94,5 +94,13 @@ object BuiltinFeatures {
                 FeatureDescriptor("org.brucia.tools.bleconsole", 52, "BLE console", "Run device commands over Bluetooth (BLE API, paired with the device PIN)"),
             )),
         )
+    )
+
+    /** Routes outside the tool grid: the Theme shortcut and the retained legacy Spam hub. */
+    val routeCatalog: FeatureRegistry = FeatureRegistry.of(
+        registry.categories + FeatureCategory("Auxiliary routes", "Auxiliary", listOf(
+            FeatureDescriptor("org.brucia.spam.all", 16, "Spam", "Legacy combined spam hub"),
+            FeatureDescriptor("org.brucia.device.theme", 36, "Theme", "App + device colors & LED"),
+        )),
     )
 }

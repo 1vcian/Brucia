@@ -266,8 +266,13 @@ both sides aware of it.
 2. **Firmware** - in the appropriate `src/companion/` module, handle the `CMD`/`SUB`, and
    emit `EVENT`/`DATA`. Keep peripheral work on the ESP; do not compute there what
    the phone can do.
-3. **App** - add the Kotlin side (ViewModel + a Compose screen under `app.brucia`),
-   parsing the same messages.
+3. **App** - add a service and Compose screen with small explicit inputs/callbacks,
+   parsing the same messages. Add its stable descriptor to `features/BuiltinFeatures`
+   and bind that ID to the screen in `BuiltinFeatureScreens.kt`. The generic host
+   needs no new branch in MainActivity. Keep existing tab IDs stable; supply a unique
+   tab ID for the internal navigation adapter. The registry rejects duplicate,
+   missing and uncatalogued screen bindings. Phone-only screens can omit a device
+   capability; mixed tools must still gate each device operation in their service.
 4. **Tests** - unit-test the phone-side logic; add a Paparazzi snapshot if it has UI;
    extend `tools/` if it helps.
 5. **Keep standalone intact** - preserve and check the standalone paths affected by the change.

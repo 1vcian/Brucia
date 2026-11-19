@@ -1,7 +1,7 @@
 package app.brucia
 
 import app.brucia.ui.CommandLogDialog
-import app.brucia.ui.ConsoleScreen
+import app.brucia.ui.FeatureScreenHost
 import app.brucia.ui.SegButton
 import app.brucia.ui.StatusPill
 import app.brucia.ui.windowHeightDp
@@ -554,7 +554,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit, onGoCrack: () -> Unit = {}) {
+internal fun BruciaScreen(vm: WardriveViewModel, onConnect: () -> Unit, onGoCrack: () -> Unit = {}) {
     // Stop further beacon bursts on navigation, while retaining the loop across rotation.
     // Keep this on the screen: disposing the lazy header during scrolling is not leaving.
     LeaveEffect { vm.stopBeaconSpam() }
@@ -1439,27 +1439,8 @@ private fun toolIcon(title: String): androidx.compose.ui.graphics.vector.ImageVe
     }
 }
 
-/** The capability a tab requires, or null if it is always available. */
-private fun capForTab(tab: Int): String? = app.brucia.features.BuiltinFeatures.registry.byTabId(tab)?.cap
-
 /** Whether [caps] permits a tool needing capability [cap] (null cap is always allowed). */
 private fun capsAllow(caps: DeviceCaps, cap: String?): Boolean = caps.allows(cap)
-
-/** User-facing "this device has no <module>" message for a missing capability. */
-private fun capMessage(cap: String?): String = when (cap) {
-    "wifi" -> "This device has no Wi-Fi radio."
-    "cc1101" -> "This device has no CC1101 sub-GHz module."
-    "nfc" -> "No supported NFC reader was detected or reported by this firmware."
-    "ble" -> "This device has no BLE radio."
-    "ir" -> "This device has no IR module."
-    "nrf24" -> "This device has no NRF24L01 module."
-    "fm" -> "This device has no FM radio module."
-    "lora" -> "This device has no LoRa module"
-    "eth" -> "This device has no Ethernet"
-    "mic" -> "This device has no microphone."
-    "speaker" -> "This device has no speaker."
-    else -> "This feature is not available on this device."
-}
 
 /** Short module name a capability needs, for the "needs X" hint on gated tools. */
 private fun capModuleName(cap: String?): String = when (cap) {
@@ -1503,6 +1484,15 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
         fwUpdateAvailable -> "Firmware update available"
         else -> ""
     }
+    val screens = builtinFeatureScreens(
+        vm = vm,
+        connected = status == "Connected",
+        updateLabel = updateLabel,
+        onConnect = onConnect,
+        onFlash = onFlash,
+        onExportLog = { exportConsoleLog(context) },
+        onNavigate = { id -> tab = app.brucia.features.BuiltinFeatures.routeCatalog.byId(id)?.tabId ?: HOME },
+    )
     var showCmdLog by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     // Background survival is handled by the foreground ConnectionService + wake lock (started on
@@ -1558,83 +1548,15 @@ private fun AppRoot(vm: WardriveViewModel, onConnect: () -> Unit, onFlash: () ->
                     },
                 )
             } else {
-                val cap = capForTab(tab)
-                val caps = device?.caps
-                // Wide windows: tool screens are centered and capped at 840dp (Material's
-                // expanded breakpoint); narrower windows keep the full width unchanged.
+                // Keep the same width cap for every registered screen.
                 CenteredMaxWidth(AdaptiveLayout.ToolMaxWidth) {
-                    // Capability gating: when connected (caps known) and the module is absent, show a
-                    // disabled page instead of the tool. NRF24 (tab 13) gates itself with its own
-                    // message. When disconnected / caps unknown, nothing is hidden.
-                    if (caps != null && tab != 13 && !capsAllow(caps, cap)) {
-                        CapabilityDisabled(capMessage(cap), CapabilityEvidence.unavailableReason(cap, device?.evidence))
-                    } else when (tab) {
-                        0 -> BruciaScreen(vm, onConnect, onGoCrack = { tab = 7 })
-                        1 -> IrScreen(vm, onConnect)
-                        2 -> SubGhzScreen(vm, onConnect)
-                        3 -> NfcScreen(vm, onConnect)
-                        4 -> BadUsbScreen(vm, onConnect)
-                        5 -> BleScreen(vm, onConnect)
-                        6 -> DeviceScreen(vm, onConnect, updateLabel = updateLabel, onOpenUpdates = { tab = 12 })
-                        7 -> CrackScreen(vm)
-                        8 -> {
-                            val console by vm.console.collectAsState()
-                            ConsoleScreen(
-                                connected = status == "Connected",
-                                log = console,
-                                onConnect = onConnect,
-                                onSend = vm::sendConsole,
-                                onClear = vm::clearConsole,
-                                onExportLog = { exportConsoleLog(context) },
-                            )
-                        }
-                        9 -> RemoteScreen(vm, onConnect)
-                        10 -> FilesScreen(vm, onConnect)
-                        11 -> StationSnifferScreen(vm, onConnect)
-                        12 -> UpdatesScreen(vm, onFlash = onFlash)
-                        13 -> Nrf24Screen(vm, onConnect)
-                        14 -> FmScreen(vm, onConnect)
-                        15 -> WifiProbeScreen(vm, onConnect)
-                        16 -> SpamScreen(vm, onConnect)
-                        49 -> SpamScreen(vm, onConnect, filter = "ble")
-                        50 -> SpamScreen(vm, onConnect, filter = "wifi")
-                        51 -> SpamScreen(vm, onConnect, filter = "nfc")
-                        53 -> SpamScreen(vm, onConnect, filter = "ir")
-                        17 -> WifiMonitorScreen(vm, onConnect)
-                        18 -> MitmScreen(vm, status == "Connected")
-                        19 -> ScriptsScreen(vm, onConnect)
-                        20 -> ToolsScreen(vm, onConnect)
-                        21 -> ReportScreen(vm)
-                        22 -> LoRaScreen(vm, onConnect)
-                        23 -> EthernetScreen(vm, onConnect)
-                        24 -> UtilitiesScreen()
-                        52 -> BleConsoleScreen(vm)
-                        25 -> AudioDashboardScreen(vm, onConnect)
-                        41 -> MacroScreen(vm, onConnect)
-                        42 -> RfMap3dScreen(vm, onConnect)
-                        43 -> BugSweepScreen(vm, onConnect)
-                        44 -> WidsScreen(vm, onConnect)
-                        45 -> PcapDissectScreen(vm, onConnect)
-                        46 -> RfFingerprintScreen(vm, onConnect)
-                        47 -> RfTimelineScreen(vm, onConnect)
-                        48 -> GeoSignalsScreen(vm, onConnect)
-                        27 -> SstvScreen(vm, onConnect)
-                        28 -> ToneScreen(vm, onConnect)
-                        29 -> OscilloscopeScreen(vm, onConnect)
-                        30 -> EvilPortalScreen(vm, onConnect)
-                        26 -> ChannelAnalyzerScreen(vm, onConnect)
-                        31 -> NetworkScanScreen()
-                        32 -> EspnowScreen(vm, onConnect)
-                        33 -> MacScreen(vm, onConnect)
-                        34 -> WifiJoinScreen(vm, onConnect)
-                        35 -> BrucegotchiScreen(vm, onConnect)
-                        36 -> ThemeScreen(vm, onConnect)
-                        37 -> IrRemoteScreen(vm, onConnect)
-                        38 -> KarmaScreen(vm, onConnect)
-                        39 -> BleHidScreen(vm, onConnect)
-                        40 -> ResponderScreen(vm, onConnect)
-                        else -> StationSnifferScreen(vm, onConnect)
-                    }
+                    FeatureScreenHost(
+                        registry = screens,
+                        tabId = tab,
+                        caps = device?.caps,
+                        evidence = device?.evidence,
+                        onHome = { tab = HOME; category = -1 },
+                    )
                 }
             }
         }
@@ -2127,32 +2049,6 @@ private fun ToolCard(tool: app.brucia.features.FeatureDescriptor, available: Boo
     }
 }
 
-/** Shown in place of a tool page when the connected device lacks the required module. */
-@Composable
-private fun CapabilityDisabled(message: String, evidenceReason: String? = null) {
-    val cs = MaterialTheme.colorScheme
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.height(48.dp))
-        Text("Module not available", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = cs.onSurface)
-        Spacer(Modifier.height(12.dp))
-        Text(message, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-        // CAPS d.evidence: why the firmware reports it unavailable (probed absent, busy, no pins...).
-        if (evidenceReason != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(evidenceReason, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Attach the required module and reconnect to enable this tool.",
-            style = MaterialTheme.typography.bodySmall,
-            color = cs.onSurfaceVariant,
-        )
-    }
-}
-
 @Composable
 private fun BottomNav(runningCount: Int, deviceUpdate: Boolean, onHome: () -> Unit, onDevice: () -> Unit, onCmds: () -> Unit) {
     val cs = MaterialTheme.colorScheme
@@ -2258,7 +2154,7 @@ private class EditorState(
 }
 
 @Composable
-private fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun FilesScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
@@ -2629,7 +2525,7 @@ private fun FileEditorScreen(vm: WardriveViewModel, state: EditorState, currentP
 }
 
 @Composable
-private fun StationSnifferScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun StationSnifferScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
@@ -2729,7 +2625,7 @@ private fun StationSnifferScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
  * client ("what this device is looking for"), and exported to CSV.
  */
 @Composable
-private fun WifiProbeScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun WifiProbeScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
@@ -2876,7 +2772,7 @@ private fun JamDetectCard(vm: WardriveViewModel, connected: Boolean) {
 }
 
 @Composable
-private fun WifiMonitorScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun WifiMonitorScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
@@ -3115,7 +3011,7 @@ private fun WifiMonitorScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 }
 
 @Composable
-private fun RemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun RemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
@@ -3223,7 +3119,7 @@ private fun IrDeviceRow(d: app.brucia.ir.CatalogDevice, cs: androidx.compose.mat
 }
 
 @Composable
-private fun IrScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun IrScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
@@ -3973,7 +3869,7 @@ private fun SubGhzJammerCard(vm: WardriveViewModel, connected: Boolean, freqHz: 
 }
 
 @Composable
-private fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun SubGhzScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val signals by vm.subghz.collectAsState()
@@ -4456,7 +4352,7 @@ internal val scriptExamples = listOf(
 )
 
 @Composable
-private fun ScriptsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun ScriptsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
@@ -4550,7 +4446,7 @@ private fun bleConsolePermissions(): Array<String> =
     else arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
 
 @Composable
-private fun BleConsoleScreen(vm: WardriveViewModel) {
+internal fun BleConsoleScreen(vm: WardriveViewModel) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val console = vm.bleConsole
@@ -4646,7 +4542,7 @@ private fun BleConsoleScreen(vm: WardriveViewModel) {
 }
 
 @Composable
-private fun UtilitiesScreen() {
+internal fun UtilitiesScreen() {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val copyText = rememberTextCopier()
@@ -4872,7 +4768,7 @@ private fun ResultRow(value: String, onCopy: () -> Unit) {
 }
 
 @Composable
-private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
@@ -5114,7 +5010,7 @@ private fun ToolsScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
 /** BLE HID tool: the device acts as a Bluetooth keyboard/presenter the phone drives (parity). */
 @Composable
-private fun BleHidScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun BleHidScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
     val hid by vm.bleHidStatus.collectAsState()
@@ -5178,7 +5074,7 @@ private fun BleHidScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
 /** Responder tool (LLMNR/NBT-NS poisoning): time-bounded, headless. Authorized use; needs Wi-Fi joined. */
 @Composable
-private fun ResponderScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun ResponderScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
     val rStatus by vm.responderStatus.collectAsState()
@@ -5236,7 +5132,7 @@ private fun ResponderScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
 /** Karma tool (evil-twin probe-response lure): time-bounded, headless. Authorized use only. */
 @Composable
-private fun KarmaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun KarmaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
     val kStatus by vm.karmaStatus.collectAsState()
@@ -5298,7 +5194,7 @@ private fun KarmaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
 /** Brucegotchi tool (Pwnagotchi parity): time-bounded WPA-handshake collector. Authorized use. */
 @Composable
-private fun BrucegotchiScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun BrucegotchiScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
     val gStatus by vm.brucegotchiStatus.collectAsState()
@@ -5375,7 +5271,7 @@ private fun BrucegotchiScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
 /** Wi-Fi join tool (Bruce "Connect to Wifi" parity): join the device to an AP. */
 @Composable
-private fun WifiJoinScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun WifiJoinScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
     val joinStatus by vm.wifiJoinStatus.collectAsState()
@@ -5447,7 +5343,7 @@ private fun WifiJoinScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
 /** Wi-Fi MAC tool (Bruce "Change MAC" parity): view, set or randomize the device STA MAC. */
 @Composable
-private fun MacScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun MacScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
     val wifiMac by vm.wifiMac.collectAsState()
@@ -5525,7 +5421,7 @@ private fun MacScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 /** Custom IR remote builder: a grid of buttons taught one by one (ir_rx), tap to replay (ir tx). */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun IrRemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun IrRemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
     val keys by vm.remoteKeys.collectAsState()
@@ -5622,7 +5518,7 @@ private fun IrRemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 
 /** Standalone ESP-NOW broadcast tool (also reachable from the Audio screen). No module needed. */
 @Composable
-private fun EspnowScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun EspnowScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
     val espnowStatus by vm.espnowStatus.collectAsState()
@@ -5782,7 +5678,7 @@ private fun SavedRow(item: SavedItem, onReplay: (() -> Unit)?, onDelete: () -> U
 }
 
 @Composable
-private fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun NfcScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val last by vm.lastNfc.collectAsState()
@@ -6193,7 +6089,7 @@ private fun NfcNdefPushCard(
 }
 
 @Composable
-private fun BadUsbScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun BadUsbScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val scripts = remember { DuckyLibrary.load(context) }
@@ -6318,7 +6214,7 @@ private fun BleIbeaconCard(vm: WardriveViewModel, connected: Boolean) {
 }
 
 @Composable
-private fun BleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun BleScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val devices by vm.ble.collectAsState()
@@ -6589,7 +6485,7 @@ private fun BadBleSection(vm: WardriveViewModel, connected: Boolean) {
 // never drift. Not capability-gated away (BLE / Wi-Fi are always offered); individual BLE
 // tiles surface the firmware ACK error if a target is unsupported.
 @Composable
-private fun SpamScreen(vm: WardriveViewModel, onConnect: () -> Unit, filter: String? = null) {
+internal fun SpamScreen(vm: WardriveViewModel, onConnect: () -> Unit, filter: String? = null) {
     val status by vm.status.collectAsState()
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
@@ -6816,7 +6712,7 @@ private fun BlePlatformSpamCard(
 }
 
 @Composable
-private fun Nrf24Screen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun Nrf24Screen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
@@ -7096,7 +6992,7 @@ private fun Nrf24DeviceCard(d: Nrf24Device) {
 }
 
 @Composable
-private fun LoRaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun LoRaScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
@@ -7265,7 +7161,7 @@ private fun LoraPacketCard(p: LoraPacket) {
 }
 
 @Composable
-private fun EthernetScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun EthernetScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
@@ -7369,7 +7265,7 @@ private fun EthernetScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 // Phone-side automation: build, save and run macros (ordered sequences of device commands with a
 // pause after each). The phone does the sequencing the device's tiny interpreter cannot.
 @Composable
-private fun MacroScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun MacroScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val connected = status == "Connected"
     val cs = MaterialTheme.colorScheme
@@ -7475,7 +7371,7 @@ private enum class FmSource(val label: String) {
 }
 
 @Composable
-private fun FmScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun FmScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val connected = status == "Connected"
@@ -7662,7 +7558,7 @@ private fun FmScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
  * on-phone analysis of data the device streamed - "the phone is the brain".
  */
 @Composable
-private fun ReportScreen(vm: WardriveViewModel) {
+internal fun ReportScreen(vm: WardriveViewModel) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
 
@@ -7765,7 +7661,7 @@ private val LED_EFFECTS = listOf(
 
 /** Standalone Theme tool: app + device theme colors, LED color/brightness/animation. */
 @Composable
-private fun ThemeScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun ThemeScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
     val connected = status == "Connected"
@@ -7881,7 +7777,7 @@ private fun ThemeLedCard(vm: WardriveViewModel, connected: Boolean) {
 }
 
 @Composable
-private fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLabel: String = "", onOpenUpdates: () -> Unit = {}) {
+internal fun DeviceScreen(vm: WardriveViewModel, onConnect: () -> Unit, updateLabel: String = "", onOpenUpdates: () -> Unit = {}) {
     val status by vm.status.collectAsState()
     val device by vm.device.collectAsState()
     val out by vm.deviceOut.collectAsState()
@@ -8070,7 +7966,7 @@ private fun Waveform(timings: IntArray, modifier: Modifier) {
 }
 
 @Composable
-private fun CrackScreen(vm: WardriveViewModel) {
+internal fun CrackScreen(vm: WardriveViewModel) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val wordlists by vm.wordlists.collectAsState()
@@ -8396,7 +8292,7 @@ private fun ReleaseNotes(tag: String, notes: String, cs: androidx.compose.materi
 }
 
 @Composable
-private fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
+internal fun UpdatesScreen(vm: WardriveViewModel, onFlash: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
     val status by vm.status.collectAsState()

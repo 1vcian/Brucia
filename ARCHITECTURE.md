@@ -117,12 +117,30 @@ recreated by its late completion because local IDs are not reused.
 
 `ui/ConsoleScreen.kt` receives connection state, console lines and explicit callbacks
 for Connect, Send, Clear and Export. It owns only presentation state (draft, palette
-selection and scrolling); MainActivity collects the flows and wires the existing
-ViewModel and Android diagnostic export. `ui/CommandLogDialog.kt` similarly takes
+selection and scrolling); the application composition root collects the flows and
+wires the existing ViewModel and Android diagnostic export. `ui/CommandLogDialog.kt` similarly takes
 entries and Clear/Stop/Close callbacks. Shared status controls and dialog sizing live
 in `ui/` so neither screen imports MainActivity or WardriveViewModel. This is one
-incremental screen extraction; the other screens and navigation router remain in
+incremental screen extraction; most other screen implementations remain in
 MainActivity and the extension SDK below remains proposed.
+
+`features/FeatureScreenRegistry.kt` now validates a complete association between
+stable catalog IDs and screens, rejecting missing, duplicate and dangling bindings.
+The catalog and this association remain pure Kotlin; `ui/FeatureScreenHost.kt`
+renders the destination, applies its capability gate and keys composition by stable
+ID. Unknown tabs show a return-to-Home page instead of opening the station scanner.
+The 52-tool grid is unchanged; `BuiltinFeatures.routeCatalog` additionally includes
+the Theme shortcut and legacy combined Spam hub (54 routes total). Saved navigation
+continues to use the existing integer tab IDs as an internal compatibility adapter.
+
+`BuiltinFeatureScreens.kt` is the app composition root connecting those IDs to the
+existing composables and their current inputs/callbacks. NRF24 retains its own
+missing-module page; other capability messages, update labels and cross-screen
+links keep their behavior. Registering a screen no longer needs a branch in
+MainActivity. Legacy adapters still pass the full ViewModel to unmigrated screens;
+this is not completion of feature service extraction, firmware registration or a
+public plugin API. New feature screens should take small inputs/services, as Console
+already does, rather than extend that legacy coupling.
 
 Managed transfers require `CAPS.features.verified_files`; hardware capabilities
 remain a separate map. See the protocol document for correlation, size/CRC and

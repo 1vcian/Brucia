@@ -321,6 +321,31 @@ class CompanionLinkFlowTest {
     }
 
     @Test
+    fun registeredRoutesPreserveCapabilityPagesThemeAndUpdatesShortcut() {
+        val device = connect()
+        compose.onNodeWithText("NFC", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("Module not available").assertExists()
+        compose.onNodeWithText("No supported NFC reader was detected or reported by this firmware.").assertExists()
+        Espresso.pressBack()
+
+        compose.onNodeWithText("Search tools").performTextReplacement("MouseJack")
+        Espresso.closeSoftKeyboard()
+        compose.onNodeWithText("NRF24", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("No NRF24L01 module").assertExists()
+        compose.onNodeWithText("Module not available").assertDoesNotExist()
+        Espresso.pressBack()
+
+        compose.onNodeWithText("Search tools").performTextReplacement("")
+        compose.onNodeWithText("Theme", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("App + device theme").assertExists()
+        // Bottom navigation reaches Device; its shortcut must invoke the registered Updates route.
+        compose.onNodeWithText("Device", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Updates", useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithText("Updates - app and device firmware").assertExists()
+        assertFalse("navigation cannot fall back to the station scanner", device.subs.any { it.first == "wifi.sta" && it.second })
+    }
+
+    @Test
     fun navigateStreamReconnectStopAndDisconnectOverSimulatedLink() {
         onMain { vm = ViewModelProvider(compose.activity)[WardriveViewModel::class.java] }
         val device = SimulatedDevice()

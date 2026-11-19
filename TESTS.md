@@ -4,6 +4,49 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Feature catalog to screen registration — 2026-11-19 (unreleased)
+
+Base `ba2c9bc3`. `FeatureScreenRegistry` validates stable-ID bindings against a
+catalog; duplicate, missing and uncatalogued bindings fail before navigation.
+`BuiltinFeatureScreens` associates all 54 existing routes with their original
+screen calls. The tool grid stays at 52 entries: Theme and the legacy combined
+Spam hub are explicit auxiliary routes. Existing integer tab IDs remain the saved
+navigation adapter. MainActivity delegates rendering to `FeatureScreenHost` and
+drops **104 lines (8,683 -> 8,579)**; most screen implementations still live there
+and legacy adapters still use WardriveViewModel. No public SDK or firmware registry.
+
+The host keys composition by stable ID, retains the original capability messages
+and NRF24's own missing-module UI, and uses current callbacks/state. Unknown routes
+now show a return-to-Home page; the old default opened the station scanner. The
+Wardrive -> Crack and Device -> Updates links resolve their stable catalog IDs.
+Comparison against the old switch preserves all 53 direct screen calls; the
+Console's state/callback adapter is checked by its existing real-app regression.
+
+- Seven new JVM tests cover binding order, metadata/legacy-tab lookup, missing,
+  dangling and duplicate screens, caller-list mutation, fixture registration and
+  unknown lookup, plus preservation of all built-in route IDs and the tool grid.
+- `python3 tools/test_android_logic.py`: **311 PASS**, including both feature
+  registry suites (previously 295).
+- `./gradlew --offline --continue :app:testDebugUnitTest :app:lintDebug
+  :app:assembleDebugAndroidTest`: **BUILD SUCCESSFUL**, **1,223 JVM tests PASS**;
+  lint **0 errors / 1 existing OldTargetApi warning** and instrumentation APK compiled.
+- Final `./gradlew --offline --continue :app:lintDebug :app:connectedDebugAndroidTest`:
+  **BUILD SUCCESSFUL**, XML **28 tests: 27 PASS / 1 intentionally skipped** (the
+  opt-in decoder benchmark), zero failures/errors. Isolated API 36.1 arm64 AVD.
+  Three new generic-host cases prove state/effect isolation when routes share one
+  renderer, live capability changes including self-gated/local screens, and unknown
+  routes composing no feature while offering Home. A new real-Activity/session flow
+  covers the NFC gate, NRF24-specific gate, Theme shortcut and Device -> Updates.
+  All nine link-flow scenarios pass, including existing rotation, Console, reconnect,
+  beacon leave, command-log Clear and global Stop. The first draft of the new
+  navigation test left the search IME open; closing it before navigation lets Back
+  exercise navigation rather than dismiss the keyboard. No production fix for that fixture.
+
+Reports and host log are retained in ignored `.codex_tmp/feature-routing-20261119/`.
+No firmware/protocol change, firmware rebuild, physical USB/radio acceptance or new
+release. Generic host fixtures and selected real-app flows do not certify every
+operation in all 52 tools. Broader service/screen separation remains the next step.
+
 ## Console/UI extraction and contributor template — 2026-11-18/19 (unreleased)
 
 Base `d85695b5`. `ui/ConsoleScreen.kt` receives connection state, console lines and
