@@ -34,6 +34,7 @@ TESTS = [
     "DiagnosticsTest", "CaptureWorkflowTest", "CaptureDescriptorTest",
     "WifiTargetStoreTest", "WifiTargetImportServiceTest", "CommandHistoryTest",
     "FeatureRegistryTest", "FeatureScreenRegistryTest",
+    "PcapDissectorTest", "PcapDissectSessionTest", "IButtonServiceTest", "ClockServiceTest", "DeviceOperationTest",
     "StreamRotationTest", "ParkedLeavesTest", "DeviceOutputsTest",
     "FrameBudgetTest", "HandshakeParserTest", "PcapReaderTest", "SubFileTest", "DeBruijnTxTest",
     "SlipReceiverTest", "CliReplyLimitTest",
@@ -42,6 +43,8 @@ TESTS = [
 TEST_HELPERS = ["DeviceJson", "VirtualTime"]
 SOURCES = [
     "features/FeatureRegistry.kt", "features/BuiltinFeatures.kt", "features/FeatureScreenRegistry.kt",
+    "wifi/PcapDissectSession.kt", "ibutton/IButtonService.kt", "device/ClockService.kt",
+    "session/DeviceOperation.kt", "session/JsonCommandRunner.kt",
     "protocol/Protocol.kt", "protocol/CompanionClient.kt", "protocol/CommandReply.kt", "protocol/LinkCounters.kt",
     "protocol/FrameBudget.kt",
     "session/CommandSession.kt", "wardrive/DeviceDiagnostics.kt", "wardrive/CommandHistory.kt",

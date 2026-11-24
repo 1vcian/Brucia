@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Build
+import android.net.Uri
 import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -25,6 +26,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
 import app.brucia.DeviceState.waitUntil
 import app.brucia.wardrive.WardriveViewModel
+import app.brucia.features.pcap.openPcapDocument
+import app.brucia.wifi.PcapDissectState
+import app.brucia.wifi.PcapDissectViewModel
+import app.brucia.wifi.PcapWriter
+import java.io.ByteArrayOutputStream
+import java.io.File
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -92,6 +99,116 @@ class CompanionLinkFlowTest {
     private fun openWifiTool(name: String) {
         compose.onNodeWithText("Wi-Fi", useUnmergedTree = true).performScrollTo().performClick()
         compose.onNodeWithText(name, useUnmergedTree = true).performScrollTo().performClick()
+    }
+
+    private fun openToolFromSearch(query: String, title: String) {
+        compose.onNodeWithText("Search tools").performTextReplacement(query)
+        Espresso.closeSoftKeyboard()
+        compose.onNodeWithText(title, useUnmergedTree = true).performScrollTo().performClick()
+    }
+
+    @Test
+    fun pcapPilotImportsOfflineRetainsResultsAcrossRotationAndClearsOnLeave() {
+        onMain { vm = ViewModelProvider(compose.activity)[WardriveViewModel::class.java] }
+        openToolFromSearch("802.11", "PCAP dissect")
+        lateinit var owner: PcapDissectViewModel
+        onMain { owner = ViewModelProvider(compose.activity)[PcapDissectViewModel::class.java] }
+        val context = compose.activity.applicationContext
+        val capture = File.createTempFile("pilot-", ".pcap", context.cacheDir)
+        val bytes = ByteArrayOutputStream().also { out ->
+            val frame = ByteArray(24).also { it[0] = 0x80.toByte() }
+            PcapWriter.write(out, List(3) { it.toLong() * 1000 to frame })
+        }.toByteArray()
+        try {
+            capture.writeBytes(bytes)
+            onMain { assertTrue(openPcapDocument(owner.session, context.contentResolver, Uri.fromFile(capture))) }
+            awaitUi("offline capture parsed") { owner.session.state.value.summary?.frames == 3 }
+            compose.onNodeWithText("3 frames  -  mgmt 3 / ctrl 0 / data 0").assertExists()
+            rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, Configuration.ORIENTATION_LANDSCAPE)
+            rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
+            onMain { assertSame(owner, ViewModelProvider(compose.activity)[PcapDissectViewModel::class.java]) }
+            compose.onNodeWithText(capture.name).assertExists()
+            compose.onNodeWithText("3 frames  -  mgmt 3 / ctrl 0 / data 0").assertExists()
+            assertTrue("PCAP works without a companion link", vm.device.value == null)
+            compose.onNodeWithText("Home", useUnmergedTree = true).performClick()
+            awaitUi("leaving forgets capture") { owner.session.state.value == PcapDissectState() }
+            openToolFromSearch("802.11", "PCAP dissect")
+            compose.onNodeWithText(capture.name).assertDoesNotExist()
+            capture.writeBytes(ByteArray(16))
+            onMain { assertTrue(openPcapDocument(owner.session, context.contentResolver, Uri.fromFile(capture))) }
+            awaitUi("invalid capture reported") { owner.session.state.value.error.isNotEmpty() }
+            compose.onNodeWithText("Not a classic pcap, or no frames found.").assertExists()
+        } finally {
+            capture.delete()
+        }
+    }
+
+    @Test
+    fun gadgetsPilotKeepsMissingInterfaceGatedWhileClockRemainsUsable() {
+        val device = connect()
+        openToolFromSearch("iButton", "Gadgets")
+        compose.onNodeWithText("No confirmed iButton interface").assertExists()
+        compose.onNodeWithText("Read").assertIsNotEnabled()
+        compose.onNodeWithText("id (hex)").performTextReplacement("0123456789ABCDEF")
+        compose.onNodeWithText("Write").assertIsNotEnabled()
+        Espresso.closeSoftKeyboard()
+        compose.onNodeWithText("Get time").performScrollTo().performClick()
+        awaitUi("clock reply shown") { vm.clockStatus.value == "(no time)" }
+        compose.onNodeWithText("(no time)").assertExists()
+        compose.onNodeWithText("Sync from phone").performScrollTo().performClick()
+        awaitUi("clock synced") { vm.clockStatus.value == "Clock synced." }
+        assertTrue(device.commands.any { it.startsWith("clock_set ") })
+        assertFalse(device.commands.any { it.startsWith("ibutton_") })
+        onMain { vm.disconnect() }
+        awaitUi("disconnected controls") { compose.shows("Connect over USB") }
+        compose.onNodeWithText("Get time").assertIsNotEnabled()
+        compose.onNodeWithText("Read").assertIsNotEnabled()
+    }
+
+    @Test
+    fun gadgetsPilotRetainsPendingReadOnRotationStopsAndUsesTheReplacementLink() {
+        val device = connect(SimulatedDevice().apply { ibuttonAvailable = true; holdIButtonReplies = true })
+        openToolFromSearch("iButton", "Gadgets")
+        compose.onNodeWithText("id (hex)").performTextReplacement("01:23:45:67 89ab cdef")
+        Espresso.closeSoftKeyboard()
+        compose.onNodeWithText("Read").performClick()
+        awaitUi("read pending") { device.heldIButtons.size == 1 && vm.ibuttonBusy.value }
+        rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, Configuration.ORIENTATION_LANDSCAPE)
+        rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
+        compose.onNodeWithText("id (hex)").assertTextContains("01:23:45:67 89ab cdef")
+        compose.onNodeWithText("Stop").performClick()
+        awaitUi("iButton stopped") { !vm.ibuttonBusy.value && vm.ibuttonStatus.value == "Stopped." }
+        device.releaseIButtonReplies("id=LATE")
+        readBarrier(device, 73)
+        compose.onNodeWithText("Stopped.").assertExists()
+        val before = device.commands.toList()
+        compose.onNodeWithText("id (hex)").performTextReplacement("bad")
+        Espresso.closeSoftKeyboard()
+        compose.onNodeWithText("Write").performClick()
+        compose.onNodeWithText("invalid id (need 16 hex chars)").assertExists()
+        assertEquals(before, device.commands.toList())
+        device.holdIButtonReplies = false
+        compose.onNodeWithText("id (hex)").performTextReplacement("01:23:45:67 89ab cdef")
+        Espresso.closeSoftKeyboard()
+        compose.onNodeWithText("Write").performClick()
+        awaitUi("normalized write") { vm.ibuttonStatus.value == "Wrote 0123456789abcdef." }
+        assertTrue(device.commands.contains("ibutton_write 0123456789abcdef"))
+
+        device.holdIButtonReplies = true
+        compose.onNodeWithText("Read").performClick()
+        awaitUi("another pending read") { device.heldIButtons.size == 1 && vm.ibuttonBusy.value }
+        compose.onNodeWithText("Home", useUnmergedTree = true).performClick()
+        assertTrue("leaving retains the existing bounded operation", vm.ibuttonBusy.value)
+        openToolFromSearch("iButton", "Gadgets")
+        compose.onNodeWithText("Stop").assertExists()
+        onMain { vm.disconnect() }
+        awaitUi("disconnect stops the shared service") { !vm.ibuttonBusy.value && compose.shows("Connect over USB") }
+        compose.onNodeWithText("Read").assertIsNotEnabled()
+        val replacement = connect(SimulatedDevice().apply { ibuttonAvailable = true })
+        device.releaseIButtonReplies("id=OLD LINK")
+        compose.onNodeWithText("Read").performClick()
+        awaitUi("read through replacement link") { replacement.commands.contains("ibutton_read") && !vm.ibuttonBusy.value }
+        compose.onNodeWithText("No iButton read.").assertExists()
     }
 
     private fun wardriveSwitch() = compose.onNode(

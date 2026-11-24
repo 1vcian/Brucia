@@ -1,7 +1,5 @@
 package app.brucia.wifi
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -77,9 +75,4 @@ class PcapDissectSession(
         job = null
         _state.value = PcapDissectState()
     }
-}
-
-/** Activity-scoped owner of the [PcapDissectSession]: survives configuration changes. */
-class PcapDissectViewModel : ViewModel() {
-    val session = PcapDissectSession(viewModelScope)
 }

@@ -277,6 +277,16 @@ both sides aware of it.
    extend `tools/` if it helps.
 5. **Keep standalone intact** - preserve and check the standalone paths affected by the change.
 
+For existing examples, see `features/pcap/` (phone-only registration, document adapter
+and state-driven screen) and `features/gadgets/` (screen state/actions plus injected
+domain services). Neither depends on MainActivity or WardriveViewModel. Gadgets uses
+the application's existing service instances so global Stop and disconnect still
+clean up the same operations. PCAP retains its dedicated session across rotation and
+resets it on leave; Gadgets preserves its existing bounded operations on leave.
+These are internal source boundaries, not a public SDK. Lifecycle/late-result and
+missing-capability checks are in `CompanionLinkFlowTest`; parser/session/iButton
+regressions also run with `python3 tools/test_android_logic.py`.
+
 ## Style & conventions
 
 - **English everywhere**: code, comments, docs, UI strings, commit messages.

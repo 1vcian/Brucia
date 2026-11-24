@@ -4,6 +4,20 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## PCAP and Gadgets feature migration — 2026-11-24 (unreleased)
+
+Base `9d086b0e`. The Android unit suite passed all 1,223 tests. Lint reported
+one existing OldTargetApi warning and zero errors. The host Kotlin runner passed
+348 tests, including PCAP parsing and cancellation, iButton, clock and device
+operation tests. The debug instrumentation APK compiled successfully.
+
+The full emulator suite passed 30 tests and skipped the opt-in decoder benchmark.
+The three new integration cases use MainActivity with a synthetic three-frame file
+and a simulated device. They exercise import through ContentResolver, results
+after rotation, clearing on navigation, malformed input, a missing iButton
+interface, clock access, cancellation, delayed replies and reconnect. OS picker
+interaction and physical peripheral acceptance remain separate.
+
 ## Feature catalog to screen registration — 2026-11-19 (unreleased)
 
 Base `ba2c9bc3`. `FeatureScreenRegistry` validates stable-ID bindings against a

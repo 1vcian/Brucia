@@ -1,25 +1,18 @@
-package app.brucia
+package app.brucia.features.pcap
 
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import app.brucia.wardrive.WardriveViewModel
-import app.brucia.wifi.PcapDissector
 import app.brucia.ui.Button
-import app.brucia.ui.LeaveEffect
-import app.brucia.wifi.PcapDissectViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
+import app.brucia.wifi.PcapDissectState
+import app.brucia.wifi.PcapDissector
 
 /**
  * On-phone PCAP dissection - a Wireshark-lite for the 802.11 captures the device records in monitor
@@ -28,27 +21,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  * BSSID and EAPOL (handshake) flag. The dissection the device's tiny screen could never show.
  */
 @Composable
-internal fun PcapDissectScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
+internal fun PcapDissectScreen(state: PcapDissectState, onOpen: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val context = LocalContext.current
-    // The decoded capture and a parse in progress live in an Activity-scoped ViewModel: a rotation
-    // or resize keeps them; leaving the tool cancels and clears them (as before).
-    val session = viewModel<PcapDissectViewModel>().session
-    val state by session.state.collectAsState()
     val fileName = state.fileName
     val loading = state.loading
     val summary = state.summary
     val rows = state.rows
     val error = state.error
-    LeaveEffect { session.reset() }
-
-    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val resolver = context.applicationContext.contentResolver
-        session.open(uri.lastPathSegment?.substringAfterLast('/') ?: "capture.pcap") {
-            resolver.openInputStream(uri)?.use { PcapDissector.readBounded(it) } ?: ByteArray(0)
-        }
-    }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -60,7 +39,7 @@ internal fun PcapDissectScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
             "handshakes. For authorized analysis of your own captures.",
             color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
 
-        Button(onClick = { open.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth(), enabled = !loading) {
+        Button(onClick = onOpen, modifier = Modifier.fillMaxWidth(), enabled = !loading) {
             Text(if (loading) "Parsing..." else "Open .pcap from phone")
         }
         if (fileName.isNotBlank()) Text(fileName, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)

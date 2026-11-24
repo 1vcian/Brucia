@@ -139,8 +139,27 @@ missing-module page; other capability messages, update labels and cross-screen
 links keep their behavior. Registering a screen no longer needs a branch in
 MainActivity. Legacy adapters still pass the full ViewModel to unmigrated screens;
 this is not completion of feature service extraction, firmware registration or a
-public plugin API. New feature screens should take small inputs/services, as Console
-already does, rather than extend that legacy coupling.
+public plugin API. New feature screens should take small inputs/services, following
+Console and the two feature pilots below.
+
+`features/pcap/` owns PCAP dissect's registration, document adapter and state-driven
+screen. It needs no connection or general ViewModel. The existing dedicated
+`wifi/PcapDissectViewModel` retains `PcapDissectSession` across Activity recreation;
+leaving the destination resets the session. The session is now in an Android-free
+source file, with bounded document reads and cancellation/late-result tests runnable
+by the host harness. The application ContentResolver opens documents without retaining
+an Activity. A blocked provider read is still not forcibly interrupted.
+
+`features/gadgets/` owns the full existing Gadgets screen, its state/actions and a
+route collecting the injected iButton, clock, speaker, microphone and ESP-NOW
+services. The app composition root supplies connection/capability state and the same
+service instances owned by WardriveViewModel. No feature code imports that ViewModel
+or MainActivity; no second command session or service lifecycle is created. Existing
+per-operation capability gates remain. Leaving Gadgets preserves its bounded device
+operations/playback; global Stop and disconnect retain their existing service cleanup.
+iButton Stop cancels the local wait and fences late replies; it does not prove a
+physical operation was interrupted. Both pilots are logical source boundaries in
+the current app module, not separate Gradle modules or a versioned extension API.
 
 Managed transfers require `CAPS.features.verified_files`; hardware capabilities
 remain a separate map. See the protocol document for correlation, size/CRC and

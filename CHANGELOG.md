@@ -7,6 +7,12 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- Migrated PCAP dissect and Gadgets into feature packages with explicit screen state
+  and actions. PCAP keeps its independent phone-only session; Gadgets receives the
+  existing iButton, clock, speaker, microphone and ESP-NOW services. Neither screen
+  depends on the general ViewModel. Existing capability gates, rotation retention,
+  leave/Stop behavior and disconnect handling are preserved.
+
 - Connected the feature catalog to a validated screen registry, replacing MainActivity's
   numeric screen switch. All 54 existing routes retain their IDs and capability behavior;
   Theme and the legacy Spam hub remain outside the 52-tool grid. Unknown routes now

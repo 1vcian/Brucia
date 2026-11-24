@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import app.brucia.features.BuiltinFeatures
 import app.brucia.features.FeatureScreenBinding
 import app.brucia.features.FeatureScreenRegistry
+import app.brucia.features.gadgets.GadgetsRoute
+import app.brucia.features.pcap.pcapDissectFeature
 import app.brucia.ui.ConsoleScreen
 import app.brucia.ui.FeatureScreen
 import app.brucia.wardrive.WardriveViewModel
@@ -60,7 +62,14 @@ internal fun builtinFeatureScreens(
         FeatureScreenBinding<FeatureScreen>("org.brucia.wifi.monitor", screen = { WifiMonitorScreen(vm, onConnect) }),
         FeatureScreenBinding<FeatureScreen>("org.brucia.intercept.mitm", screen = { MitmScreen(vm, connected) }),
         FeatureScreenBinding<FeatureScreen>("org.brucia.tools.scripts", screen = { ScriptsScreen(vm, onConnect) }),
-        FeatureScreenBinding<FeatureScreen>("org.brucia.tools.gadgets", screen = { ToolsScreen(vm, onConnect) }),
+        FeatureScreenBinding<FeatureScreen>("org.brucia.tools.gadgets", screen = {
+            val device by vm.device.collectAsState()
+            GadgetsRoute(
+                connected = connected, caps = device?.caps,
+                ibutton = vm.ibutton, clock = vm.clock, speaker = vm.speaker,
+                mic = vm.micRecorder, espNow = vm.espNow, onConnect = onConnect,
+            )
+        }),
         FeatureScreenBinding<FeatureScreen>("org.brucia.tools.report", screen = { ReportScreen(vm) }),
         FeatureScreenBinding<FeatureScreen>("org.brucia.radio.lora", screen = { LoRaScreen(vm, onConnect) }),
         FeatureScreenBinding<FeatureScreen>("org.brucia.device.ethernet", screen = { EthernetScreen(vm, onConnect) }),
@@ -71,7 +80,7 @@ internal fun builtinFeatureScreens(
         FeatureScreenBinding<FeatureScreen>("org.brucia.tools.rfmap3d", screen = { RfMap3dScreen(vm, onConnect) }),
         FeatureScreenBinding<FeatureScreen>("org.brucia.tools.bugsweep", screen = { BugSweepScreen(vm, onConnect) }),
         FeatureScreenBinding<FeatureScreen>("org.brucia.intercept.wids", screen = { WidsScreen(vm, onConnect) }),
-        FeatureScreenBinding<FeatureScreen>("org.brucia.tools.pcapdissect", screen = { PcapDissectScreen(vm, onConnect) }),
+        pcapDissectFeature(),
         FeatureScreenBinding<FeatureScreen>("org.brucia.intercept.rffingerprint", screen = { RfFingerprintScreen(vm, onConnect) }),
         FeatureScreenBinding<FeatureScreen>("org.brucia.intercept.rftimeline", screen = { RfTimelineScreen(vm, onConnect) }),
         FeatureScreenBinding<FeatureScreen>("org.brucia.tools.geosignals", screen = { GeoSignalsScreen(vm, onConnect) }),

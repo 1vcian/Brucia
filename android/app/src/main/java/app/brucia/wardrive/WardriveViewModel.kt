@@ -3581,7 +3581,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val evilActive: StateFlow<Boolean> = evilPortal.active
     val evilStatus: StateFlow<String> = evilPortal.status
 
-    private val ibutton = IButtonService(
+    internal val ibutton = IButtonService(
         viewModelScope, commandRunner,
         isConnected = { session != null },
         hasInterface = { _device.value?.caps?.ibutton == true }, // same source as the session preflight
@@ -3589,7 +3589,7 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     val ibuttonStatus: StateFlow<String> = ibutton.status
     val ibuttonBusy: StateFlow<Boolean> = ibutton.busy
 
-    private val clock = ClockService(viewModelScope, commandRunner, isConnected = { session != null })
+    internal val clock = ClockService(viewModelScope, commandRunner, isConnected = { session != null })
     val clockStatus: StateFlow<String> = clock.status
 
     // script_stop goes out like the responder/karma stops: unlogged and unawaited (the firmware
@@ -3602,17 +3602,17 @@ class WardriveViewModel(app: Application) : AndroidViewModel(app) {
     /** True while a stop is on its way and the run has not ended yet. */
     val scriptStopping: StateFlow<Boolean> = script.stopping
 
-    private val espNow = EspNowService(viewModelScope, commandRunner, isConnected = { session != null })
+    internal val espNow = EspNowService(viewModelScope, commandRunner, isConnected = { session != null })
     val espnowStatus: StateFlow<String> = espNow.status
 
     // --- Audio (speaker / mic) + ESP-NOW (fixed contract; firmware built in parallel) ---
-    private val speaker = SpeakerService(
+    internal val speaker = SpeakerService(
         viewModelScope, commandRunner, isConnected = { session != null }, json = jsonRunner,
         asyncPlay = { _device.value?.features?.speakerPlayAsync == true },
     )
     val speakerStatus: StateFlow<String> = speaker.status
 
-    private val micRecorder = MicRecordService(viewModelScope, commandRunner, isConnected = { session != null })
+    internal val micRecorder = MicRecordService(viewModelScope, commandRunner, isConnected = { session != null })
     val micStatus: StateFlow<String> = micRecorder.status
 
 

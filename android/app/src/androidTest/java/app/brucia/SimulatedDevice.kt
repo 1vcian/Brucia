@@ -29,6 +29,9 @@ internal class SimulatedDevice : Transport {
     /** Every SUB body the app sent, in order: stream to on/off. */
     val subs = CopyOnWriteArrayList<Pair<String, Boolean>>()
     val commands = CopyOnWriteArrayList<String>()
+    @Volatile var ibuttonAvailable = false
+    @Volatile var holdIButtonReplies = false
+    val heldIButtons = CopyOnWriteArrayList<Int>()
     @Volatile var holdSubscriptionStarts = false
     val heldStarts = CopyOnWriteArrayList<Int>()
     @Volatile var holdBeaconReplies = false
@@ -67,6 +70,7 @@ internal class SimulatedDevice : Transport {
                 val command = d.optString("cmd")
                 commands += command
                 if (holdBeaconReplies && command.startsWith("wifi_beacon_spam ")) heldBeacons += id
+                else if (holdIButtonReplies && command.startsWith("ibutton_")) heldIButtons += id
                 else send(Kind.ACK, id, JSONObject().put("ok", true).put("out", ""))
             }
             Kind.SUB -> {
@@ -84,6 +88,13 @@ internal class SimulatedDevice : Transport {
     }
 
     fun lastSub(stream: String): Boolean? = subs.lastOrNull { it.first == stream }?.second
+
+    /** Complete only pending iButton requests, including replies deliberately delivered after Stop. */
+    fun releaseIButtonReplies(out: String = "id=0123456789ABCDEF") {
+        for (id in heldIButtons.toList()) {
+            if (heldIButtons.remove(id)) send(Kind.ACK, id, JSONObject().put("ok", true).put("out", out))
+        }
+    }
 
     /** Complete only the bursts already pending, so a continued loop parks on its next burst. */
     fun releaseBeaconReplies() {
@@ -147,7 +158,7 @@ internal class SimulatedDevice : Transport {
         .put("battery", 77)
         .put("modules", JSONArray(listOf("wifi", "ble")))
         .put("transports", JSONArray(listOf("usb")))
-        .put("caps", JSONObject().put("wifi", true).put("ble", true))
+        .put("caps", JSONObject().put("wifi", true).put("ble", true).put("ibutton", ibuttonAvailable))
         .put("features", JSONObject())
 
     companion object {
