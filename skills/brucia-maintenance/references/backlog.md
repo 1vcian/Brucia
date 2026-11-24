@@ -7,7 +7,8 @@ checkpoint; the correction/release outcome supersedes them. Hardware gates stay 
 
 | Item | State | Next action / boundary |
 |---|---|---|
-| A24-1 — AP scan stalls | FIXED in software, physical acceptance open | Checked SDK start and completion results, one-second nonblocking retry after failure, diagnostic counter. Host fault injection and LilyGO firmware build passed. Installed 0.1.16 baseline predates the fix. |
+| A24-1 — AP scan stalls | FIXED, physical normal start/stop/restart PASS | Checked SDK start and completion results, one-second nonblocking retry after failure, diagnostic counter. Host fault injection and LilyGO firmware build passed. After flash, two 12 s windows yielded 22 and 17 AP events and zero after each OFF. Forced driver failures tested on host only. |
+| Post-flash heap delta | OPEN | Full LilyGO runner failed its heap threshold by measuring a 49220-byte decrease across multiple operations. Warm repeat passed and 100 diagnostics showed stable medians. Isolate cold per-operation allocations and check a longer trend. See TESTS.md. |
 | A24-2 — false save confirmation | OPEN, high | Files editor and RF map show success after a nullable output stream skipped the write. Require an opened stream and completed write/close before reporting success. Test provider null, write and close failures. |
 | A24-3 — Wi-Fi stream readiness | OPEN | Station, probe and monitor setup ignore ESP driver errors before successful SUB ACK. Fail and release partial state when required initialization fails. Physical 0.1.16 baseline on Nov 24: wifi.sta and wifi.probe ACKed ON/OFF but produced zero events in 8 s each. Reception and failure handling remain unverified. |
 | A24-4 — unsupported PCAP link types | OPEN, reproduced | Ethernet input is interpreted as 802.11. Validate link type and report unsupported input. |

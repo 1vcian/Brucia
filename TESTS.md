@@ -4,6 +4,32 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## T-Embed AP recovery build on hardware — 2026-11-24
+
+Matched the board partition table to the build and flashed only the factory app at
+0x10000. Esptool verified the write. The installed binary matches the SHA-256 in
+the A24-1 build record. It reports 0.1.16 with build provenance 041cb984030b.dirty
+because compilation preceded commit 5743cf34.
+
+Two real wifi.ap subscriptions delivered 22 and 17 AP events in 12 seconds each.
+Both ON/OFF requests were acknowledged, both three-second windows after OFF were
+silent, and wifi_ap_scan_failures stayed at zero. Counts represent events, not
+unique networks. Fault recovery remains covered by the simulated driver.
+
+Full hardware runner: 15/16 passed. Identity, capabilities, storage listing/read,
+transactional scratch upload/readback/removal, malformed frame handling, busy and
+idle stops, script interruption/restart, stream control and link counters passed.
+200/200 pings, p99 4.07 ms. Two-minute soak had no reboot or link discrepancy.
+Passive stream windows produced no events in the initial stream check. Heap
+fell from 113467 to 64247 bytes over the entire run, exceeding the 32768-byte
+threshold. The final 20 diag calls had identical first/last medians (64247).
+A subsequent warm run with streams, busy, script Stop and 100 diag calls passed
+7/7. It began at 56119 bytes free and ended at 93471, with identical first/last
+medians during the diag loop. Cause of the original decrease remains open.
+Raw local reports: .codex_tmp/lilygo-ap-postflash and .codex_tmp/lilygo-ap-warm.
+Host discovery passed 368/371 with three skipped. Full Android JVM tests and
+lintDebug succeeded. No Android instrumentation run in this hardware session.
+
 ## AP scan recovery (A24-1) — 2026-11-24
 
 The host harness exercised the production polling loop with a failed start,
