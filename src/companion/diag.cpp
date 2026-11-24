@@ -54,6 +54,7 @@ void runDiagCommand(uint32_t id) {
     diagWriteLink(link, sink);
 
     JsonObject drops = d["drops"].to<JsonObject>();
+    drops["wifi_ap_scan_failures"] = link.apScanFailures;
     uint32_t lost = 0, dropped = 0;
     bool fmActive = false;
     if (fmAudioLostSamples(lost, fmActive)) {

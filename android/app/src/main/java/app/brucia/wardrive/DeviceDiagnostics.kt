@@ -25,6 +25,7 @@ data class DeviceDiagnostics(
     val fmPcmLost: Long? = null,
     val fmPcmActive: Boolean? = null,
     val micPcmDropped: Long? = null,
+    val apScanFailures: Long? = null,
 ) {
     fun lines(): List<String> = buildList {
         add("Device reset reason: $reset (code $resetCode), uptime ${uptime(uptimeS)}")
@@ -43,6 +44,7 @@ data class DeviceDiagnostics(
         add("Device ERR replies: " + (if (errs.isEmpty()) "none" else errs.joinToString(", ")) +
             " (busy during blocking ops: ${count(link["busy_409"])})")
         fmPcmLost?.let { add("Device FM PCM lost samples: ${count(it)} (since last FM start" + (if (fmPcmActive == true) ", active)" else ")")) }
+        apScanFailures?.let { add("Device Wi-Fi AP scan failures since boot: ${count(it)}") }
         micPcmDropped?.let { add("Device mic PCM dropped samples: ${count(it)} (current stream)") }
     }
 
@@ -109,6 +111,7 @@ data class DeviceDiagnostics(
                 errors = errors,
                 fmPcmLost = u32(drops, "fm_pcm_lost"),
                 fmPcmActive = drops?.opt("fm_pcm_active") as? Boolean,
+                apScanFailures = u32(drops, "wifi_ap_scan_failures"),
                 micPcmDropped = u32(drops, "mic_pcm_dropped"),
             )
         }

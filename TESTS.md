@@ -4,6 +4,53 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## AP scan recovery (A24-1) — 2026-11-24
+
+The host harness exercised the production polling loop with a failed start,
+a running scan followed by failed completion, retry delay across millis wrap,
+a successful three-result scan, zero results and reset during cooldown.
+All assertions passed. Firmware diagnostic core passed 20/20 checks. The
+stream registry regression passed across its board-guard combinations.
+Seven Android DiagnosticsTest cases passed and lintDebug succeeded.
+PlatformIO built lilygo-t-embed-cc1101. The local unflashed firmware.bin
+SHA-256 is `530f3ca659bbbbf65b83494698a41303c839254351888d2abfd125d7baac63e5`.
+Fault injection used a simulated driver. The device baseline below predates this build.
+
+## Physical T-Embed baseline — 2026-11-24
+
+USB Companion mode, installed firmware reporting 0.1.16, build
+`lilygo-t-embed-cc1101.1e29fb264b43.dirty`. The first run passed identity,
+provenance, ping, subghz.raw subscription and diagnostic counters. All 200
+pings returned (median 3.01 ms, p99 4.06 ms), the 20-frame burst stayed in
+order, and both counter deltas matched 223 frames. A second connection
+passed identity, wifi.sta/wifi.probe subscriptions and counters (5 frames
+each way). All three receive-only streams acknowledged ON and OFF. No events
+arrived in 5 s of CC1101 listening or 8 s per Wi-Fi stream, or in the 2 s
+quiet windows after OFF. These runs establish link and subscription replies.
+Actual radio reception, active AP scan failure recovery, and the unreleased
+stream registry remain unverified on this board. No flash or device file writes.
+
+## App and firmware audit — 2026-11-24
+
+Reviewed commit `041cb984`. Offline Gradle debug APK, unit and lint tasks succeeded
+(1,223 JVM cases, one existing OldTargetApi warning). PlatformIO linked the actual
+lilygo-t-embed-cc1101 target (4,376,998 firmware bytes). Host discovery selected
+370 cases. Three skipped and 366 passed on the initial run. The only error was a
+denied localhost bind in the untrusted-certificate test. The same test passed
+individually with localhost permission. No new physical or instrumentation results.
+
+A local Java harness ran the compiled production PcapDissector with synthetic
+records. A linktype 1 capture yielded an 802.11 data row. A 50,001-frame raw Wi-Fi
+capture under 2.1 MB reported 50,000. In a ToDS data frame with distinct addresses,
+the row and Top BSSIDs used address 3 instead of the AP at address 1.
+
+Source inspection traced nullable SAF output streams through two success messages,
+unchecked radio setup through SUB ACK, the AP scan state across negative SDK
+results, and the LITE ESP-NOW command from the UI through firmware rejection.
+Physical error rates and provider failures were not simulated. See A24-1–7 in
+the maintenance backlog. This review covers cross-layer contracts and automated
+checks, with no claim of exhaustive per-board, per-tool or physical validation.
+
 ## Stream lifecycle and portable fixture recipes — 2026-11-24 (unreleased)
 
 The NewDeviceModel firmware compiled and linked with the stream registry.

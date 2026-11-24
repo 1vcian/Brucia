@@ -49,7 +49,7 @@ private fun diagBody(): JSONObject {
         .put("uptime_s", 90_061)
         .put("heap", JSONObject().put("free", 181_220).put("min_free", 120_440).put("largest", 110_580))
         .put("link", link)
-        .put("drops", JSONObject().put("fm_pcm_lost", 7).put("fm_pcm_active", false).put("mic_pcm_dropped", 0))
+        .put("drops", JSONObject().put("fm_pcm_lost", 7).put("fm_pcm_active", false).put("mic_pcm_dropped", 0).put("wifi_ap_scan_failures", 2))
 }
 
 private fun caps(features: JSONObject?) = DeviceInfo.fromCaps(
@@ -70,6 +70,7 @@ class DiagnosticsTest {
         assertEquals(7L, d.fmPcmLost)
         assertEquals(false, d.fmPcmActive)
         assertEquals(0L, d.micPcmDropped)
+        assertEquals(2L, d.apScanFailures)
         val lines = d.lines()
         assertTrue(lines[0], lines[0] == "Device reset reason: brownout (code 9), uptime 1d 01:01:01")
         assertTrue(lines.contains("Device rejected frames: 4 bad JSON, 1 oversize, 0 zero length, 0 alloc failure, 3 stale partial"))
@@ -87,6 +88,7 @@ class DiagnosticsTest {
         assertEquals(8_386_295L, d.psram?.size)
         assertNull(d.fmPcmLost)
         assertNull(d.micPcmDropped)
+        assertNull(d.apScanFailures)
         assertTrue(d.lines().any { it.contains("4294967295+ frames out") })
         assertTrue(d.lines().any { it.startsWith("Device PSRAM: 8100000 of 8386295 B free") })
         assertTrue(d.lines().none { it.contains("FM PCM") || it.contains("mic PCM") })

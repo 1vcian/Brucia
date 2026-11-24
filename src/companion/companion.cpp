@@ -1,4 +1,5 @@
 #include "companion.h"
+#include "ap_scan_loop.h"
 #include "core/display.h"
 #include "core/led_control.h"
 #include "core/mykeyboard.h"
@@ -310,33 +311,17 @@ static void runCompanionUSB(bool headless) {
     bool subWifiAp = false;        // wifi.ap stream subscription
     bool subBleOn = false;         // ble.scan stream subscription (for the status screen)
     bool subGhzOn = false;         // subghz.raw stream subscription (for the status screen)
-    bool scanning = false;         // an async WiFi scan is in flight
+    ApScanLoop apScan;
     const auto pollAccessPoints = [&]() {
-        // 2) Service the wifi.ap stream: run back-to-back async scans and emit
-        //    each access point as an EVENT. The radio is free because the
-        //    transport is USB, not WiFi.
-        if (subWifiAp) {
-            if (!scanning) {
-                WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/true);
-                scanning = true;
-            } else {
-                int n = WiFi.scanComplete();
-                if (n >= 0) {
-                    for (int i = 0; i < n; i++) {
-                        sendWifiApEvent(
-                            WiFi.BSSIDstr(i),
-                            WiFi.SSID(i),
-                            WiFi.channel(i),
-                            WiFi.RSSI(i),
-                            encToStr(WiFi.encryptionType(i))
-                        );
-                    }
-                    WiFi.scanDelete();
-                    scanning = false; // a fresh scan starts next iteration
-                }
-                // n == WIFI_SCAN_RUNNING: keep waiting
+        if (!subWifiAp) return;
+        apScan.poll(millis(), WiFi, WIFI_SCAN_RUNNING, [](int count) {
+            for (int i = 0; i < count; i++) {
+                sendWifiApEvent(
+                    WiFi.BSSIDstr(i), WiFi.SSID(i), WiFi.channel(i),
+                    WiFi.RSSI(i), encToStr(WiFi.encryptionType(i))
+                );
             }
-        }
+        }, diagNoteApScanFailure);
     };
     uint32_t lastFrame = millis(); // for auto-restoring screen/LED if the app vanishes
     // App-mode input lock: once the app is connected (helloSeen), the device is "locked" to the
@@ -496,7 +481,7 @@ static void runCompanionUSB(bool headless) {
                                 monStop();   // Wi-Fi radio -> mutually exclusive
                             }
                             WiFi.scanDelete();
-                            scanning = false;
+                            apScan.reset();
                             if (on) {
                                 WiFi.mode(WIFI_STA);
                                 WiFi.disconnect(false, true);
@@ -509,7 +494,7 @@ static void runCompanionUSB(bool headless) {
                                 probeStop();       // and with the probe sniffer (shared radio)
                                 monStop();         // and with the monitor capture
                                 WiFi.scanDelete();
-                                scanning = false;
+                                apScan.reset();
                                 staStart();
                             } else {
                                 staStop();
@@ -522,7 +507,7 @@ static void runCompanionUSB(bool headless) {
                                 staStop();
                                 monStop(); // and with the monitor capture (shared radio)
                                 WiFi.scanDelete();
-                                scanning = false;
+                                apScan.reset();
                                 probeStart();
                             } else {
                                 probeStop();
@@ -536,7 +521,7 @@ static void runCompanionUSB(bool headless) {
                                 staStop();
                                 probeStop();
                                 WiFi.scanDelete();
-                                scanning = false;
+                                apScan.reset();
                                 int channel = in["d"]["channel"] | 0; // 0 = slow-hop the band
                                 const char *bssid = in["d"]["bssid"] | "";
                                 monStart(channel, bssid);

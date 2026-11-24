@@ -64,6 +64,7 @@ inline const char *diagRxRejectKey(uint8_t kind) {
 }
 
 struct DiagLinkCounters {
+    uint32_t apScanFailures; // failed starts or completions since boot
     uint32_t sessions;  // companion mode entries
     uint32_t rxFrames;  // complete frames read by the decoder (valid length, before JSON parsing)
     uint32_t txFrames;  // frames written whole (every kind); a torn frame is NOT counted here
@@ -84,6 +85,7 @@ inline DiagLinkCounters &diagLink() {
 #if defined(LITE_VERSION)
 // LITE builds compile `diag` out for app-slot headroom (src/companion/config.h COMPANION_HAS_DIAG):
 // the hooks below are no-ops, nothing reads the counters and CAPS does not advertise features.diag.
+inline void diagNoteApScanFailure() {}
 inline void diagNoteSession() {}
 inline void diagNoteRxFrame() {}
 inline void diagNoteTxFrame() {}
@@ -92,6 +94,7 @@ inline void diagNoteBusy() {}
 inline void diagNoteRxReject(DiagRxReject) {}
 inline void diagNoteErr(uint32_t) {}
 #else
+inline void diagNoteApScanFailure() { diagInc(diagLink().apScanFailures); }
 inline void diagNoteSession() { diagInc(diagLink().sessions); }
 inline void diagNoteRxFrame() { diagInc(diagLink().rxFrames); }
 inline void diagNoteTxFrame() { diagInc(diagLink().txFrames); }

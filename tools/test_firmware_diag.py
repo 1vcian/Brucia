@@ -85,7 +85,9 @@ int main() {
         check(a.err[DIAG_ERR_400] == UINT32_MAX, "err bucket saturates");
         a.err[DIAG_ERR_400] = 0;
     }
-    check(sizeof(DiagLinkCounters) == 4 * (5 + DIAG_RX_REJECT_KINDS + DIAG_ERR_BUCKETS), "fixed size, no padding");
+    diagNoteApScanFailure();
+    check(diagLink().apScanFailures == 1, "AP scan failure counted");
+    check(sizeof(DiagLinkCounters) == 4 * (6 + DIAG_RX_REJECT_KINDS + DIAG_ERR_BUCKETS), "fixed size, no padding");
     PrintSink sink;
     diagWriteLink(diagLink(), sink);
     std::printf("%d/%d checks passed\n", checks - failures, checks);

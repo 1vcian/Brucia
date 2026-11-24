@@ -7,6 +7,10 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+Fixed Wi-Fi AP subscriptions getting stuck after a scan fails to start or finish.
+Failed scans retry after one second. Device diagnostics show the failure count
+on firmware that supports it.
+
 Registered polling and teardown for companion streams. Added portable local PCAP
 report recipes and a download catalog with versioned artifacts and checksums.
 

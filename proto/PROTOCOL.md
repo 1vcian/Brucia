@@ -822,6 +822,11 @@ above is what makes cancellation prompt. Card removal/swap fixtures remain a har
 
 ### Recovery diagnostics (`diag`, additive)
 
+The optional `d.drops.wifi_ap_scan_failures` counter records failed asynchronous
+AP scan starts and completions since boot (saturating uint32). While subscribed,
+the firmware waits at least one second before retrying a failed scan.
+
+
 Firmware with literal `features.diag: true` in CAPS answers `CMD {cmd:"diag"}` with one ACK.
 LITE builds report `features.diag: false` and answer `diag` with ERR 501 (see `features`).
 There is no automatic telemetry: the counters live in RAM only, nothing is sent unless the
