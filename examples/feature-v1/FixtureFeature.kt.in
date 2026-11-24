@@ -1,0 +1,14 @@
+package app.brucia.features.example
+
+import androidx.compose.material3.Text
+import app.brucia.features.FeatureDescriptor
+import app.brucia.features.FeatureScreenBinding
+import app.brucia.ui.FeatureScreen
+
+internal val fixtureDescriptor = FeatureDescriptor(
+    "@ID@", @TAB@, "Capture fixture", "Show the number of packets in a local fixture",
+)
+
+internal fun fixtureBinding(packetCount: Int) = FeatureScreenBinding<FeatureScreen>(
+    fixtureDescriptor.id, screen = { Text("Packets: $packetCount") },
+)

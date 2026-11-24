@@ -58,6 +58,13 @@ jobs:
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           packages: platform-tools platforms;android-37.0 build-tools;${{ env.ANDROID_BUILD_TOOLS }}
+      - name: Compile the v1 contributor example and resolve its registration
+        run: |
+          mkdir -p android/app/src/debug/java/app/brucia
+          python3 tools/new_feature.py org.example.fixture 101 android/app/src/debug/java/app/brucia/FixtureFeature.kt
+          cp examples/feature-v1/FixtureRegistrationTest.kt android/app/src/test/java/app/brucia/
+          (cd android && ./gradlew :app:testDebugUnitTest --tests '*FixtureRegistrationTest')
+          rm android/app/src/{debug/java/app/brucia/FixtureFeature,test/java/app/brucia/FixtureRegistrationTest}.kt
       # verifyPaparazziDebug runs the unit tests with paparazzi.test.verify set, so every screenshot
       # test is compared with its committed baseline (src/test/snapshots). The plain
       # testDebugUnitTest task only renders: Paparazzi 2.0.0-alpha05.1 verifies nothing without

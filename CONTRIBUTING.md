@@ -287,6 +287,42 @@ These are internal source boundaries, not a public SDK. Lifecycle/late-result an
 missing-capability checks are in `CompanionLinkFlowTest`; parser/session/iButton
 regressions also run with `python3 tools/test_android_logic.py`.
 
+## Source template v1 and local fixture packs
+
+Generate a phone-only Kotlin example in a new file with
+`python3 tools/new_feature.py org.example.fixture 101 FixtureFeature.kt`.
+Move the source into the app's feature package, give it a package specific to your
+contribution, and choose an unused tab and descriptor ID. Include its descriptor
+in the appropriate BuiltinFeatures category and its binding in BuiltinFeatureScreens.
+Pass the packet count from your fixture to the binding. The example registration
+test in `examples/feature-v1/` shows the same wiring in isolation. The Android CI
+job generates, compiles and tests the example. Template v1 targets the Kotlin
+source interfaces in this checkout. The generated example requires no BruceJS API.
+
+Firmware command families register an identifier and a handler in
+`src/companion/command_features.def`. Declare the handler alongside the existing
+dispatchers. Entries run in file order. Return true after every recognized command,
+including unsupported hardware and errors. Keep board gates and resource cleanup
+in the owning service. The existing CI matrix builds T-Embed CC1101, Core4MB and
+Cardputer.
+
+The v1 local data-pack tool carries a single classic raw 802.11 PCAP fixture.
+To try the contributed synthetic fixture from the repository root:
+
+```sh
+python3 tools/pcap_pack.py import examples/feature-v1/synthetic.json sample.pcap
+python3 tools/pcap_pack.py export sample.pcap sample.json --source "Synthetic management-frame header generated for Brucia" --license CC0-1.0
+cmp examples/feature-v1/synthetic.json sample.json
+```
+
+Open the extracted file in Android's **PCAP dissect** tool. Import and export
+require a new output path. The JSON contains a format ID, integer version, source,
+license, base64 capture and SHA-256 of the decoded bytes. The reader checks the
+exact field set, size limits (1 MiB capture, 1,400,000 bytes JSON), PCAP link type,
+record boundaries and digest before writing. Provenance is supplied by the author.
+Version 1 supports passive fixture data only. Recipe execution and online catalog
+distribution remain future work.
+
 ## Style & conventions
 
 - **English everywhere**: code, comments, docs, UI strings, commit messages.

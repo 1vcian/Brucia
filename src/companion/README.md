@@ -25,7 +25,7 @@ by `internal.h`. The USB wire contract remains in
 
 A service implements `dispatch…Command(const CommandRequest&)`: return `false`
 when it does not recognize the command, or handle it and return `true` after
-sending its response. The central registry tries these handlers, then preserves
+sending its response. The ordered list in `command_features.def` registers one ID per family. The dispatcher tries these handlers, then preserves
 the legacy CLI fallback. Recognition must be distinct from execution success: a
 failed recognized command must not fall through and execute another CLI path.
 Match the exact verb (`cmd == "v" || cmd.startsWith("v ")`), never a bare-word prefix: a

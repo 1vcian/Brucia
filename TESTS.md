@@ -4,6 +4,22 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Source contribution and fixture packs — 2026-11-24 (unreleased)
+
+All 13 command dispatch/Stop host regressions passed against the ordered command
+family registry. The NewDeviceModel firmware compiled and linked with PlatformIO
+under Python 3.11. The default installation used unsupported Python 3.15.
+The local build covered the contributor board template. Physical acceptance and
+the remote board matrix are pending.
+
+The v1 generator produced a Kotlin feature in the debug source set. Gradle
+compiled it and passed FixtureRegistrationTest using the app's actual catalog
+and screen registry. Temporary generated sources were removed after the test.
+All three host contribution tests passed, covering the template, round-trip,
+limits, unsupported fields/version, corruption, duplicate keys and truncation.
+Running the documented CLI import/export commands reproduced the synthetic pack
+byte for byte. Existing PCAP screen evidence is in the next section.
+
 ## PCAP and Gadgets feature migration — 2026-11-24 (unreleased)
 
 Base `9d086b0e`. The Android unit suite passed all 1,223 tests. Lint reported

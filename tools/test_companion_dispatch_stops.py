@@ -2,7 +2,7 @@
 """Stop frames and unknown `<verb>_<suffix>` commands never reach another command's handler.
 
 Every companion CMD goes through handleCompanionCommand (src/companion/commands.cpp): a few inline
-tests, then the dispatchers in the order of its `handlers[]` array, each matching with ordered
+tests, then the dispatchers in command_features.def order, each matching with ordered
 `cmdStr == "x"` / `cmdStr.startsWith("x")` tests where the first match wins, then the Bruce CLI.
 A bare-word prefix (no trailing space) also matches `x_stop` or `x_anything`: batch 17 found that
 `ir_jammer_stop` started an IR jam window, `ble_ibeacon_stop` a broadcast, `jam_detect_stop` a
@@ -152,14 +152,15 @@ def handlers_in(fname, code, masked, start, end):
 
 
 def dispatch_chain(sources, variant):
-    """Ordered handlers a CMD meets: commands.cpp inline tests, then each dispatcher of handlers[].
+    """Ordered handlers a CMD meets: commands.cpp inline tests, then each registered dispatcher.
     variant 'full' takes the first definition of a dispatcher, 'lite' the last (the #else one)."""
     cmd_code, cmd_masked = mask(sources["commands.cpp"])
     (s, e), = function_bodies(cmd_code, cmd_masked, r"void handleCompanionCommand\([^)]*\)")
     cut = cmd_code.index("const CommandRequest request{", s)
     chain = handlers_in("commands.cpp", cmd_code, cmd_masked, s, cut)
-    names = re.findall(r"\b(dispatch\w+Command),", cmd_code[cut:e])
-    assert names, "handlers[] array not found in commands.cpp"
+    names = re.findall(r"BRUCIA_COMMAND_FEATURE\(\w+, (dispatch\w+Command)\)",
+                       (Path(__file__).resolve().parents[1] / "src/companion/command_features.def").read_text())
+    assert names, "no registered command families in command_features.def"
     for name in names:
         defs = []
         for fname, text in sources.items():

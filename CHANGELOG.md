@@ -7,6 +7,10 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+Added a static firmware command-family registry, a versioned Kotlin source template
+with a CI registration example, and local import/export of bounded PCAP fixture packs.
+
+
 - Migrated PCAP dissect and Gadgets into feature packages with explicit screen state
   and actions. PCAP keeps its independent phone-only session; Gadgets receives the
   existing iButton, clock, speaker, microphone and ESP-NOW services. Neither screen

@@ -173,6 +173,12 @@ the master; a worker report is not a substitute for those checks.
 
 ## Proposed extension architecture
 
+Implemented source integration includes the ordered firmware command-family list,
+the v1 Android source template, and local PCAP fixture packs. See CONTRIBUTING.md
+for the working example. Stream/lifecycle registration, shared resource ownership,
+recipe compatibility and a catalog remain proposals.
+
+
 Design proposal, not an implemented plugin SDK. Stabilization remains first;
 introduce these boundaries by migrating existing features, not rewriting the app.
 Track execution in the maintenance backlog (E01–E05).

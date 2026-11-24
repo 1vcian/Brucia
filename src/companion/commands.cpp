@@ -8,6 +8,20 @@
 
 namespace brucia {
 namespace companion {
+// Repeated IDs fail compilation as duplicate enumerators. Board-specific availability
+// and terminal error replies belong to each registered handler.
+enum class CommandFeatureId {
+#define BRUCIA_COMMAND_FEATURE(id, handler) id,
+#include "command_features.def"
+#undef BRUCIA_COMMAND_FEATURE
+};
+using CommandFeatureHandler = bool (*)(const CommandRequest &);
+static constexpr CommandFeatureHandler commandFeatures[] = {
+#define BRUCIA_COMMAND_FEATURE(id, handler) handler,
+#include "command_features.def"
+#undef BRUCIA_COMMAND_FEATURE
+};
+
 // While routeCommand runs a CLI command: the capture device and the task running it. usbConsole()
 // appends to it only from that task, so text from other tasks never touches the String.
 static SerialDevice *volatile g_cliCapture = nullptr;
@@ -266,20 +280,7 @@ void handleCompanionCommand(JsonDocument &in, uint32_t id, CompanionSession &ses
             break;
         }
         const CommandRequest request{cmdStr, id, in, session};
-        using Handler = bool (*)(const CommandRequest &);
-        static const Handler handlers[] = {
-            dispatchStorageCommand,
-            dispatchWifiCommand,
-            dispatchSubghzCommand,
-            dispatchInfraredCommand,
-            dispatchNfcCommand,
-            dispatchBluetoothCommand,
-            dispatchAudioCommand,
-            dispatchNrf24Command,
-            dispatchSystemCommand,
-            dispatchNetworkCommand,
-        };
-        for (Handler handler : handlers) {
+        for (auto handler : commandFeatures) {
             if (handler(request)) return;
         }
 

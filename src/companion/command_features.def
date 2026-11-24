@@ -1,0 +1,11 @@
+// Ordered built-in command families. Keep existing precedence and board guards.
+BRUCIA_COMMAND_FEATURE(storage, dispatchStorageCommand)
+BRUCIA_COMMAND_FEATURE(wifi, dispatchWifiCommand)
+BRUCIA_COMMAND_FEATURE(subghz, dispatchSubghzCommand)
+BRUCIA_COMMAND_FEATURE(infrared, dispatchInfraredCommand)
+BRUCIA_COMMAND_FEATURE(nfc, dispatchNfcCommand)
+BRUCIA_COMMAND_FEATURE(bluetooth, dispatchBluetoothCommand)
+BRUCIA_COMMAND_FEATURE(audio, dispatchAudioCommand)
+BRUCIA_COMMAND_FEATURE(nrf24, dispatchNrf24Command)
+BRUCIA_COMMAND_FEATURE(system, dispatchSystemCommand)
+BRUCIA_COMMAND_FEATURE(network, dispatchNetworkCommand)
