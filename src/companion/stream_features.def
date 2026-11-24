@@ -1,0 +1,25 @@
+// Subscription IDs and lifecycle hooks in service and teardown order.
+BRUCIA_STREAM(WifiAp, "wifi.ap", pollAccessPoints(), WiFi.scanDelete())
+BRUCIA_STREAM(SubRaw, "subghz.raw", subghzService(), subghzStop())
+#ifdef COMPANION_HAS_CC1101
+BRUCIA_STREAM(SubSpectrum, "subghz.spectrum", subghzSpecService(), subghzSpecStop())
+#else
+BRUCIA_STREAM(SubSpectrum, "subghz.spectrum", (void)0, (void)0)
+#endif
+BRUCIA_STREAM(BleScan, "ble.scan", bleService(), bleStop())
+BRUCIA_STREAM(WifiSta, "wifi.sta", staService(), staStop())
+BRUCIA_STREAM(WifiProbe, "wifi.probe", probeService(), probeStop())
+BRUCIA_STREAM(WifiMonitor, "wifi.monitor", monService(), monStop())
+#ifndef LITE_VERSION
+BRUCIA_SERVICE(evilPortalService(), evilPortalStop(0, false))
+#endif
+#ifdef COMPANION_HAS_MIC
+BRUCIA_STREAM(MicSpectrum, "mic.spectrum", micService(), micStop())
+#else
+BRUCIA_STREAM(MicSpectrum, "mic.spectrum", (void)0, (void)0)
+#endif
+#ifdef COMPANION_HAS_MIC
+BRUCIA_STREAM(MicPcm, "mic.pcm", micPcmService(), micPcmStop())
+#else
+BRUCIA_STREAM(MicPcm, "mic.pcm", (void)0, (void)0)
+#endif

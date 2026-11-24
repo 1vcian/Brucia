@@ -261,6 +261,24 @@ bool companionPollStop() {
     return false;
 }
 
+enum class StreamId {
+    Unknown,
+#define BRUCIA_STREAM(id, name, poll, close) id,
+#define BRUCIA_SERVICE(poll, close)
+#include "stream_features.def"
+#undef BRUCIA_SERVICE
+#undef BRUCIA_STREAM
+};
+
+static StreamId findStream(const char *stream) {
+#define BRUCIA_STREAM(id, name, poll, close) if (strcmp(stream, name) == 0) return StreamId::id;
+#define BRUCIA_SERVICE(poll, close)
+#include "stream_features.def"
+#undef BRUCIA_SERVICE
+#undef BRUCIA_STREAM
+    return StreamId::Unknown;
+}
+
 static void runCompanionUSB(bool headless) {
     // When entered from the menu, show a QR to the latest release so the user can grab the
     // companion app, then wait for it to connect. (Press OK/ESC on the QR to continue.)
@@ -293,6 +311,33 @@ static void runCompanionUSB(bool headless) {
     bool subBleOn = false;         // ble.scan stream subscription (for the status screen)
     bool subGhzOn = false;         // subghz.raw stream subscription (for the status screen)
     bool scanning = false;         // an async WiFi scan is in flight
+    const auto pollAccessPoints = [&]() {
+        // 2) Service the wifi.ap stream: run back-to-back async scans and emit
+        //    each access point as an EVENT. The radio is free because the
+        //    transport is USB, not WiFi.
+        if (subWifiAp) {
+            if (!scanning) {
+                WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/true);
+                scanning = true;
+            } else {
+                int n = WiFi.scanComplete();
+                if (n >= 0) {
+                    for (int i = 0; i < n; i++) {
+                        sendWifiApEvent(
+                            WiFi.BSSIDstr(i),
+                            WiFi.SSID(i),
+                            WiFi.channel(i),
+                            WiFi.RSSI(i),
+                            encToStr(WiFi.encryptionType(i))
+                        );
+                    }
+                    WiFi.scanDelete();
+                    scanning = false; // a fresh scan starts next iteration
+                }
+                // n == WIFI_SCAN_RUNNING: keep waiting
+            }
+        }
+    };
     uint32_t lastFrame = millis(); // for auto-restoring screen/LED if the app vanishes
     // App-mode input lock: once the app is connected (helloSeen), the device is "locked" to the
     // phone - the wheel/OK and a short ESC tap do nothing, so the only control is the app. A
@@ -380,9 +425,9 @@ static void runCompanionUSB(bool headless) {
                     }
 
                     case MSG_SUB: {
-                        const char *stream = in["d"]["stream"] | "";
+                        const auto stream = findStream(in["d"]["stream"] | "");
                         bool on = in["d"]["on"] | false;
-                        if (strcmp(stream, "ble.scan") == 0) {
+                        if (stream == StreamId::BleScan) {
                             int code = 0;
                             if (on) code = bleStart();
                             else bleStop();
@@ -391,7 +436,7 @@ static void runCompanionUSB(bool headless) {
                             else if (code == 409) sendErr(id, 409, "ble hid session active (ble_hid_end first)");
                             else sendErr(id, 503, "ble init failed");
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
-                        } else if (strcmp(stream, "subghz.raw") == 0) {
+                        } else if (stream == StreamId::SubRaw) {
                             bool started = true;
                             if (on) {
 #if defined(COMPANION_HAS_CC1101)
@@ -407,7 +452,7 @@ static void runCompanionUSB(bool headless) {
                             if (started) sendAck(id, true);
                             else sendErr(id, 503, "sub-ghz receiver init failed");
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
-                        } else if (strcmp(stream, "subghz.spectrum") == 0) {
+                        } else if (stream == StreamId::SubSpectrum) {
 #if defined(COMPANION_HAS_CC1101)
                             // Optional sweep window (MHz); absent fields default to 300-348 MHz,
                             // step 1 MHz. Invalid values get ERR 400 before any stream changes.
@@ -443,7 +488,7 @@ static void runCompanionUSB(bool headless) {
 #else
                             sendErr(id, 501, "no CC1101 on this board");
 #endif
-                        } else if (strcmp(stream, "wifi.ap") == 0) {
+                        } else if (stream == StreamId::WifiAp) {
                             subWifiAp = on;
                             if (on) {
                                 staStop();   // wifi.ap scan, the sta sniffer, the probe
@@ -458,7 +503,7 @@ static void runCompanionUSB(bool headless) {
                             }
                             sendAck(id, true);
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
-                        } else if (strcmp(stream, "wifi.sta") == 0) {
+                        } else if (stream == StreamId::WifiSta) {
                             if (on) {
                                 subWifiAp = false; // mutually exclusive with the AP scan
                                 probeStop();       // and with the probe sniffer (shared radio)
@@ -471,7 +516,7 @@ static void runCompanionUSB(bool headless) {
                             }
                             sendAck(id, true);
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
-                        } else if (strcmp(stream, "wifi.probe") == 0) {
+                        } else if (stream == StreamId::WifiProbe) {
                             if (on) {
                                 subWifiAp = false; // mutually exclusive with wifi.ap and wifi.sta
                                 staStop();
@@ -484,7 +529,7 @@ static void runCompanionUSB(bool headless) {
                             }
                             sendAck(id, true);
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
-                        } else if (strcmp(stream, "wifi.monitor") == 0) {
+                        } else if (stream == StreamId::WifiMonitor) {
                             // Full 802.11 monitor-mode capture. Optional channel lock + BSSID filter.
                             if (on) {
                                 subWifiAp = false; // shares the Wi-Fi radio with ap/sta/probe
@@ -500,7 +545,7 @@ static void runCompanionUSB(bool headless) {
                             }
                             sendAck(id, true);
                             drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
-                        } else if (strcmp(stream, "mic.spectrum") == 0) {
+                        } else if (stream == StreamId::MicSpectrum) {
 #ifdef COMPANION_HAS_MIC
                             if (on) speakerPlayRelease("superseded"); // mic shares the I2S peripherals
                             if (on) fmAudioRelease(true); // an FM mic source reads the same mic
@@ -510,7 +555,7 @@ static void runCompanionUSB(bool headless) {
 #else
                             sendErr(id, 501, "no microphone on this board");
 #endif
-                        } else if (strcmp(stream, "mic.pcm") == 0) {
+                        } else if (stream == StreamId::MicPcm) {
 #ifdef COMPANION_HAS_MIC
                             if (on) speakerPlayRelease("superseded"); // mic shares the I2S peripherals
                             if (on) fmAudioRelease(true); // an FM mic source reads the same mic
@@ -535,63 +580,11 @@ static void runCompanionUSB(bool headless) {
             lastFrame = millis();
         }
 
-        // 2) Service the wifi.ap stream: run back-to-back async scans and emit
-        //    each access point as an EVENT. The radio is free because the
-        //    transport is USB, not WiFi.
-        if (subWifiAp) {
-            if (!scanning) {
-                WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/true);
-                scanning = true;
-            } else {
-                int n = WiFi.scanComplete();
-                if (n >= 0) {
-                    for (int i = 0; i < n; i++) {
-                        sendWifiApEvent(
-                            WiFi.BSSIDstr(i),
-                            WiFi.SSID(i),
-                            WiFi.channel(i),
-                            WiFi.RSSI(i),
-                            encToStr(WiFi.encryptionType(i))
-                        );
-                    }
-                    WiFi.scanDelete();
-                    scanning = false; // a fresh scan starts next iteration
-                }
-                // n == WIFI_SCAN_RUNNING: keep waiting
-            }
-        }
-
-        // 3) Service the sub-ghz raw stream.
-        subghzService();
-
-        // 3b) Service the sub-ghz spectrum sweep stream (CC1101).
-#if defined(COMPANION_HAS_CC1101)
-        subghzSpecService();
-#endif
-
-        // 4) Service the BLE scan stream.
-        bleService();
-
-        // 5) Service the wifi.sta station sniffer stream.
-        staService();
-
-        // 5b) Service the wifi.probe (probe-request) sniffer stream.
-        probeService();
-
-        // 5c) Service the wifi.monitor full 802.11 capture stream.
-        monService();
-
-        // 5d) Service the Evil Portal (captive-portal AP) if one is running.
-#if !defined(LITE_VERSION)
-        evilPortalService();
-#endif
-
-        // 6) Service the mic.spectrum stream (onboard microphone).
-#ifdef COMPANION_HAS_MIC
-        micService();
-        // 6b) Service the raw mic.pcm stream (gapless continuous capture for phone DSP).
-        micPcmService();
-#endif
+#define BRUCIA_STREAM(id, name, poll, close) poll;
+#define BRUCIA_SERVICE(poll, close) poll;
+#include "stream_features.def"
+#undef BRUCIA_SERVICE
+#undef BRUCIA_STREAM
 
         // 7) Service the FM audio I2S sink (phone PCM or onboard mic -> Si4713).
 #ifdef COMPANION_HAS_FM_AUDIO
@@ -604,22 +597,11 @@ static void runCompanionUSB(bool headless) {
         vTaskDelay(1);
     }
 
-    WiFi.scanDelete();
-    subghzStop();
-#if defined(COMPANION_HAS_CC1101)
-    subghzSpecStop();
-#endif
-    bleStop();
-    staStop();
-    probeStop();
-    monStop();
-#if !defined(LITE_VERSION)
-    evilPortalStop(0, false); // tear down the Evil Portal AP if a session was left running
-#endif
-#ifdef COMPANION_HAS_MIC
-    micStop();
-    micPcmStop(); // release the continuous mic capture if a mic.pcm sub was left running
-#endif
+#define BRUCIA_STREAM(id, name, poll, close) close;
+#define BRUCIA_SERVICE(poll, close) close;
+#include "stream_features.def"
+#undef BRUCIA_SERVICE
+#undef BRUCIA_STREAM
     stopCompanionAudio();
     stopCompanionStorage();
     stopCompanionNetwork();

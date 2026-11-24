@@ -286,7 +286,7 @@ class FirmwareGuards(unittest.TestCase):
         self.assertIn("return 503;", start)
         self.assertLess(start.find("return 409;"), start.find("NimBLEDevice::init("))
         comp = strip_comments(read("src/companion/companion.cpp"))
-        sub = comp[comp.find('strcmp(stream, "ble.scan") == 0'):comp.find('strcmp(stream, "subghz.raw") == 0')]
+        sub = comp[comp.find('stream == StreamId::BleScan'):comp.find('stream == StreamId::SubRaw')]
         self.assertIn("subBleOn = on && code == 0;", sub)
         self.assertIn("sendErr(id, 409,", sub)
         self.assertIn("sendErr(id, 503,", sub)

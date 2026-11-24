@@ -320,8 +320,17 @@ require a new output path. The JSON contains a format ID, integer version, sourc
 license, base64 capture and SHA-256 of the decoded bytes. The reader checks the
 exact field set, size limits (1 MiB capture, 1,400,000 bytes JSON), PCAP link type,
 record boundaries and digest before writing. Provenance is supplied by the author.
-Version 1 supports passive fixture data only. Recipe execution and online catalog
-distribution remain future work.
+The [fixture catalog](docs/catalog/index.html) distributes packs and compatible
+recipes. Download both JSON files, then run
+`python3 tools/fixture_recipe.py capture-summary.json synthetic.json`.
+Recipe v1 accepts one validated local PCAP pack v1. Its steps select packet count,
+byte count or capture digest, once each. New catalog entries include the artifact
+format, version, byte length, SHA-256, source and license in `docs/catalog/catalog.json`.
+
+Firmware subscriptions are registered in `src/companion/stream_features.def`.
+Declare the wire name, polling hook and teardown hook together. Preserve service
+order and keep unsupported streams recognizable so their SUB handlers can return
+the existing board-specific error.
 
 ## Style & conventions
 

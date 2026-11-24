@@ -7,6 +7,9 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+Registered polling and teardown for companion streams. Added portable local PCAP
+report recipes and a download catalog with versioned artifacts and checksums.
+
 Added a static firmware command-family registry, a versioned Kotlin source template
 with a CI registration example, and local import/export of bounded PCAP fixture packs.
 

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "synthetic",
+      "file": "synthetic.json",
+      "format": "org.brucia.fixture.pcap",
+      "version": 1,
+      "license": "CC0-1.0",
+      "source": "Synthetic management-frame header generated for Brucia",
+      "bytes": 337,
+      "sha256": "dfdb3836edc58a91dcf91f622e6e64e8f77e249fccf4ed8c76c51ee2925f980d"
+    },
+    {
+      "id": "capture-summary",
+      "file": "capture-summary.json",
+      "format": "org.brucia.fixture.recipe",
+      "version": 1,
+      "license": "AGPL-3.0-or-later",
+      "source": "Brucia project",
+      "bytes": 164,
+      "sha256": "62a4d36caccd4f0127254a0c7511ab5d254dfe08d921f9f6335efd7ecf524b93"
+    }
+  ]
+}

@@ -175,8 +175,9 @@ the master; a worker report is not a substitute for those checks.
 
 Implemented source integration includes the ordered firmware command-family list,
 the v1 Android source template, and local PCAP fixture packs. See CONTRIBUTING.md
-for the working example. Stream/lifecycle registration, shared resource ownership,
-recipe compatibility and a catalog remain proposals.
+for the working example. The firmware stream registry binds wire names to service and teardown hooks.
+The static fixture catalog distributes v1 PCAP packs and compatible local report recipes.
+Broader shared resource ownership remains proposed.
 
 
 Design proposal, not an implemented plugin SDK. Stabilization remains first;

@@ -1,7 +1,9 @@
+import hashlib
 import json
 from pathlib import Path
 import unittest
 
+from fixture_recipe import run
 from new_feature import generate
 from pcap_pack import MAX_PACK, export_pack, import_pack
 
@@ -28,6 +30,25 @@ class ContributionTest(unittest.TestCase):
             import_pack(FIXTURE.read_bytes().replace(b'"version":', b'"version":1,"version":'))
         with self.assertRaises(ValueError):
             export_pack(import_pack(FIXTURE.read_bytes())[:-1], "fixture", "CC0")
+
+    def test_catalog_downloads_and_recipe(self):
+        catalog = FIXTURE.parents[2] / "docs/catalog"
+        entries = json.loads((catalog / "catalog.json").read_bytes())["entries"]
+        for entry in entries:
+            data = (catalog / entry["file"]).read_bytes()
+            self.assertEqual((len(data), hashlib.sha256(data).hexdigest()), (entry["bytes"], entry["sha256"]))
+            self.assertIn(f'href="{entry["file"]}"', (catalog / "index.html").read_text())
+            for key in ("format", "version"):
+                self.assertEqual(json.loads(data)[key], entry[key])
+        pack = (catalog / "synthetic.json").read_bytes()
+        self.assertEqual(pack, FIXTURE.read_bytes())
+        recipe = (catalog / "capture-summary.json").read_bytes()
+        self.assertEqual(run(recipe, pack), {"packet-count": 1, "capture-bytes": 64,
+                                             "capture-sha256": json.loads(pack)["sha256"]})
+        for patch in [dict(steps=["shell"]), dict(steps=[]), dict(steps=["packet-count"]*2),
+                      dict(input="org.brucia.fixture.pcap/2"), dict(version=True)]:
+            with self.subTest(patch=patch), self.assertRaises(ValueError):
+                run(json.dumps(dict(json.loads(recipe), **patch)).encode(), pack)
 
     def test_generator(self):
         self.assertIn('"org.example.fixture", 101', generate("org.example.fixture", 101))

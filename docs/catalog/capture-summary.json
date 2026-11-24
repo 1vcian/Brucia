@@ -1,0 +1,6 @@
+{
+  "format": "org.brucia.fixture.recipe",
+  "version": 1,
+  "input": "org.brucia.fixture.pcap/1",
+  "steps": ["packet-count", "capture-bytes", "capture-sha256"]
+}

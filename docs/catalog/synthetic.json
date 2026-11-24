@@ -1,0 +1,8 @@
+{
+  "format": "org.brucia.fixture.pcap",
+  "version": 1,
+  "source": "Synthetic management-frame header generated for Brucia",
+  "license": "CC0-1.0",
+  "sha256": "2ddcfca8f58ee673f0736b87f798803b67240f68eb1e7640d198ac0ae71dd02d",
+  "capture": "1MOyoQIABAAAAAAAAAAAAP//AABpAAAAAAAAAAAAAAAYAAAAGAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+}

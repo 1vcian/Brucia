@@ -4,6 +4,19 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Stream lifecycle and portable fixture recipes — 2026-11-24 (unreleased)
+
+The NewDeviceModel firmware compiled and linked with the stream registry.
+All 37 radio guard regressions passed. The host registry test preprocessed all
+eight combinations of LITE, microphone and CC1101 flags and checked stream names,
+order and conditional hooks. Only the template board was built locally.
+Physical teardown timing remains unmeasured.
+
+All four contribution tests passed. They check catalog download hashes and sizes,
+pack compatibility, rejection of invalid recipe steps and versions, and the
+expected report for the synthetic frame. The documented CLI produced one packet,
+64 capture bytes and the expected digest.
+
 ## Source contribution and fixture packs — 2026-11-24 (unreleased)
 
 All 13 command dispatch/Stop host regressions passed against the ordered command
