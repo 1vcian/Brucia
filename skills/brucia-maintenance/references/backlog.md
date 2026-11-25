@@ -35,7 +35,10 @@ firmware build recovery and the six real-board build fixes shipped in 0.1.15.
 NRF24 Stop, FM ownership and saved-RF replay guards are already fixed in software.
 The owner authorized publication on 2026-11-18: 0.1.16 is published at `9b2392c9`,
 with a signed APK and freshly built T-Embed CC1101 firmware, re-downloaded and hash-verified.
-Other board binaries remain in 0.1.15. The subsequent modularization and contributor-template fixes are unreleased.
+Other board binaries remain in 0.1.15. The subsequent modularization, contributor-template,
+AP-scan, heap and export fixes were published in 0.1.17 on 2026-11-25 (`3572d2e1`, tag `v0.1.17`):
+signed APK `7ac13fde…3787` and T-Embed firmware `8b4b667f…e1b4`, assets re-downloaded and hash-verified
+by release.sh. Phone OTG install/demo of this pair and the three launcher flash budgets remain open.
 No new hardware acceptance is implied by the changes above.
 
 ## Public review follow-up — 2026-11-11, base `942287e5`
