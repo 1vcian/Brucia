@@ -34,24 +34,26 @@ class MainActivityReceiverTest {
     @Test
     fun recreateKeepsOneUsbPermissionReceiverAndDestroyUnregistersIt() {
         assertEquals("no leftover receiver before launch", 0, registeredReceivers(USB_PERMISSION))
-        val scenario = ActivityScenario.launch(MainActivity::class.java)
-        waitUntil("permission receiver registered") { registeredReceivers(USB_PERMISSION) == 1 }
-        assertEquals(1, registeredReceivers(UsbManager.ACTION_USB_DEVICE_ATTACHED))
+        // Other components can already be listening for the system USB attach action.
+        val attachAction = UsbManager.ACTION_USB_DEVICE_ATTACHED
+        val initialAttachCount = registeredReceivers(attachAction)
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            waitUntil("permission receiver registered") { registeredReceivers(USB_PERMISSION) == 1 }
+            assertEquals(initialAttachCount + 1, registeredReceivers(attachAction))
 
-        repeat(2) {
-            scenario.recreate()
-            assertEquals("one permission receiver after recreate", 1, registeredReceivers(USB_PERMISSION))
-            assertEquals("one attach receiver after recreate", 1, registeredReceivers(UsbManager.ACTION_USB_DEVICE_ATTACHED))
+            repeat(2) {
+                scenario.recreate()
+                assertEquals("one permission receiver after recreate", 1, registeredReceivers(USB_PERMISSION))
+                assertEquals("one attach receiver after recreate", initialAttachCount + 1, registeredReceivers(attachAction))
+            }
+
+            // Paused (still created): the attach receiver goes, the permission receiver stays.
+            scenario.moveToState(Lifecycle.State.STARTED)
+            assertEquals(1, registeredReceivers(USB_PERMISSION))
+            assertEquals(initialAttachCount, registeredReceivers(attachAction))
         }
-
-        // Paused (still created): the attach receiver goes, the permission receiver stays.
-        scenario.moveToState(Lifecycle.State.STARTED)
-        assertEquals(1, registeredReceivers(USB_PERMISSION))
-        assertEquals(0, registeredReceivers(UsbManager.ACTION_USB_DEVICE_ATTACHED))
-
-        scenario.close()
         assertEquals("permission receiver unregistered on destroy", 0, registeredReceivers(USB_PERMISSION))
-        assertEquals(0, registeredReceivers(UsbManager.ACTION_USB_DEVICE_ATTACHED))
+        assertEquals(initialAttachCount, registeredReceivers(attachAction))
     }
 
     private companion object {

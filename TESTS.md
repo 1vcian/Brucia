@@ -4,6 +4,36 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Publication readiness — 2026-11-25
+
+Base `74ff0a70`, nine commits after v0.1.16, plus local Android changes. On API 36 the full
+instrumented suite passed 84 cases and skipped its opt-in benchmark. A separate run with
+`decoderBenchmark=true` passed the benchmark. CatalogScreenSmokeTest opened each of the 52 tools
+and both auxiliary routes with a fresh disconnected ViewModel. This covers initial composition.
+Actions, peripherals and radio outcomes require their own evidence. The physical control
+checklist still has 488 unchecked rows. No physical device was available in this run.
+
+The first full run exposed a USB lifecycle test that counted pre-existing process listeners
+for the shared system attach action. The regression now checks the Activity adds exactly one
+and releases it on pause/destroy, while retaining the absolute check for its private action.
+The console rotation test now dismisses the keyboard and clicks the enabled Run button.
+It passed locally. The earlier CI timeout waiting for the command still needs a remote rerun.
+The dedicated ESP-NOW page and Gadgets now share the same availability check. JVM coverage
+includes absent Wi-Fi, legacy Wi-Fi support and explicit LITE omission.
+
+- Gradle offline: testDebugUnitTest (1,228 passed), verifyPaparazziDebug, assembleRelease,
+  lintRelease (one OldTargetApi warning) and connectedDebugAndroidTest passed.
+- Python unittest discovery under tools: 369 passed, three skipped. Both opt-in live store
+  checks subsequently passed (HTTPS catalog/asset and certificate trust). Node site tests: 17 passed.
+- The staged v0.1.16 APK and T-Embed binary matched both SHA256SUMS and the GitHub asset
+  digests. Android apksigner verified the APK signature (v2, one signer).
+- GitHub build run 45586775196 at the base passed Android build, protocol E2E and all three
+  firmware jobs. Android instrumentation failed on the console rotation case.
+- In full matrix run 45181696441 at 9d086b0e, 66 of 69 firmware jobs passed. Three compiled
+  but breached their partition usage limits: LAUNCHER_CYD-3248S035C at 98.03% (limit 98%),
+  LAUNCHER_elecrow-24B and LAUNCHER_elecrow-28B at 99.11% (limit 99%). A passing matrix
+  for the release candidate and a fresh physical acceptance run remain open.
+
 ## Audit fixes and per-operation heap profile — 2026-11-25
 
 Android debug build succeeded. All 1,227 JVM tests passed and lint reported

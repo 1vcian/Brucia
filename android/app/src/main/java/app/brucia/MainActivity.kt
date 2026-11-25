@@ -5280,6 +5280,8 @@ internal fun IrRemoteScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
 internal fun EspnowScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val status by vm.status.collectAsState()
+    val device by vm.device.collectAsState()
+    val espnowAvailable = device?.espNowAvailable == true
     val espnowStatus by vm.espnowStatus.collectAsState()
     val connected = status == "Connected"
     var espnowMsg by rememberSaveable { mutableStateOf("") }
@@ -5316,6 +5318,7 @@ internal fun EspnowScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
         }
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surface)) {
             Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                if (connected && !espnowAvailable) Text("ESP-NOW unavailable on this device")
                 OutlinedTextField(
                     value = espnowMsg,
                     onValueChange = { espnowMsg = it },
@@ -5325,7 +5328,7 @@ internal fun EspnowScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Button(
-                    enabled = connected && espnowMsg.isNotBlank(),
+                    enabled = connected && espnowAvailable && espnowMsg.isNotBlank(),
                     onClick = { vm.espnowSend(espnowMsg.trim()) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Broadcast (ESP-NOW)") }

@@ -12,7 +12,8 @@ that offloads computation to the phone. Format loosely follows
   summaries, and resolves Wi-Fi data addresses using both distribution flags.
 - Wi-Fi receiver subscriptions report driver setup errors. The interference
   detector uses the same Arduino layer to start and shut down Wi-Fi. LITE
-  firmware explicitly advertises the omitted ESP-NOW operation to the app.
+  firmware explicitly advertises the omitted ESP-NOW operation to the app. Both
+  the dedicated ESP-NOW page and Gadgets disable its broadcast control on these builds.
 
 
 Fixed Wi-Fi AP subscriptions getting stuck after a scan fails to start or finish.

@@ -7,6 +7,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CapsTest {
+    @Test fun espNowControlsRequireWifiAndRespectExplicitFirmwareOmission() {
+        val device = app.brucia.wardrive.DeviceInfo("test", "", "", emptyList())
+        assertFalse(device.espNowAvailable)
+        val wifiDevice = device.copy(caps = DeviceCaps(wifi = true))
+        assertTrue(wifiDevice.espNowAvailable)
+        val lite = app.brucia.wardrive.DeviceFeatures.fromJson(JSONObject().put("espnow_send", false))
+        assertFalse(wifiDevice.copy(features = lite).espNowAvailable)
+    }
+
     @Test fun verifiedFileTransfersRequireExplicitFirmwareSupport() {
         assertFalse(app.brucia.wardrive.DeviceFeatures.fromJson(null).verifiedFiles)
         assertFalse(app.brucia.wardrive.DeviceFeatures.fromJson(JSONObject().put("verified_files", "true")).verifiedFiles)

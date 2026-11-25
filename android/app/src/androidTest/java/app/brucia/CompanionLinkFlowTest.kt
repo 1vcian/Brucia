@@ -8,6 +8,7 @@ import android.net.Uri
 import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasAnySibling
@@ -404,13 +405,14 @@ class CompanionLinkFlowTest {
         compose.onNodeWithText("Connect over USB", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("wifi on").assertIsNotEnabled()
         compose.onNodeWithText("command").performTextReplacement("  info  ")
+        Espresso.closeSoftKeyboard()
         compose.onNodeWithText("Run").assertIsNotEnabled()
 
         val device = connect()
         rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, Configuration.ORIENTATION_LANDSCAPE)
         rotate(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
         compose.onNodeWithText("command").assertTextContains("  info  ")
-        compose.onNodeWithText("Run", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Run").assertIsEnabled().performClick()
         awaitUi("trimmed console command sent once") { device.commands.count { it == "info" } == 1 }
         compose.onNodeWithText("> info", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("Run").assertIsNotEnabled()

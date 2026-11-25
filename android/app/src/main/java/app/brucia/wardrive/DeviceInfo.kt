@@ -193,6 +193,8 @@ data class DeviceInfo(
     val rxMax: Int? = null,
     val rxBuf: Int? = null,  // CAPS d.rx_buf: RX buffer bytes the device allocated
 ) {
+    val espNowAvailable: Boolean get() = caps.wifi && !features.omits(DeviceFeatures.ESP_NOW)
+
     /**
      * Brightness the screen shows while on, for the brightness slider: the live level when the
      * firmware reports it and the screen is on, else the configured [screenBright] (-1 = unknown).
