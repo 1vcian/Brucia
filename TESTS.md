@@ -4,6 +4,25 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Candidate follow-up — 2026-11-25
+
+Commit `497e5be0` passed all six jobs in GitHub build run 45633515736, including the
+instrumented console/rotation regression and the three reference firmware builds.
+The published 0.1.15 and 0.1.16 APKs installed successively on an isolated API 36 emulator.
+Package Manager retained firstInstallTime and advanced versionCode from 1000115 to 1000116.
+
+The Mac connected over serial to the physical T-Embed running 2c1a8199a1c9.dirty.
+All five selected host acceptance checks passed, including 200 sequential pings,
+20 ordered burst replies, a scratch file upload/read-back/removal and 78 passive
+station events with silence after OFF. Reopening the port returned CAPS and PONG.
+These checks used the previously installed firmware. Phone OTG acceptance of the
+downloadable APK/firmware pair is pending. No physical Android device appeared in ADB.
+
+On the same physical T-Embed, the brute-force and raw transmit handlers each received
+a request with missing arguments. Both returned correlated ERR 400, followed by a
+matching PONG in the same USB session. This exercises rejection before RF setup.
+Android controls, an active Stop and RF output were outside this check.
+
 ## Publication readiness — 2026-11-25
 
 Base `74ff0a70`, nine commits after v0.1.16, plus local Android changes. On API 36 the full

@@ -7,6 +7,11 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+## [0.1.17] - 2026-11-25
+
+- Published a signed Android APK and freshly built T-Embed CC1101 firmware. Other board
+  binaries remain available in 0.1.15; no older binary is relabeled as 0.1.17.
+
 - File and RF map exports now report success only after a document opens, writes
   and closes. The PCAP viewer rejects unsupported link types, flags partial
   summaries, and resolves Wi-Fi data addresses using both distribution flags.

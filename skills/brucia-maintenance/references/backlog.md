@@ -7,7 +7,7 @@ checkpoint; the correction/release outcome supersedes them. Hardware gates stay 
 
 | Item | State | Next action / boundary |
 |---|---|---|
-| Publication readiness | HOLD general launch | Local catalog smoke 54/54, Android suite and release build pass. Repeat CI on the candidate (console rotation), resolve or scope out three launcher flash-budget failures, verify install/update and demo on the actual release pair. See TESTS.md, Publication readiness. |
+| Publication readiness | HOLD general launch | Local catalog smoke 54/54, Android suite and release build pass. All six candidate CI jobs passed at 497e5be0. Published APK upgrade passed on emulator. Mac-to-LilyGO checks passed on the installed dev firmware. Phone OTG install/demo on the downloadable pair and the three launcher flash budgets remain open. See TESTS.md, Publication readiness. |
 | A24-1 — AP scan stalls | FIXED, physical normal start/stop/restart PASS | Checked SDK start and completion results, one-second nonblocking retry after failure, diagnostic counter. Host fault injection and LilyGO firmware build passed. After flash, two 12 s windows yielded 22 and 17 AP events and zero after each OFF. Forced driver failures tested on host only. |
 | Post-flash heap delta | FIXED, physical repeat PASS | Isolated first-use radio allocations. Matched Arduino driver initialization and teardown and power down receivers on Stop only if they started Wi-Fi from off. Same cold LilyGO workload: heap delta 49,220 -> 20,172 bytes (threshold 32,768), 16/16 checks passed. Two-minute soak, no long-duration leak claim. |
 | A24-2 — false save confirmation | FIXED in software | The two document exports propagate missing-stream, write and close errors. |
