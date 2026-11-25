@@ -66,6 +66,7 @@ internal fun builtinFeatureScreens(
             val device by vm.device.collectAsState()
             GadgetsRoute(
                 connected = connected, caps = device?.caps,
+                espNowAvailable = device?.caps?.wifi == true && device?.features?.omits(app.brucia.wardrive.DeviceFeatures.ESP_NOW) != true,
                 ibutton = vm.ibutton, clock = vm.clock, speaker = vm.speaker,
                 mic = vm.micRecorder, espNow = vm.espNow, onConnect = onConnect,
             )

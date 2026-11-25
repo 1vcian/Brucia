@@ -91,11 +91,12 @@ def _capture_descriptor(cmd, pmkid):
 # reports each group as a literal false and drops features.diag / the mifare_keycheck flags /
 # capture_descriptor; caps.nrf24 resolves to evidence level "none". tools/test_lite_companion.py
 # keeps this table in step with the firmware sources.
-LITE_OMITTED_FEATURES = {"mifare_keycheck": False, "ir_cmds": False, "ble_gatt": False, "diag": False}
+LITE_OMITTED_FEATURES = {"mifare_keycheck": False, "ir_cmds": False, "ble_gatt": False, "diag": False, "espnow_send": False}
 LITE_501 = (
     (lambda c: c.startswith("mifare_keycheck "), "mifare_keycheck not available in this (lite) build"),
     (lambda c: c == "ir_rx" or c == "ir_tvbgone" or c.startswith("ir_tvbgone ") or c.startswith("ir_tx_raw ")
      or c == "ir_jammer" or c.startswith("ir_jammer "), "ir companion commands not available in this (lite) build"),
+    (lambda c: c.startswith("espnow_send "), "espnow not available in this (lite) build"),
     (lambda c: c.startswith("ble_gatt_connect ") or c.startswith("ble_gatt_read "),
      "ble_gatt not available in this (lite) build"),
     (lambda c: c == "diag", "diag not available in this (lite) build"),

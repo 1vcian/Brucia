@@ -7,13 +7,13 @@ namespace companion {
 struct CommandRequest;
 const char *encToStr(wifi_auth_mode_t enc);
 void sendWifiApEvent(const String &bssid, const String &ssid, int ch, int rssi, const char *enc);
-void staStart();
+bool staStart();
 void staStop();
 void staService();
-void probeStart();
+bool probeStart();
 void probeStop();
 void probeService();
-void monStart(int channel, const char *bssidStr);
+bool monStart(int channel, const char *bssidStr);
 void monStop();
 void monService();
 void evilPortalStop(uint32_t id, bool ack);

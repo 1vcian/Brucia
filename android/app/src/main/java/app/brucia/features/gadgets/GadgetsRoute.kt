@@ -19,6 +19,7 @@ import app.brucia.wardrive.DeviceCaps
 internal fun GadgetsRoute(
     connected: Boolean,
     caps: DeviceCaps?,
+    espNowAvailable: Boolean,
     ibutton: IButtonService,
     clock: ClockService,
     speaker: SpeakerService,
@@ -36,7 +37,7 @@ internal fun GadgetsRoute(
     GadgetsScreen(
         state = GadgetsState(
             connected, caps, ibuttonStatus, ibuttonBusy, clockStatus,
-            speakerStatus, speakerFile, micStatus, espnowStatus,
+            speakerStatus, speakerFile, micStatus, espnowStatus, espNowAvailable,
         ),
         actions = GadgetsActions(
             connect = onConnect,

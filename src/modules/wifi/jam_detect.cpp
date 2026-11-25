@@ -42,32 +42,31 @@ static void IRAM_ATTR jd_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (ftype == 0x00 && (fsub == 0x0C || fsub == 0x0A)) jd_deauth++;
 }
 
-static void jd_start_wifi() {
+static bool jd_start_wifi() {
     ensureWifiPlatform();
-    nvs_flash_init();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_err_t e = esp_wifi_init(&cfg);
-    if (e != ESP_OK && e != ESP_ERR_WIFI_INIT_STATE && !g_companionActive)
-        Serial.printf("[JamDetect] wifi_init: %s\n", esp_err_to_name(e));
-    esp_wifi_set_storage(WIFI_STORAGE_RAM);
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    e = esp_wifi_start();
-    if (e != ESP_OK && e != ESP_ERR_WIFI_INIT_STATE && !g_companionActive)
-        Serial.printf("[JamDetect] wifi_start: %s\n", esp_err_to_name(e));
+    // Pair Arduino driver initialization with its shutdown path.
+    if (!WiFi.mode(WIFI_STA)) return false;
+    if (esp_wifi_set_storage(WIFI_STORAGE_RAM) != ESP_OK) {
+        WiFi.mode(WIFI_OFF);
+        return false;
+    }
     esp_wifi_disconnect(); // drop any STA association so channel hopping isn't locked to one channel
-    esp_wifi_set_promiscuous(true);
     // CRITICAL: deauth/disassoc are management frames — capture MGMT (+DATA for
     // an activity reference). Without this the default filter may drop them.
     wifi_promiscuous_filter_t filt = {};
     filt.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
-    esp_wifi_set_promiscuous_filter(&filt);
-    esp_wifi_set_promiscuous_rx_cb(jd_rx_cb);
+    if (esp_wifi_set_promiscuous_filter(&filt) == ESP_OK &&
+        esp_wifi_set_promiscuous_rx_cb(jd_rx_cb) == ESP_OK &&
+        esp_wifi_set_promiscuous(true) == ESP_OK) return true;
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_set_promiscuous_rx_cb(nullptr);
+    wifiDisconnect();
+    return false;
 }
 
 static void jd_stop_wifi() {
     esp_wifi_set_promiscuous(false);
     esp_wifi_set_promiscuous_rx_cb(NULL);
-    esp_wifi_stop();
     wifiDisconnect();
     vTaskDelay(1 / portTICK_RATE_MS);
 }
@@ -131,14 +130,14 @@ jd_draw(const uint16_t *dps, const uint16_t *peak, uint32_t thr, uint8_t curCh, 
     tft.drawString("scan ch" + String(curCh) + " thr" + String(thr) + "/s  UP/DN  ESC", x0, tftHeight - 12, 1);
 }
 
-void jam_detect_run(int secs, uint32_t &deauthOut, uint32_t &totalOut, std::function<bool()> shouldAbort) {
+bool jam_detect_run(int secs, uint32_t &deauthOut, uint32_t &totalOut, std::function<bool()> shouldAbort) {
     if (secs < 1) secs = 1;
     if (secs > 120) secs = 120;
 
     uint32_t deauthTotal = 0, frameTotal = 0;
     int idx = 0;
 
-    jd_start_wifi();
+    if (!jd_start_wifi()) return false;
     uint32_t deadline = millis() + (uint32_t)secs * 1000UL;
 
     // Same hop-and-sample sweep as the interactive detector, minus the screen UI and key
@@ -163,6 +162,7 @@ void jam_detect_run(int secs, uint32_t &deauthOut, uint32_t &totalOut, std::func
     jd_stop_wifi();
     deauthOut = deauthTotal;
     totalOut = frameTotal;
+    return true;
 }
 
 void jam_detect_setup() {
@@ -173,7 +173,10 @@ void jam_detect_setup() {
     uint32_t threshold = 10; // deauth/s to flag (adjustable)
     int idx = 0;
 
-    jd_start_wifi();
+    if (!jd_start_wifi()) {
+        displayError("Wi-Fi initialization failed");
+        return;
+    }
     tft.fillScreen(bruceConfig.bgColor);
 
     for (;;) {

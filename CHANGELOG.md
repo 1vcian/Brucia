@@ -7,6 +7,14 @@ that offloads computation to the phone. Format loosely follows
 
 ## Unreleased
 
+- File and RF map exports now report success only after a document opens, writes
+  and closes. The PCAP viewer rejects unsupported link types, flags partial
+  summaries, and resolves Wi-Fi data addresses using both distribution flags.
+- Wi-Fi receiver subscriptions report driver setup errors. The interference
+  detector uses the same Arduino layer to start and shut down Wi-Fi. LITE
+  firmware explicitly advertises the omitted ESP-NOW operation to the app.
+
+
 Fixed Wi-Fi AP subscriptions getting stuck after a scan fails to start or finish.
 Failed scans retry after one second. Device diagnostics show the failure count
 on firmware that supports it.

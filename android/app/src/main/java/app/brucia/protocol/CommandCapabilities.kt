@@ -41,6 +41,7 @@ object CommandCapabilities {
     fun firmwareGroup(command: String): String? {
         val verb = command.trim().split(Regex("\\s+"), limit = 2).firstOrNull().orEmpty()
         return when {
+            verb == "espnow_send" -> DeviceFeatures.ESP_NOW
             verb == "mifare_keycheck" -> DeviceFeatures.MIFARE_KEYCHECK
             verb in setOf("ir_rx", "ir_tvbgone", "ir_tx_raw", "ir_jammer", "ir_power_spam") -> DeviceFeatures.IR_CMDS
             verb.startsWith("ble_gatt_") -> DeviceFeatures.BLE_GATT

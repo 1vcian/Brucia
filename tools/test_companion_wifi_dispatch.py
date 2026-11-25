@@ -92,7 +92,7 @@ class CompanionWifiDispatchTest(unittest.TestCase):
         self.assertEqual([], bare, "bare-word startsWith() also matches '<verb>_stop'; match the verb exactly")
 
     def test_monitor_channel_clamped_to_1_13(self):
-        mon = self.text[self.text.index("void monStart("):]
+        mon = self.text[self.text.index("bool monStart("):]
         mon = mon[: mon.index("void monStop(")]
         self.assertIn("channel >= 1 && channel <= 13", mon,
                       "monStart must lock the channel only for 1..13 (app/PROTOCOL range)")

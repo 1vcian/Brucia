@@ -1,6 +1,6 @@
 # Work queue — single operational ledger
 
-## Current software queue — 2026-11-24, base `8ec4a40c` (0.1.16 + unreleased maintenance)
+## Current software queue — 2026-11-25, base `2c1a8199` (0.1.16 + unreleased maintenance)
 
 This section is the current queue. Older dated findings below describe their original
 checkpoint; the correction/release outcome supersedes them. Hardware gates stay separate.
@@ -8,13 +8,13 @@ checkpoint; the correction/release outcome supersedes them. Hardware gates stay 
 | Item | State | Next action / boundary |
 |---|---|---|
 | A24-1 — AP scan stalls | FIXED, physical normal start/stop/restart PASS | Checked SDK start and completion results, one-second nonblocking retry after failure, diagnostic counter. Host fault injection and LilyGO firmware build passed. After flash, two 12 s windows yielded 22 and 17 AP events and zero after each OFF. Forced driver failures tested on host only. |
-| Post-flash heap delta | OPEN | Full LilyGO runner failed its heap threshold by measuring a 49220-byte decrease across multiple operations. Warm repeat passed and 100 diagnostics showed stable medians. Isolate cold per-operation allocations and check a longer trend. See TESTS.md. |
-| A24-2 — false save confirmation | OPEN, high | Files editor and RF map show success after a nullable output stream skipped the write. Require an opened stream and completed write/close before reporting success. Test provider null, write and close failures. |
-| A24-3 — Wi-Fi stream readiness | OPEN | Station, probe and monitor setup ignore ESP driver errors before successful SUB ACK. Fail and release partial state when required initialization fails. Physical 0.1.16 baseline on Nov 24: wifi.sta and wifi.probe ACKed ON/OFF but produced zero events in 8 s each. Reception and failure handling remain unverified. |
-| A24-4 — unsupported PCAP link types | OPEN, reproduced | Ethernet input is interpreted as 802.11. Validate link type and report unsupported input. |
-| A24-5 — PCAP header address roles | OPEN, reproduced | Data-frame source, destination and BSSID are displayed as fixed header positions. Resolve roles from DS flags and cover four-address frames. |
-| A24-6 — silent partial PCAP summary | OPEN, reproduced at record limit | A 50,001-record capture reports 50,000 as the total. Distinguish complete, limited and truncated input while retaining memory bounds. |
-| A24-7 — ESP-NOW on LITE | OPEN | Gadgets offers broadcast while connected and command preflight checks Wi-Fi. LITE firmware always rejects the operation. Gate by actual endpoint support. |
+| Post-flash heap delta | FIXED, physical repeat PASS | Isolated first-use radio allocations. Matched Arduino driver initialization and teardown and power down receivers on Stop only if they started Wi-Fi from off. Same cold LilyGO workload: heap delta 49,220 -> 20,172 bytes (threshold 32,768), 16/16 checks passed. Two-minute soak, no long-duration leak claim. |
+| A24-2 — false save confirmation | FIXED in software | The two document exports propagate missing-stream, write and close errors. |
+| A24-3 — Wi-Fi stream readiness | FIXED, host faults and physical station reception PASS | Receiver initialization is checked before SUB ACK. On failure it unregisters the callback and disables reception. Six injected failures tested. Updated LilyGO: 73 station events, no post-OFF events. Probe and sub-GHz had no traffic in their short windows. |
+| A24-4 — unsupported PCAP link types | FIXED in software | Unsupported link types produce an explicit reader error in PCAP dissect. |
+| A24-5 — PCAP header address roles | FIXED in software | DS-aware source, destination and BSSID applied to offline and monitor rows. Four-address data has no BSSID. |
+| A24-6 — silent partial PCAP summary | FIXED in software | Record-limit and truncated-input notices distinguish partial summaries. At exactly 50,000 complete records there is no limit warning. |
+| A24-7 — ESP-NOW on LITE | FIXED in software | LITE advertises espnow_send=false. UI and command preflight honor it. Older firmware without the optional key retains compatibility. |
 | F21 — Wardrive beacon loop on leave | RELEASED in 0.1.16; emulator regression PASS | Screen-level LeaveEffect stops subsequent bursts on navigation and preserves the loop across rotation. Real UI/VM/session regression fails before the fix; after it, all six link-flow tests and 37 focused JVM tests PASS, lint 0 errors/1 existing warning. Late ACK cannot restart the loop. No firmware change; an already-sent burst may finish its bounded window. Physical stop latency NOT RUN; evidence in TESTS.md (2026-11-18). |
 | F42 — remaining dictionary integrity pins | RELEASED in 0.1.16; validation recorded in TESTS.md | RockYou and all three top-* assets downloaded from the existing wordlists release; local size/SHA-256 match GitHub metadata. All eight Wi-Fi/NFC catalog entries pinned and recorded. This identifies hosted bytes, not previously unrecorded upstream provenance. No dictionary asset replaced; pins shipped in the 0.1.16 APK. |
 | F45 — current release records | UPDATED | CHANGELOG now separates 0.1.14 (2026-11-12) and 0.1.15 (2026-11-13); correct stale unpublished/private/brand statuses. Retain original evidence and physical limits. |

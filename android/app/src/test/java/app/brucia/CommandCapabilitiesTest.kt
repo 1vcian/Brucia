@@ -58,8 +58,9 @@ class CommandCapabilitiesTest {
     @Test fun liteFirmwareRejectsOnlyItsCompiledOutCommandsWithTheReason() {
         val caps = DeviceCaps(nfc = true, ir = true, ble = true, wifi = true)
         val lite = DeviceFeatures.fromJson(JSONObject().put("mifare_keycheck", false)
-            .put("ir_cmds", false).put("ble_gatt", false).put("diag", false))
+            .put("ir_cmds", false).put("ble_gatt", false).put("diag", false).put("espnow_send", false))
         val omitted = mapOf(
+            "espnow_send test" to DeviceFeatures.ESP_NOW,
             "mifare_keycheck A0A1A2A3A4A5,FFFFFFFFFFFF" to DeviceFeatures.MIFARE_KEYCHECK,
             "ir_rx" to DeviceFeatures.IR_CMDS, "ir_tvbgone eu" to DeviceFeatures.IR_CMDS,
             "ir_tx_raw 38 9000,4500" to DeviceFeatures.IR_CMDS, "ir_jammer 2" to DeviceFeatures.IR_CMDS,

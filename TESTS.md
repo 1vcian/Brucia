@@ -4,6 +4,40 @@ On-hardware tests to run on the LilyGo T-Embed CC1101 (ESP32-S3) with the Androi
 Use phone flashing to validate the in-app updater; PC flashing is also available for
 development and recovery. Historical checks below are not proof for the current build.
 
+## Audit fixes and per-operation heap profile — 2026-11-25
+
+Android debug build succeeded. All 1,227 JVM tests passed and lint reported
+only the existing OldTargetApi warning. Regressions cover
+missing/write/close failures in shared document output, all four data address
+directions, unsupported link type, truncation and the exact record-limit boundary.
+Capability preflight tests check the LITE ESP-NOW omission and legacy-absent case.
+The source guard and dispatch suites passed (37 and 13 tests), as did all nine
+full/LITE contract tests. The receiver fixture exercised failure at each of its
+six driver calls plus a successful start.
+
+On the previously installed A24-1 firmware, cold heap was 113,519 B. After the
+first station stream it was 101,615 B. Across five station/probe/sub-GHz cycles
+it ended at 101,563 B. A separate cold profile starting at 113,519 B reached
+100,863 B after the stream group and 67,595 B after the busy detector. During
+the second round, busy went from 65,015 B to 66,811 B. This localizes the large
+first-use drop and distinguishes it from a recurring 33 KB loss. The detector
+previously mixed raw ESP driver initialization/stop with Arduino shutdown.
+
+The first fix restored heap after the detector but left the Wi-Fi driver resident
+after standalone receiver subscriptions. The final firmware pairs driver start
+and teardown and restores radio-off on receiver Stop if that receiver started
+the driver. The ownership fixture also covers a previously active driver.
+
+Final physical image 948a5c09f597c347e6e83a460e30dd331131151a7f708907945f902032bf2206
+was hash-verified on flash. On the same T-Embed, the original full hardware runner
+passed 16/16 including its unmodified heap threshold (113671 -> 93499 bytes,
+20 repeated diag medians unchanged). Two-minute soak, 200/200 pings, no reboot.
+Station reception produced 73 events. Probe and sub-GHz ON/OFF were acknowledged
+but no events arrived in their windows. Two AP cycles yielded 28 and 29 events,
+zero after each OFF, with no scan failures. Long-term trend was not assessed.
+Final host discovery: 369 passed, 3 skipped. Local reports under
+`.codex_tmp/audit25-final-hw/`.
+
 ## T-Embed AP recovery build on hardware — 2026-11-24
 
 Matched the board partition table to the build and flashed only the factory app at

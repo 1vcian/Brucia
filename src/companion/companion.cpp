@@ -495,7 +495,11 @@ static void runCompanionUSB(bool headless) {
                                 monStop();         // and with the monitor capture
                                 WiFi.scanDelete();
                                 apScan.reset();
-                                staStart();
+                                if (!staStart()) {
+                                    sendErr(id, 503, "Wi-Fi receiver initialization failed");
+                                    drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
+                                    break;
+                                }
                             } else {
                                 staStop();
                             }
@@ -508,7 +512,11 @@ static void runCompanionUSB(bool headless) {
                                 monStop(); // and with the monitor capture (shared radio)
                                 WiFi.scanDelete();
                                 apScan.reset();
-                                probeStart();
+                                if (!probeStart()) {
+                                    sendErr(id, 503, "Wi-Fi receiver initialization failed");
+                                    drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
+                                    break;
+                                }
                             } else {
                                 probeStop();
                             }
@@ -524,7 +532,11 @@ static void runCompanionUSB(bool headless) {
                                 apScan.reset();
                                 int channel = in["d"]["channel"] | 0; // 0 = slow-hop the band
                                 const char *bssid = in["d"]["bssid"] | "";
-                                monStart(channel, bssid);
+                                if (!monStart(channel, bssid)) {
+                                    sendErr(id, 503, "Wi-Fi receiver initialization failed");
+                                    drawCompanionScreen(helloSeen, subWifiAp, subBleOn, subGhzOn);
+                                    break;
+                                }
                             } else {
                                 monStop();
                             }

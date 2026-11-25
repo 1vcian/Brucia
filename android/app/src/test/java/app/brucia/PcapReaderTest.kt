@@ -47,13 +47,19 @@ class PcapReaderTest {
 
     @Test fun radiotapHeaderIsStrippedOnlyWhenItsLengthFits() {
         val rt = byteArrayOf(0x00, 0x00, 0x08, 0x00, 0, 0, 0, 0)
-        val recs = PcapReader.parse(pcap(0xa1b2c3d4L, true, 127,
+        val parsed = PcapReader.read(pcap(0xa1b2c3d4L, true, 127,
             Triple(0, 0, rt + frame),
-            Triple(0, 0, byteArrayOf(0x00, 0x00, 0x40, 0x00) + frame), // it_len beyond the record: kept raw
+            Triple(0, 0, byteArrayOf(0x00, 0x00, 0x40, 0x00) + frame), // it_len beyond the record
         ))
-        assertArrayEquals(frame, recs[0].frame)
-        assertEquals(4 + frame.size, recs[1].frame.size)
+        val recs = parsed.records
+        assertArrayEquals(frame, recs.single().frame)
+        assertTrue(parsed.notice!!.contains("radiotap"))
         assertEquals("mgmt/beacon", Dot11Frame.parse(recs[0].frame).label)
+    }
+
+    @Test fun rawWifiWithFcsMetadataKeepsItsLinkType() {
+        val records = PcapReader.parse(pcap(0xa1b2c3d4L, true, 0x24000069L, Triple(0, 0, frame)))
+        assertArrayEquals(frame, records.single().frame)
     }
 
     @Test fun writerOutputRoundTrips() {

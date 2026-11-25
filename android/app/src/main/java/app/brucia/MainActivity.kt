@@ -2452,7 +2452,7 @@ private fun FileEditorScreen(vm: WardriveViewModel, state: EditorState, currentP
     ) { uri ->
         if (uri != null) {
             try {
-                context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                app.brucia.files.writeDocument(text.toByteArray(Charsets.UTF_8)) { context.contentResolver.openOutputStream(uri, "wt") }
                 Toast.makeText(context, "Saved to phone", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -2973,11 +2973,11 @@ internal fun WifiMonitorScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                             RssiPill(fr.rssi)
                         }
                         Text(
-                            "dst ${fr.info.addr1.ifEmpty { "-" }}  src ${fr.info.addr2.ifEmpty { "-" }}",
+                            "dst ${fr.info.dst.ifEmpty { "-" }}  src ${fr.info.src.ifEmpty { "-" }}",
                             style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, fontFamily = FontFamily.Monospace,
                         )
                         Text(
-                            "bssid ${fr.info.addr3.ifEmpty { "-" }}  ch ${fr.ch}",
+                            "bssid ${fr.info.bssid.ifEmpty { "-" }}  ch ${fr.ch}",
                             style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, fontFamily = FontFamily.Monospace,
                         )
                         if (isOpen) {

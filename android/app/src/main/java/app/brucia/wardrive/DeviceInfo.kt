@@ -118,7 +118,8 @@ data class DeviceFeatures(
         const val IR_CMDS = "ir_cmds"
         const val BLE_GATT = "ble_gatt"
         /** Endpoint groups a LITE firmware build may compile out (CAPS `features.<group>: false`). */
-        val OMITTABLE = listOf(MIFARE_KEYCHECK, IR_CMDS, BLE_GATT)
+        const val ESP_NOW = "espnow_send"
+        val OMITTABLE = listOf(MIFARE_KEYCHECK, IR_CMDS, BLE_GATT, ESP_NOW)
         const val OMITTED_REASON = "Not available on this firmware (compiled out of LITE builds)."
 
         fun fromJson(obj: JSONObject?) = DeviceFeatures(obj?.opt("verified_files") == true,

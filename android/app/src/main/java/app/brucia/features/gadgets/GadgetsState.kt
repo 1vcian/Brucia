@@ -13,6 +13,7 @@ internal data class GadgetsState(
     val speakerFile: String,
     val micStatus: String,
     val espnowStatus: String,
+    val espNowAvailable: Boolean,
 )
 
 /** Explicit operations for the page, not access to an application-wide ViewModel. */

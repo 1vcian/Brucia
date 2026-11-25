@@ -82,7 +82,7 @@ internal fun RfMap3dScreen(vm: WardriveViewModel, onConnect: () -> Unit) {
                     val b64 = dataUrl.substringAfter("base64,", "")
                     if (b64.isNotEmpty()) {
                         val bytes = Base64.decode(b64, Base64.DEFAULT)
-                        context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        app.brucia.files.writeDocument(bytes) { context.contentResolver.openOutputStream(uri, "wt") }
                         Toast.makeText(context, "3D map saved", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(context, "Nothing to save yet - Refresh first", Toast.LENGTH_SHORT).show()

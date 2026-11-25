@@ -20,7 +20,8 @@ object PcapDissector {
 
     data class Summary(
         val frames: Int, val mgmt: Int, val ctrl: Int, val data: Int, val eapol: Int,
-        val bssids: List<Pair<String, Int>>, // top BSSIDs by frame count desc, then BSSID asc
+        val bssids: List<Pair<String, Int>>,
+        val notice: String? = null,
     )
 
     data class Result(val summary: Summary, val rows: List<Row>)
@@ -31,7 +32,9 @@ object PcapDissector {
      * throws (e.g. `ensureActive()` on a cancelled coroutine) the dissection aborts with that exception.
      */
     fun dissect(bytes: ByteArray, checkActive: () -> Unit = {}): Result? {
-        val recs = PcapReader.parse(bytes)
+        val parsed = PcapReader.read(bytes)
+        val recs = parsed.records
+        if (recs.isEmpty() && parsed.notice != null) throw IOException(parsed.notice)
         if (recs.isEmpty()) return null
         var mgmt = 0; var ctrl = 0; var dataC = 0; var eapol = 0
         val bssidCount = HashMap<String, Int>()
@@ -41,13 +44,13 @@ object PcapDissector {
             val info = Dot11Frame.parse(r.frame)
             when (info.type) { 0 -> mgmt++; 1 -> ctrl++; 2 -> dataC++ }
             if (info.isEapol) eapol++
-            if (info.addr3.isNotBlank()) bssidCount[info.addr3] = (bssidCount[info.addr3] ?: 0) + 1
-            if (rows.size < MAX_ROWS) rows.add(Row(i + 1, info.label, info.addr2, info.addr1, info.addr3, info.isEapol))
+            if (info.bssid.isNotBlank()) bssidCount[info.bssid] = (bssidCount[info.bssid] ?: 0) + 1
+            if (rows.size < MAX_ROWS) rows.add(Row(i + 1, info.label, info.src, info.dst, info.bssid, info.isEapol))
         }
         val top = bssidCount.entries
             .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
             .take(TOP_BSSIDS).map { it.key to it.value }
-        return Result(Summary(recs.size, mgmt, ctrl, dataC, eapol, top), rows)
+        return Result(Summary(recs.size, mgmt, ctrl, dataC, eapol, top, parsed.notice), rows)
     }
 
     /**

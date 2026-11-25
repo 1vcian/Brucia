@@ -201,6 +201,7 @@ firmware) means the group is present. Each command of a dropped group answers
 |---|---|---|
 | `mifare_keycheck` | `false` | `mifare_keycheck` (`mifare_keycheck_report` / `mifare_keycheck_stop` are not sent) |
 | `ir_cmds` | `false` | `ir_tvbgone`, `ir_rx`, `ir_tx_raw`, `ir_jammer`, `ir_power_spam`; `caps.ir` stays, Bruce's `ir rx` / `ir tx` / `ir tx_raw` CLI still works |
+| `espnow_send` | `false` | ESP-NOW broadcast endpoint |
 | `ble_gatt` | `false` | `ble_gatt_connect`, `ble_gatt_read` |
 | `diag` | `false` | `diag` (the link counters are not kept either) |
 

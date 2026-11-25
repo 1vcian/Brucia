@@ -7,7 +7,7 @@ package app.brucia.wifi
  *
  * addr1/addr2/addr3 are the raw header addresses. For the common
  * (toDS=0, fromDS=0) case they are receiver/destination, transmitter/source and BSSID; the
- * UI labels them dst / src / bssid, which holds for most captured frames.
+ * derived addresses below resolve the corresponding roles for DS and four-address data.
  */
 data class Dot11Info(
     val type: Int,          // 0 mgmt, 1 ctrl, 2 data, 3 ext
@@ -18,8 +18,23 @@ data class Dot11Info(
     val addr3: String,      // bssid (typical)
     val toDs: Boolean,
     val fromDs: Boolean,
-    val isEapol: Boolean,   // data frame carrying an EAPOL (handshake) payload
-)
+    val isEapol: Boolean,
+    val addr4: String = "",
+) {
+    val src get() = when {
+        type == 2 && fromDs && toDs -> addr4
+        type == 2 && fromDs -> addr3
+        else -> addr2
+    }
+    val dst get() = if (type == 2 && toDs) addr3 else addr1
+    val bssid get() = when {
+        type == 0 -> addr3
+        type != 2 || (toDs && fromDs) -> ""
+        toDs -> addr1
+        fromDs -> addr2
+        else -> addr3
+    }
+}
 
 object Dot11Frame {
 
@@ -65,7 +80,7 @@ object Dot11Frame {
         val a3 = if (type == 1) "" else mac(f, 16)
 
         val eapol = type == 2 && isEapol(f, subtype, toDs, fromDs)
-        return Dot11Info(type, subtype, label, a1, a2, a3, toDs, fromDs, eapol)
+        return Dot11Info(type, subtype, label, a1, a2, a3, toDs, fromDs, eapol, if (type == 2 && toDs && fromDs) mac(f, 24) else "")
     }
 
     /** True if a data frame's payload begins with the SNAP header for EtherType 0x888E (EAPOL). */

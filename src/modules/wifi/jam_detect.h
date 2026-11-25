@@ -14,7 +14,7 @@ void jam_detect_setup();
 // seconds (clamped 1..120) in promiscuous mode and returns the total number of deauth/disassoc
 // management frames seen (deauthOut) and the total frames captured (totalOut). No screen UI or
 // key handling. [shouldAbort], if set, is polled during the sweep and ends it early (app stop).
-void jam_detect_run(
+bool jam_detect_run(
     int secs, uint32_t &deauthOut, uint32_t &totalOut, std::function<bool()> shouldAbort = nullptr
 );
 

@@ -745,6 +745,9 @@ void sendCaps(uint32_t id) {
 #if defined(COMPANION_HAS_DIAG)
     d["features"]["diag"] = true; // `diag` CMD: reset reason, heap and bounded link/drop counters on request
 #endif
+#if defined(LITE_VERSION)
+    d["features"]["espnow_send"] = false;
+#endif
     // Companion endpoint groups a LITE build compiles out for app-slot headroom (config.h). A literal
     // false means "not in this firmware" (the commands answer ERR 501); full builds and older
     // firmware omit these keys. NRF24 is reported through caps.nrf24 / evidence instead.

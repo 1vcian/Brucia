@@ -40,7 +40,7 @@ CXX = os.environ.get("CXX", "c++")
 BOARD = ["-DUSE_NRF24_VIA_SPI", "-DTXLED=22"]  # CYD-2432S028: NRF24 + IR wired
 GROUP_MACROS = {"COMPANION_HAS_MIFARE_KEYCHECK", "COMPANION_HAS_IR_CMDS", "COMPANION_HAS_GATT",
                 "COMPANION_HAS_DIAG", "COMPANION_HAS_NRF24"}
-LITE_FALSE = {"mifare_keycheck": False, "ir_cmds": False, "ble_gatt": False, "diag": False}
+LITE_FALSE = {"mifare_keycheck": False, "ir_cmds": False, "ble_gatt": False, "diag": False, "espnow_send": False}
 FULL_FEATURES = {"verified_files": True, "transactional_uploads": True, "mifare_keycheck_report": True,
                  "mifare_keycheck_stop": True, "diag": True, "capture_descriptor": True, "script_run_file": True}
 # (file, handler call that must vanish on LITE, ERR 501 text that replaces it)
@@ -54,6 +54,7 @@ DISPATCH = [
     ("nrf24.cpp", "runNrf24Scan(", "nrf24 not available in this (lite) build"),
     ("nrf24.cpp", "runNrf24Mousejack(", "nrf24 not available in this (lite) build"),
     ("system.cpp", "runScriptRun(", "script_run not available in this (lite) build"),
+    ("system.cpp", "runEspnowSend(cmdStr", "espnow not available in this (lite) build"),
 ]
 
 
@@ -199,6 +200,7 @@ class MockLiteProfileTest(unittest.TestCase):
         for cmd, message in [
             ("mifare_keycheck FFFFFFFFFFFF", DISPATCH[0][2]), ("ir_rx", DISPATCH[1][2]),
             ("ir_tvbgone eu", DISPATCH[1][2]), ("ir_tx_raw 38 9000,4500", DISPATCH[1][2]),
+            ("espnow_send test", "espnow not available in this (lite) build"),
             ("ir_jammer 3", DISPATCH[1][2]), ("ble_gatt_connect AA:BB:CC:DD:EE:FF", DISPATCH[3][2]),
             ("ble_gatt_read AA:BB:CC:DD:EE:FF 2a00", DISPATCH[3][2]), ("diag", DISPATCH[5][2]),
             ("nrf24_scan 5", DISPATCH[6][2]), ("nrf24_mousejack 5", DISPATCH[6][2]),

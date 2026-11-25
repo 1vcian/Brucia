@@ -233,6 +233,7 @@ internal fun GadgetsScreen(state: GadgetsState, actions: GadgetsActions) {
             colors = CardDefaults.cardColors(containerColor = cs.surface),
         ) {
             Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                if (state.connected && !state.espNowAvailable) Text("ESP-NOW unavailable on this device")
                 Text("ESP-NOW", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, color = cs.onSurface)
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
@@ -244,7 +245,7 @@ internal fun GadgetsScreen(state: GadgetsState, actions: GadgetsActions) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Button(
-                    enabled = state.connected && espnowMsg.isNotBlank(),
+                    enabled = state.connected && state.espNowAvailable && espnowMsg.isNotBlank(),
                     onClick = { actions.sendEspNow(espnowMsg.trim()) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Broadcast (ESP-NOW)") }

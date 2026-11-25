@@ -134,30 +134,48 @@ static void staSnifferCb(void *buf, wifi_promiscuous_pkt_type_t type) {
     staHead = next;
 }
 
-void staStart() {
-    if (staSniff) return;
+// A stream started from radio-off owns the driver lifetime. Other callers may
+// already have initialized Wi-Fi, so only release a driver we brought up.
+static bool receiverOwnsRadio = false;
+
+static void releaseReceiver() {
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_set_promiscuous_rx_cb(nullptr);
+    if (receiverOwnsRadio) WiFi.mode(WIFI_OFF);
+    receiverOwnsRadio = false;
+}
+
+static bool startReceiver(uint32_t mask, wifi_promiscuous_cb_t callback, uint8_t channel) {
     ensureWifiPlatform();
-    esp_wifi_set_storage(WIFI_STORAGE_RAM);
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_start();
-    esp_wifi_set_promiscuous(true);
-    wifi_promiscuous_filter_t filt = {};
-    filt.filter_mask = WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_MGMT;
-    esp_wifi_set_promiscuous_filter(&filt);
-    esp_wifi_set_promiscuous_rx_cb(staSnifferCb);
+    receiverOwnsRadio = WiFi.getMode() == WIFI_OFF;
+    wifi_promiscuous_filter_t filter = {};
+    filter.filter_mask = mask;
+    if (!WiFi.mode(WIFI_STA) || esp_wifi_set_storage(WIFI_STORAGE_RAM) != ESP_OK ||
+        esp_wifi_set_promiscuous_filter(&filter) != ESP_OK ||
+        esp_wifi_set_promiscuous_rx_cb(callback) != ESP_OK ||
+        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE) != ESP_OK ||
+        esp_wifi_set_promiscuous(true) != ESP_OK) {
+        releaseReceiver();
+        return false;
+    }
+    return true;
+}
+
+bool staStart() {
+    if (staSniff) return true;
     staChannel = 1;
-    esp_wifi_set_channel(staChannel, WIFI_SECOND_CHAN_NONE);
+    if (!startReceiver(WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_MGMT, staSnifferCb, staChannel)) return false;
     staHead = 0;
     staTail = 0;
     staLastHop = millis();
     staSniff = true;
+    return true;
 }
 
 void staStop() {
     if (!staSniff) return;
     staSniff = false;
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_set_promiscuous_rx_cb(NULL);
+    releaseReceiver();
 }
 
 void staService() {
@@ -256,30 +274,21 @@ static void probeSnifferCb(void *buf, wifi_promiscuous_pkt_type_t type) {
     probeHead = next;
 }
 
-void probeStart() {
-    if (probeSniff) return;
-    ensureWifiPlatform();
-    esp_wifi_set_storage(WIFI_STORAGE_RAM);
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_start();
-    esp_wifi_set_promiscuous(true);
-    wifi_promiscuous_filter_t filt = {};
-    filt.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT; // only management frames (probe requests)
-    esp_wifi_set_promiscuous_filter(&filt);
-    esp_wifi_set_promiscuous_rx_cb(probeSnifferCb);
+bool probeStart() {
+    if (probeSniff) return true;
     probeChannel = 1;
-    esp_wifi_set_channel(probeChannel, WIFI_SECOND_CHAN_NONE);
+    if (!startReceiver(WIFI_PROMIS_FILTER_MASK_MGMT, probeSnifferCb, probeChannel)) return false;
     probeHead = 0;
     probeTail = 0;
     probeLastHop = millis();
     probeSniff = true;
+    return true;
 }
 
 void probeStop() {
     if (!probeSniff) return;
     probeSniff = false;
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_set_promiscuous_rx_cb(NULL);
+    releaseReceiver();
 }
 
 void probeService() {
@@ -376,19 +385,8 @@ static void monSnifferCb(void *buf, wifi_promiscuous_pkt_type_t type) {
     monHead = next;
 }
 
-void monStart(int channel, const char *bssidStr) {
-    if (monSniff) return;
-    ensureWifiPlatform();
-    esp_wifi_set_storage(WIFI_STORAGE_RAM);
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_start();
-    esp_wifi_set_promiscuous(true);
-    wifi_promiscuous_filter_t filt = {};
-    // Capture everything over the air: management, data and control frames.
-    filt.filter_mask =
-        WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_CTRL;
-    esp_wifi_set_promiscuous_filter(&filt);
-    esp_wifi_set_promiscuous_rx_cb(monSnifferCb);
+bool monStart(int channel, const char *bssidStr) {
+    if (monSniff) return true;
     // Optional BSSID filter.
     monBssidFilter = false;
     if (bssidStr && bssidStr[0]) {
@@ -411,18 +409,18 @@ void monStart(int channel, const char *bssidStr) {
         monChannel = 1;
         monLockChannel = false;
     }
-    esp_wifi_set_channel(monChannel, WIFI_SECOND_CHAN_NONE);
+    if (!startReceiver(WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_CTRL, monSnifferCb, monChannel)) return false;
     monHead = 0;
     monTail = 0;
     monLastHop = millis();
     monSniff = true;
+    return true;
 }
 
 void monStop() {
     if (!monSniff) return;
     monSniff = false;
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_set_promiscuous_rx_cb(NULL);
+    releaseReceiver();
     monBssidFilter = false;
 }
 
@@ -1009,7 +1007,10 @@ bool dispatchWifiCommand(const CommandRequest &request) {
             if (secs < 1) secs = 5;
             if (secs > 120) secs = 120;
             uint32_t deauth = 0, total = 0;
-            jam_detect_run(secs, deauth, total, companionPollStop);
+            if (!jam_detect_run(secs, deauth, total, companionPollStop)) {
+                sendErr(id, 503, "Wi-Fi receiver initialization failed");
+                break;
+            }
             char out[64];
             snprintf(out, sizeof(out), "deauth=%lu total=%lu", (unsigned long)deauth, (unsigned long)total);
             companionAckMsg(id, true, out);

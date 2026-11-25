@@ -60,6 +60,25 @@ class PcapDissectorTest {
         }
     }
 
+    @Test fun reportsLimitsAndUnsupportedLinkTypes() {
+        val ethernet = pcap(listOf(beacon(1))).also { it[20] = 1 }
+        assertTrue(assertThrows(IOException::class.java) { PcapDissector.dissect(ethernet) }.message!!.contains("link type"))
+        val exact = pcap(List(50_000) { byteArrayOf(0) })
+        assertNull(PcapDissector.dissect(exact)!!.summary.notice)
+        assertTrue(PcapDissector.dissect(exact + PcapWriter.packetRecord(0, byteArrayOf(0)))!!.summary.notice!!.contains("limit"))
+        assertTrue(PcapDissector.dissect(pcap(listOf(beacon(1))) + ByteArray(4))!!.summary.notice!!.contains("incomplete"))
+    }
+
+    @Test fun dataAddressRolesFollowBothDsFlags() {
+        val frames = (0..3).map { flags ->
+            byteArrayOf(8, flags.toByte(), 0, 0) + mac(1) + mac(2) + mac(3) + ByteArray(2) + mac(4)
+        }
+        val rows = PcapDissector.dissect(pcap(frames))!!.rows
+        assertEquals(listOf(2,2,3,4).map(::macStr), rows.map { it.src })
+        assertEquals(listOf(1,3,1,3).map(::macStr), rows.map { it.dst })
+        assertEquals(listOf(macStr(3),macStr(1),macStr(2),""), rows.map { it.bssid })
+    }
+
     @Test fun countsTypesAndEapol() {
         val r = PcapDissector.dissect(pcap(listOf(beacon(1), ack(), eapolData(1), beacon(2))))
         assertNotNull(r)
@@ -108,7 +127,7 @@ class PcapDissectorTest {
         val bad = pcap(listOf(beacon(1))).also { it[0] = 0 }
         assertNull(PcapDissector.dissect(bad))                                         // invalid magic
         val two = pcap(listOf(beacon(1), beacon(2)))
-        assertNull(PcapDissector.dissect(two.copyOf(24 + 16 + 23)))                    // first record cut
+        assertTrue(assertThrows(IOException::class.java) { PcapDissector.dissect(two.copyOf(24 + 16 + 23)) }.message!!.contains("incomplete"))
         val partial = PcapDissector.dissect(two.copyOf(two.size - 1))!!                // second record cut
         assertEquals(1, partial.summary.frames)
         assertEquals(1, partial.rows.size)

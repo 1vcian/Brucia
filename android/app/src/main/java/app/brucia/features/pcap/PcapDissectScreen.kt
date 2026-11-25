@@ -50,6 +50,7 @@ internal fun PcapDissectScreen(state: PcapDissectState, onOpen: () -> Unit) {
                 Column(Modifier.padding(14.dp)) {
                     Text("Summary", fontWeight = FontWeight.SemiBold, color = cs.primary)
                     Spacer(Modifier.height(6.dp))
+                    s.notice?.let { Text(it, color = cs.error) }
                     Text("${s.frames} frames  -  mgmt ${s.mgmt} / ctrl ${s.ctrl} / data ${s.data}", color = cs.onSurface)
                     if (s.eapol > 0) Text("EAPOL (handshake) frames: ${s.eapol}", color = cs.secondary, fontWeight = FontWeight.SemiBold)
                     if (s.bssids.isNotEmpty()) {
